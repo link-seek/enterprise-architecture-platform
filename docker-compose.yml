@@ -1,0 +1,18 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - RUST_LOG=info
+      - APP_DATABASE__URL=sqlite://./data/platform.db?mode=rwc
+      - APP_LLM__BACKEND=openai
+      - APP_LLM__API_KEY=${OPENAI_API_KEY:-}
+  litestream:
+    image: litestream/litestream
+    volumes:
+      - ./data:/data
+      - ./litestream.yml:/etc/litestream.yml
+    command: replicate

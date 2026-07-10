@@ -1,0 +1,6 @@
+dbs:
+  - path: /data/platform.db
+    replicas:
+      - type: s3
+        bucket: your-bucket
+        path: platform.db
