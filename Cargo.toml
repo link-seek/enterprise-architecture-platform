@@ -1,0 +1,75 @@
+[workspace]
+members = [
+    "crates/shared-common",
+    "crates/user-management",
+    "crates/business-architecture",
+    "crates/server",
+    "migration",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["xie-yucheng2"]
+license = "MIT"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# Web framework
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["full"] }
+tower_governor = "0.8"
+
+# Database
+sea-orm = { version = "2.0.0-rc.42", features = [
+    "sqlx-sqlite",
+    "runtime-tokio-rustls",
+    "macros",
+    "with-json",
+    "with-uuid",
+    "with-chrono",
+] }
+sea-orm-migration = "2.0.0-rc.42"
+
+# GraphQL
+async-graphql = "7.0"
+async-graphql-axum = "7.0"
+seaography = { version = "2.0.0-rc.9", features = ["with-json", "with-uuid", "with-chrono"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Auth
+jsonwebtoken = "9"
+argon2 = "0.5"
+rsa = "0.9"
+rand = "0.8"
+base64 = "0.22"
+sha2 = "0.10"
+url = "2"
+
+# API docs
+utoipa = "5"
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
+
+# Utils
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+semver = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+config = "0.14"
+validator = { version = "0.20", features = ["derive"] }
+moka = { version = "0.12", features = ["future"] }
+async-trait = "0.1"
+anyhow = "1"
+
+# Internal crates
+shared-common = { path = "crates/shared-common" }
+user-management = { path = "crates/user-management" }
+business-architecture = { path = "crates/business-architecture" }
