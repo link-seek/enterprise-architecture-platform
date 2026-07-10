@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use validator::Validate;
 
-#[derive(Debug, Clone, Deserialize, Validate)]
+#[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
 pub struct RegisterInput {
     #[validate(email)]
     pub email: String,
@@ -11,7 +12,7 @@ pub struct RegisterInput {
     pub password: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct AuthOutput {
     pub access_token: String,
     pub refresh_token: String,
@@ -19,7 +20,7 @@ pub struct AuthOutput {
     pub user: UserDto,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct UserDto {
     pub id: uuid::Uuid,
     pub email: String,

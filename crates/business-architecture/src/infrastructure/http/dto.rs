@@ -5,19 +5,20 @@ use shared_common::enums::{
     ValueStreamImportance,
 };
 use shared_common::value_objects::{StringStringMap, StringVec};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::domain::capability::entity::BusinessCapability;
 use crate::domain::process::entity::{BusinessProcess, ProcessStep};
 use crate::domain::value_stream::entity::{ValueStream, ValueStreamStage};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ErrorResponse {
     pub error: String,
     pub message: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct CreateCapabilityInput {
     pub name: String,
     pub description: String,
@@ -29,7 +30,7 @@ pub struct CreateCapabilityInput {
     pub created_by: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct UpdateCapabilityInput {
     pub name: Option<String>,
     pub description: Option<String>,
@@ -41,7 +42,7 @@ pub struct UpdateCapabilityInput {
     pub updated_by: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct CapabilityDto {
     pub id: Uuid,
     pub business_version: String,
@@ -80,7 +81,7 @@ impl From<BusinessCapability> for CapabilityDto {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct CreateProcessInput {
     pub name: String,
     pub description: String,
@@ -91,7 +92,7 @@ pub struct CreateProcessInput {
     pub created_by: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct UpdateProcessInput {
     pub name: Option<String>,
     pub description: Option<String>,
@@ -102,7 +103,7 @@ pub struct UpdateProcessInput {
     pub updated_by: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ProcessDto {
     pub id: Uuid,
     pub logical_id: Uuid,
@@ -141,7 +142,7 @@ impl From<BusinessProcess> for ProcessDto {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct CreateProcessStepInput {
     pub name: String,
     pub description: String,
@@ -152,7 +153,7 @@ pub struct CreateProcessStepInput {
     pub role_id: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ProcessStepDto {
     pub id: Uuid,
     pub name: String,
@@ -185,7 +186,7 @@ impl From<ProcessStep> for ProcessStepDto {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct CreateValueStreamInput {
     pub name: String,
     pub description: String,
@@ -198,7 +199,7 @@ pub struct CreateValueStreamInput {
     pub created_by: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct UpdateValueStreamInput {
     pub name: Option<String>,
     pub description: Option<String>,
@@ -211,7 +212,7 @@ pub struct UpdateValueStreamInput {
     pub updated_by: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ValueStreamDto {
     pub id: Uuid,
     pub business_version: String,
@@ -252,7 +253,7 @@ impl From<ValueStream> for ValueStreamDto {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct CreateValueStreamStageInput {
     pub name: String,
     pub sequence_order: i32,
@@ -260,7 +261,7 @@ pub struct CreateValueStreamStageInput {
     pub output: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ValueStreamStageDto {
     pub id: Uuid,
     pub name: String,
@@ -287,22 +288,22 @@ impl From<ValueStreamStage> for ValueStreamStageDto {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct LinkProcessInput {
     pub process_id: Uuid,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct LinkStageCapabilityInput {
     pub capability_id: Uuid,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct GapAnalysisInput {
     pub target_maturity: MaturityLevel,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct RedundancyInput {
     pub threshold: Option<f64>,
 }

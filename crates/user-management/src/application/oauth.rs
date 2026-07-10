@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
-#[derive(Debug, Clone, Deserialize, Validate)]
+#[derive(Debug, Clone, Deserialize, Validate, IntoParams)]
 pub struct AuthorizeInput {
     #[validate(length(min = 1))]
     pub client_id: String,
@@ -14,7 +15,7 @@ pub struct AuthorizeInput {
     pub scope: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Validate)]
+#[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
 pub struct TokenInput {
     #[validate(length(min = 1))]
     pub grant_type: String,
@@ -28,7 +29,7 @@ pub struct TokenInput {
     pub code_verifier: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct TokenOutput {
     pub access_token: String,
     pub refresh_token: String,

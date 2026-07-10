@@ -1,13 +1,14 @@
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::application::register::UserDto;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct LogoutInput {
     pub refresh_token: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ErrorResponse {
     pub error: String,
     pub message: String,

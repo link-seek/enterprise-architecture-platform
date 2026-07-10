@@ -8,6 +8,15 @@ use crate::ai::backend::LlmBackend;
 use crate::ai::dto::{AiRequest, AiResponse, AiScenario};
 use crate::state::AppState;
 
+#[utoipa::path(
+    post,
+    path = "/api/ai/suggest",
+    tag = "ai",
+    request_body = AiRequest,
+    responses(
+        (status = 200, description = "AI 建议", body = AiResponse),
+    )
+)]
 pub async fn suggest_handler(
     State(state): State<AppState>,
     Json(req): Json<AiRequest>,
@@ -23,6 +32,14 @@ pub async fn suggest_handler(
     })
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/ai/stream",
+    tag = "ai",
+    responses(
+        (status = 200, description = "SSE 流式 AI 建议"),
+    )
+)]
 pub async fn stream_handler(
     State(state): State<AppState>,
     axum::extract::Query(query): axum::extract::Query<StreamQuery>,
@@ -54,7 +71,7 @@ pub async fn stream_handler(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
 pub struct StreamQuery {
     pub scenario: Option<String>,
 }

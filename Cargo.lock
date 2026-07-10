@@ -712,6 +712,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "utoipa",
  "uuid",
  "validator",
 ]
@@ -2600,6 +2601,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "paste"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
 name = "pathdiff"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3585,6 +3592,7 @@ dependencies = [
  "tracing-subscriber",
  "user-management",
  "utoipa",
+ "utoipa-axum",
  "utoipa-swagger-ui",
  "uuid",
 ]
@@ -3653,6 +3661,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tracing",
+ "utoipa",
  "uuid",
  "validator",
 ]
@@ -4631,6 +4640,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "utoipa",
  "uuid",
  "validator",
 ]
@@ -4660,6 +4670,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "utoipa-axum"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c25bae5bccc842449ec0c5ddc5cbb6a3a1eaeac4503895dc105a1138f8234a0"
+dependencies = [
+ "axum",
+ "paste",
+ "tower-layer",
+ "tower-service",
+ "utoipa",
+]
+
+[[package]]
 name = "utoipa-gen"
 version = "5.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4667,7 +4690,9 @@ checksum = "6ba0b99ee52df3028635d93840c797102da61f8a7bb3cf751032455895b52ef8"
 dependencies = [
  "proc-macro2",
  "quote",
+ "regex",
  "syn 2.0.118",
+ "uuid",
 ]
 
 [[package]]

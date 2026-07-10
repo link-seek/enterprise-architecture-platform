@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, IntoParams)]
 pub struct PageInput {
     #[serde(default = "default_page")]
     pub page: u64,
@@ -33,7 +34,7 @@ impl PageInput {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct PageInfo {
     pub page: u64,
     pub per_page: u64,
@@ -61,7 +62,7 @@ impl PageInfo {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct Page<T> {
     pub items: Vec<T>,
     pub page_info: PageInfo,

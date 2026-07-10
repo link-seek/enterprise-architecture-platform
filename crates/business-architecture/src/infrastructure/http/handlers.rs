@@ -138,6 +138,16 @@ fn name_similarity(a: &str, b: &str) -> f64 {
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/business-architecture/capabilities",
+    tag = "business-architecture",
+    request_body = CreateCapabilityInput,
+    responses(
+        (status = 201, description = "创建能力", body = CapabilityDto),
+        (status = 400, description = "参数错误"),
+    )
+)]
 pub async fn create_capability(
     State(service): State<Arc<BusinessArchitectureService>>,
     Json(input): Json<CreateCapabilityInput>,
@@ -165,6 +175,15 @@ pub async fn create_capability(
     Ok(Json(saved.into()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/business-architecture/capabilities",
+    tag = "business-architecture",
+    params(PageInput),
+    responses(
+        (status = 200, description = "能力列表", body = Page<CapabilityDto>),
+    )
+)]
 pub async fn list_capabilities(
     State(service): State<Arc<BusinessArchitectureService>>,
     Query(params): Query<PageInput>,
@@ -177,6 +196,16 @@ pub async fn list_capabilities(
     Ok(Json(Page::new(items, params.page, params.per_page, total)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/business-architecture/capabilities/{id}",
+    tag = "business-architecture",
+    params(("id" = Uuid, Path, description = "能力 ID")),
+    responses(
+        (status = 200, description = "能力详情", body = CapabilityDto),
+        (status = 404, description = "未找到"),
+    )
+)]
 pub async fn get_capability(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -189,6 +218,16 @@ pub async fn get_capability(
     Ok(Json(cap.into()))
 }
 
+#[utoipa::path(
+    put,
+    path = "/api/business-architecture/capabilities/{id}",
+    tag = "business-architecture",
+    request_body = UpdateCapabilityInput,
+    responses(
+        (status = 200, description = "更新成功", body = CapabilityDto),
+        (status = 404, description = "未找到"),
+    )
+)]
 pub async fn update_capability(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -230,6 +269,15 @@ pub async fn update_capability(
     Ok(Json(saved.into()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/business-architecture/capabilities/{id}",
+    tag = "business-architecture",
+    responses(
+        (status = 204, description = "删除成功"),
+        (status = 404, description = "未找到"),
+    )
+)]
 pub async fn delete_capability(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -238,6 +286,14 @@ pub async fn delete_capability(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/business-architecture/capabilities/{id}/processes",
+    tag = "business-architecture",
+    responses(
+        (status = 200, description = "关联流程列表", body = Vec<uuid::Uuid>),
+    )
+)]
 pub async fn get_capability_processes(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -246,6 +302,15 @@ pub async fn get_capability_processes(
     Ok(Json(process_ids))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/business-architecture/capabilities/{id}/processes",
+    tag = "business-architecture",
+    request_body = LinkProcessInput,
+    responses(
+        (status = 201, description = "关联成功"),
+    )
+)]
 pub async fn link_capability_process(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -258,6 +323,15 @@ pub async fn link_capability_process(
     Ok(StatusCode::CREATED)
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/business-architecture/processes",
+    tag = "business-architecture",
+    request_body = CreateProcessInput,
+    responses(
+        (status = 201, description = "创建流程", body = ProcessDto),
+    )
+)]
 pub async fn create_process(
     State(service): State<Arc<BusinessArchitectureService>>,
     Json(input): Json<CreateProcessInput>,
@@ -285,6 +359,15 @@ pub async fn create_process(
     Ok(Json(saved.into()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/business-architecture/processes",
+    tag = "business-architecture",
+    params(PageInput),
+    responses(
+        (status = 200, description = "流程列表", body = Page<ProcessDto>),
+    )
+)]
 pub async fn list_processes(
     State(service): State<Arc<BusinessArchitectureService>>,
     Query(params): Query<PageInput>,
@@ -297,6 +380,15 @@ pub async fn list_processes(
     Ok(Json(Page::new(items, params.page, params.per_page, total)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/business-architecture/processes/{id}",
+    tag = "business-architecture",
+    responses(
+        (status = 200, description = "流程详情", body = ProcessDto),
+        (status = 404, description = "未找到"),
+    )
+)]
 pub async fn get_process(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -309,6 +401,16 @@ pub async fn get_process(
     Ok(Json(proc.into()))
 }
 
+#[utoipa::path(
+    put,
+    path = "/api/business-architecture/processes/{id}",
+    tag = "business-architecture",
+    request_body = UpdateProcessInput,
+    responses(
+        (status = 200, description = "更新成功", body = ProcessDto),
+        (status = 404, description = "未找到"),
+    )
+)]
 pub async fn update_process(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -347,6 +449,15 @@ pub async fn update_process(
     Ok(Json(saved.into()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/business-architecture/processes/{id}",
+    tag = "business-architecture",
+    responses(
+        (status = 204, description = "删除成功"),
+        (status = 404, description = "未找到"),
+    )
+)]
 pub async fn delete_process(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -355,6 +466,14 @@ pub async fn delete_process(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/business-architecture/processes/{id}/publish",
+    tag = "business-architecture",
+    responses(
+        (status = 200, description = "发布新版本", body = ProcessDto),
+    )
+)]
 pub async fn publish_process_version(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -363,6 +482,14 @@ pub async fn publish_process_version(
     Ok(Json(new_version.into()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/business-architecture/processes/{id}/versions",
+    tag = "business-architecture",
+    responses(
+        (status = 200, description = "版本列表", body = Vec<ProcessDto>),
+    )
+)]
 pub async fn get_process_versions(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -372,6 +499,14 @@ pub async fn get_process_versions(
     Ok(Json(items))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/business-architecture/processes/{id}/steps",
+    tag = "business-architecture",
+    responses(
+        (status = 200, description = "步骤列表", body = Vec<ProcessStepDto>),
+    )
+)]
 pub async fn get_process_steps(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -381,6 +516,15 @@ pub async fn get_process_steps(
     Ok(Json(items))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/business-architecture/processes/{id}/steps",
+    tag = "business-architecture",
+    request_body = CreateProcessStepInput,
+    responses(
+        (status = 201, description = "创建步骤", body = ProcessStepDto),
+    )
+)]
 pub async fn create_process_step(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -405,6 +549,15 @@ pub async fn create_process_step(
     Ok(Json(saved.into()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/business-architecture/value-streams",
+    tag = "business-architecture",
+    request_body = CreateValueStreamInput,
+    responses(
+        (status = 201, description = "创建价值流", body = ValueStreamDto),
+    )
+)]
 pub async fn create_value_stream(
     State(service): State<Arc<BusinessArchitectureService>>,
     Json(input): Json<CreateValueStreamInput>,
@@ -433,6 +586,15 @@ pub async fn create_value_stream(
     Ok(Json(saved.into()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/business-architecture/value-streams",
+    tag = "business-architecture",
+    params(PageInput),
+    responses(
+        (status = 200, description = "价值流列表", body = Page<ValueStreamDto>),
+    )
+)]
 pub async fn list_value_streams(
     State(service): State<Arc<BusinessArchitectureService>>,
     Query(params): Query<PageInput>,
@@ -445,6 +607,15 @@ pub async fn list_value_streams(
     Ok(Json(Page::new(items, params.page, params.per_page, total)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/business-architecture/value-streams/{id}",
+    tag = "business-architecture",
+    responses(
+        (status = 200, description = "价值流详情", body = ValueStreamDto),
+        (status = 404, description = "未找到"),
+    )
+)]
 pub async fn get_value_stream(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -457,6 +628,16 @@ pub async fn get_value_stream(
     Ok(Json(vs.into()))
 }
 
+#[utoipa::path(
+    put,
+    path = "/api/business-architecture/value-streams/{id}",
+    tag = "business-architecture",
+    request_body = UpdateValueStreamInput,
+    responses(
+        (status = 200, description = "更新成功", body = ValueStreamDto),
+        (status = 404, description = "未找到"),
+    )
+)]
 pub async fn update_value_stream(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -501,6 +682,15 @@ pub async fn update_value_stream(
     Ok(Json(saved.into()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/business-architecture/value-streams/{id}",
+    tag = "business-architecture",
+    responses(
+        (status = 204, description = "删除成功"),
+        (status = 404, description = "未找到"),
+    )
+)]
 pub async fn delete_value_stream(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -509,6 +699,14 @@ pub async fn delete_value_stream(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/business-architecture/value-streams/{id}/stages",
+    tag = "business-architecture",
+    responses(
+        (status = 200, description = "阶段列表", body = Vec<ValueStreamStageDto>),
+    )
+)]
 pub async fn get_value_stream_stages(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -518,6 +716,15 @@ pub async fn get_value_stream_stages(
     Ok(Json(items))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/business-architecture/value-streams/{id}/stages",
+    tag = "business-architecture",
+    request_body = CreateValueStreamStageInput,
+    responses(
+        (status = 201, description = "创建阶段", body = ValueStreamStageDto),
+    )
+)]
 pub async fn create_value_stream_stage(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path(id): Path<Uuid>,
@@ -539,6 +746,15 @@ pub async fn create_value_stream_stage(
     Ok(Json(saved.into()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/business-architecture/value-streams/stages/{stage_id}/capabilities",
+    tag = "business-architecture",
+    request_body = LinkStageCapabilityInput,
+    responses(
+        (status = 201, description = "关联成功"),
+    )
+)]
 pub async fn link_stage_capability(
     State(service): State<Arc<BusinessArchitectureService>>,
     Path((stage_id,)): Path<(Uuid,)>,
@@ -551,6 +767,15 @@ pub async fn link_stage_capability(
     Ok(StatusCode::CREATED)
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/business-architecture/analysis/gap",
+    tag = "business-architecture",
+    request_body = GapAnalysisInput,
+    responses(
+        (status = 200, description = "差距分析结果", body = GapAnalysisResult),
+    )
+)]
 pub async fn gap_analysis(
     State(service): State<Arc<BusinessArchitectureService>>,
     Json(input): Json<GapAnalysisInput>,
@@ -577,6 +802,15 @@ pub async fn gap_analysis(
     Ok(Json(GapAnalysisResult { gaps, summary }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/business-architecture/analysis/redundancy",
+    tag = "business-architecture",
+    request_body = RedundancyInput,
+    responses(
+        (status = 200, description = "冗余分析结果", body = RedundancyResult),
+    )
+)]
 pub async fn redundancy_analysis(
     State(service): State<Arc<BusinessArchitectureService>>,
     Json(input): Json<RedundancyInput>,

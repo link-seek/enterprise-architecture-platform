@@ -14,3 +14,4 @@ chrono.workspace = true
 tracing.workspace = true
 validator.workspace = true
 async-trait.workspace = true
+utoipa.workspace = true

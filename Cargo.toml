@@ -53,8 +53,9 @@ sha2 = "0.10"
 url = "2"
 
 # API docs
-utoipa = "5"
+utoipa = { version = "5", features = ["uuid", "chrono", "axum_extras"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
+utoipa-axum = "0.2"
 
 # Utils
 uuid = { version = "1", features = ["v4", "serde"] }
