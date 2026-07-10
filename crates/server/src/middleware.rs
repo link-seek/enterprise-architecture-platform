@@ -1,7 +1,7 @@
-use axum::extract::Request;
+use axum::extract::{Request, State};
 use axum::http::{header, StatusCode};
 use axum::middleware::Next;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use jsonwebtoken::{decode, DecodingKey, Validation};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -13,8 +13,9 @@ pub struct Claims {
     pub role: String,
 }
 
+/// JWT authentication middleware for protected routes
 pub async fn jwt_auth_middleware(
-    jwt_secret: String,
+    State(jwt_secret): State<String>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {

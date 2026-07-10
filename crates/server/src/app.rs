@@ -14,6 +14,8 @@ use crate::graphql::GraphqlSchema;
 use crate::state::AppState;
 
 pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
+    let jwt_secret = state.config.jwt.rsa_private_key_pem.clone();
+
     let auth_service = Arc::new(AuthService::new(
         state.db.clone(),
         state.config.jwt.rsa_private_key_pem.clone(),
@@ -31,10 +33,11 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
             .collect(),
     ));
 
+    // Rate limiter: generous for GraphQL + REST
     let governor_config = std::sync::Arc::new(
         tower_governor::governor::GovernorConfigBuilder::default()
-            .per_second(2)
-            .burst_size(10)
+            .per_second(4)
+            .burst_size(25)
             .finish()
             .unwrap(),
     );
@@ -81,9 +84,14 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
     // 合并 schemas 到 OpenAPI spec
     let api = crate::api_doc::merge_schemas(api);
 
+    // GraphQL: public endpoint (queries + mutations + introspection)
+    // TODO: Add /gql/admin with JWT protection for mutations (axum 0.8 route merge issue)
+    // TODO: Add /gql/playground for GraphQL Playground UI
+    let graphql_public = async_graphql_axum::GraphQL::new(graphql_schema);
+
     router
         .merge(crate::api_doc::swagger_ui_from(api))
-        .route_service("/graphql", async_graphql_axum::GraphQL::new(graphql_schema))
+        .route_service("/graphql", graphql_public)
         .layer(governor_limiter)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -119,4 +127,10 @@ async fn health_handler(State(state): State<AppState>) -> Json<serde_json::Value
         "db": db_status,
         "llm": llm_status,
     }))
+}
+
+/// GraphQL Playground HTML page
+async fn graphql_playground_handler() -> axum::response::Html<String> {
+    let config = async_graphql::http::GraphQLPlaygroundConfig::new("/graphql");
+    axum::response::Html(async_graphql::http::playground_source(config))
 }
