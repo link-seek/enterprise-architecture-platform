@@ -1,7 +1,8 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityLevel {
@@ -16,7 +17,7 @@ pub enum CapabilityLevel {
     L3,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
 #[serde(rename_all = "snake_case")]
 pub enum MaturityLevel {
@@ -37,7 +38,7 @@ pub enum MaturityLevel {
     Level5,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
 #[serde(rename_all = "snake_case")]
 pub enum BusinessValueRating {
@@ -52,7 +53,7 @@ pub enum BusinessValueRating {
     Low,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
 #[serde(rename_all = "snake_case")]
 pub enum CostRating {
@@ -67,7 +68,7 @@ pub enum CostRating {
     Low,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
 #[serde(rename_all = "snake_case")]
 pub enum LifecycleStatus {
@@ -79,7 +80,7 @@ pub enum LifecycleStatus {
     Archived,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
 #[serde(rename_all = "snake_case")]
 pub enum ValueStreamImportance {
@@ -97,7 +98,7 @@ pub enum ValueStreamImportance {
     Low,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
 #[serde(rename_all = "snake_case")]
 pub enum UserRole {
@@ -127,7 +128,7 @@ impl UserRole {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
 #[serde(rename_all = "snake_case")]
 pub enum UserStatus {

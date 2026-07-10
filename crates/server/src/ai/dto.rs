@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AiScenario {
     CapabilityDecomposition,
@@ -20,7 +21,7 @@ impl std::fmt::Display for AiScenario {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AiSuggestion {
     pub entity_type: String,
     pub action: String,
@@ -29,14 +30,14 @@ pub struct AiSuggestion {
     pub reasoning: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AiResponse {
     pub scenario: String,
     pub suggestions: Vec<AiSuggestion>,
     pub summary: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct AiRequest {
     pub scenario: AiScenario,
     pub context: serde_json::Value,

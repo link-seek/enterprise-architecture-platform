@@ -220,6 +220,17 @@ fn validate_input<T: Validate>(input: &T) -> Result<(), ApiError> {
         .map_err(|e| ApiError(shared_common::AppError::BadRequest(e.to_string())))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/auth/register",
+    tag = "auth",
+    request_body = RegisterInput,
+    responses(
+        (status = 201, description = "注册成功", body = AuthOutput),
+        (status = 400, description = "参数错误"),
+        (status = 409, description = "邮箱已存在"),
+    )
+)]
 pub async fn register(
     State(service): State<Arc<AuthService>>,
     Json(input): Json<RegisterInput>,
@@ -250,6 +261,17 @@ pub async fn register(
     }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/auth/login",
+    tag = "auth",
+    request_body = LoginInput,
+    responses(
+        (status = 200, description = "登录成功", body = AuthOutput),
+        (status = 401, description = "认证失败"),
+        (status = 403, description = "用户未激活"),
+    )
+)]
 pub async fn login(
     State(service): State<Arc<AuthService>>,
     Json(input): Json<LoginInput>,
@@ -287,6 +309,16 @@ pub async fn login(
     }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/auth/refresh",
+    tag = "auth",
+    request_body = RefreshInput,
+    responses(
+        (status = 200, description = "刷新成功", body = RefreshOutput),
+        (status = 401, description = "无效 refresh token"),
+    )
+)]
 pub async fn refresh(
     State(service): State<Arc<AuthService>>,
     Json(input): Json<RefreshInput>,
@@ -324,6 +356,16 @@ pub async fn refresh(
     }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/auth/logout",
+    tag = "auth",
+    request_body = LogoutInput,
+    responses(
+        (status = 200, description = "登出成功"),
+        (status = 401, description = "无效 refresh token"),
+    )
+)]
 pub async fn logout(
     State(service): State<Arc<AuthService>>,
     Json(input): Json<LogoutInput>,
@@ -340,6 +382,15 @@ pub async fn logout(
     Ok(StatusCode::OK)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/auth/me",
+    tag = "auth",
+    responses(
+        (status = 200, description = "当前用户信息", body = UserDto),
+        (status = 401, description = "未认证"),
+    )
+)]
 pub async fn me(
     State(service): State<Arc<AuthService>>,
     headers: HeaderMap,
@@ -356,6 +407,17 @@ pub async fn me(
     Ok(Json(user_to_dto(&user)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/oauth/authorize",
+    tag = "auth",
+    params(AuthorizeInput),
+    responses(
+        (status = 302, description = "重定向到回调 URL"),
+        (status = 400, description = "参数错误"),
+        (status = 401, description = "未认证"),
+    )
+)]
 pub async fn oauth_authorize(
     State(service): State<Arc<AuthService>>,
     headers: HeaderMap,
@@ -401,6 +463,16 @@ pub async fn oauth_authorize(
     Ok(Redirect::to(&redirect_url).into_response())
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/oauth/token",
+    tag = "auth",
+    request_body = TokenInput,
+    responses(
+        (status = 200, description = "获取 token 成功", body = TokenOutput),
+        (status = 400, description = "参数错误"),
+    )
+)]
 pub async fn oauth_token(
     State(service): State<Arc<AuthService>>,
     Json(input): Json<TokenInput>,

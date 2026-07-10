@@ -4,3 +4,18 @@ port = 8080
 
 [database]
 url = "sqlite://./data/platform.db?mode=rwc"
+
+[jwt]
+access_token_ttl_minutes = 15
+refresh_token_ttl_days = 7
+rsa_private_key_pem = "dev-secret-key-for-local-testing-32ch"
+rsa_public_key_pem = ""
+
+[oauth]
+clients = []
+
+[llm]
+backend = "openai"
+api_key = ""
+model = "gpt-4o-mini"
+endpoint = ""
