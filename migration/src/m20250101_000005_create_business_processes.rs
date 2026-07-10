@@ -27,11 +27,16 @@ impl MigrationTrait for Migration {
                     .col(timestamp_with_time_zone(BusinessProcesses::UpdatedAt))
                     .col(timestamp_with_time_zone_null(BusinessProcesses::DeletedAt))
                     .primary_key(Index::create().col(BusinessProcesses::Id))
-                    .index(
-                        Index::create()
-                            .name("idx_processes_logical_id")
-                            .col(BusinessProcesses::LogicalId),
-                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_processes_logical_id")
+                    .table(BusinessProcesses::Table)
+                    .col(BusinessProcesses::LogicalId)
                     .to_owned(),
             )
             .await

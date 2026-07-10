@@ -12,6 +12,7 @@ path = "src/main.rs"
 shared-common.workspace = true
 user-management.workspace = true
 business-architecture.workspace = true
+migration = { path = "../../migration" }
 sea-orm.workspace = true
 sea-orm-migration.workspace = true
 axum.workspace = true

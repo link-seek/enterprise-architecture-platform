@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use moka::future::Cache;
 use sea_orm::DatabaseConnection;
+use migration::MigratorTrait;
 
 use crate::config::Configuration;
 
@@ -15,6 +16,10 @@ pub struct AppState {
 impl AppState {
     pub async fn new(config: Configuration) -> anyhow::Result<Self> {
         let db = sea_orm::Database::connect(&config.database.url).await?;
+
+        // Auto-run migrations on startup
+        migration::Migrator::up(&db, None).await?;
+
         let cache = Cache::builder()
             .time_to_live(std::time::Duration::from_secs(300))
             .max_capacity(10_000)

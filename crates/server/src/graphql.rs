@@ -92,7 +92,9 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
         .register_entity_dataloader_one_to_one(stage_capability::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_many(stage_capability::Entity, tokio::spawn);
 
-    let schema = builder.schema_builder().finish()?;
+    let schema = builder.schema_builder()
+        .data(db.clone())
+        .finish()?;
 
     Ok(schema)
 }

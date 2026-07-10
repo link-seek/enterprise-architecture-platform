@@ -8,7 +8,6 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use utoipa_axum::router::OpenApiRouter;
 
 use user_management::infrastructure::http::handlers::AuthService;
-use business_architecture::infrastructure::http::handlers::BusinessArchitectureService;
 
 use crate::ai::backend::LlmBackend;
 use crate::graphql::GraphqlSchema;
@@ -31,8 +30,6 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
             })
             .collect(),
     ));
-
-    let ba_service = Arc::new(BusinessArchitectureService::new(state.db.clone()));
 
     let governor_config = std::sync::Arc::new(
         tower_governor::governor::GovernorConfigBuilder::default()
@@ -77,90 +74,8 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
         ))
         .with_state(auth_service);
 
-    // business-architecture handlers (State = Arc<BusinessArchitectureService>)
-    let ba_router = OpenApiRouter::new()
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::create_capability
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::list_capabilities
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::get_capability
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::update_capability
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::delete_capability
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::get_capability_processes
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::link_capability_process
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::create_process
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::list_processes
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::get_process
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::update_process
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::delete_process
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::publish_process_version
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::get_process_versions
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::get_process_steps
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::create_process_step
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::create_value_stream
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::list_value_streams
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::get_value_stream
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::update_value_stream
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::delete_value_stream
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::get_value_stream_stages
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::create_value_stream_stage
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::link_stage_capability
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::gap_analysis
-        ))
-        .routes(utoipa_axum::routes!(
-            business_architecture::infrastructure::http::handlers::redundancy_analysis
-        ))
-        .with_state(ba_service);
-
     // 合并所有 router 和 OpenAPI spec
-    let merged = main_router.merge(auth_router).merge(ba_router);
+    let merged = main_router.merge(auth_router);
     let (router, api) = merged.split_for_parts();
 
     // 合并 schemas 到 OpenAPI spec
