@@ -7,6 +7,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct BusinessCapability {
     pub id: Uuid,
+    pub logical_id: Uuid,
     pub business_version: String,
     pub status: LifecycleStatus,
     pub name: String,
