@@ -15,6 +15,7 @@ impl From<value_stream::Model> for ValueStream {
     fn from(m: value_stream::Model) -> Self {
         ValueStream {
             id: m.id,
+            logical_id: m.logical_id,
             business_version: m.business_version,
             status: m.status,
             name: m.name,
@@ -94,6 +95,7 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
         } else {
             let active = value_stream::ActiveModel {
                 id: Set(vs.id),
+                logical_id: Set(vs.logical_id),
                 business_version: Set(vs.business_version.clone()),
                 status: Set(vs.status),
                 name: Set(vs.name.clone()),

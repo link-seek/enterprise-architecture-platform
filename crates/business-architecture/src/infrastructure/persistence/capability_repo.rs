@@ -15,6 +15,7 @@ impl From<business_capability::Model> for BusinessCapability {
     fn from(m: business_capability::Model) -> Self {
         BusinessCapability {
             id: m.id,
+            logical_id: m.logical_id,
             business_version: m.business_version,
             status: m.status,
             name: m.name,
@@ -76,6 +77,7 @@ impl CapabilityRepository for SeaOrmCapabilityRepo {
         } else {
             let active = business_capability::ActiveModel {
                 id: Set(cap.id),
+                logical_id: Set(cap.logical_id),
                 business_version: Set(cap.business_version.clone()),
                 status: Set(cap.status),
                 name: Set(cap.name.clone()),

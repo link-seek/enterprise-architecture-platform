@@ -6,6 +6,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct ValueStream {
     pub id: Uuid,
+    pub logical_id: Uuid,
     pub business_version: String,
     pub status: LifecycleStatus,
     pub name: String,
