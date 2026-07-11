@@ -1,6 +1,6 @@
 use axum::response::IntoResponse;
 use sea_orm::DatabaseConnection;
-use seaography::{Builder, BuilderContext, GuardAction, LifecycleHooks, LifecycleHooksInterface, OperationType, RelatedEntityFilter, RelationBuilder};
+use seaography::{Builder, BuilderContext, GuardAction, LifecycleHooks, LifecycleHooksInterface, OperationType, RelatedEntityFilter, RelationBuilder, TimeLibrary, TypesMapConfig};
 
 use user_management::infrastructure::persistence::entities::{
     oauth_authorization_code, refresh_token, user,
@@ -239,6 +239,11 @@ where
 pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<GraphqlSchema> {
     let context: &'static BuilderContext = Box::leak(Box::new(BuilderContext {
         hooks: LifecycleHooks::new(GraphqlAuthGuard),
+        types: TypesMapConfig {
+            time_library: TimeLibrary::Chrono,
+            timestamp_rfc3339: true,
+            ..Default::default()
+        },
         ..Default::default()
     }));
 
