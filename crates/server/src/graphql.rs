@@ -1,5 +1,6 @@
+use axum::response::IntoResponse;
 use sea_orm::DatabaseConnection;
-use seaography::{Builder, BuilderContext, RelatedEntityFilter, RelationBuilder};
+use seaography::{Builder, BuilderContext, GuardAction, LifecycleHooks, LifecycleHooksInterface, OperationType, RelatedEntityFilter, RelationBuilder};
 
 use user_management::infrastructure::persistence::entities::{
     oauth_authorization_code, refresh_token, user,
@@ -11,105 +12,187 @@ use business_architecture::infrastructure::persistence::entities::{
 
 pub type GraphqlSchema = async_graphql::dynamic::Schema;
 
-// Global storage for admin endpoint (set once at startup)
-use std::sync::OnceLock;
-static JWT_SECRET: OnceLock<String> = OnceLock::new();
-static ADMIN_SCHEMA: OnceLock<GraphqlSchema> = OnceLock::new();
+// ============================================================================
+// GraphQL Auth Guard (seaography LifecycleHooks)
+// ============================================================================
 
-pub fn set_jwt_secret(secret: String) {
-    let _ = JWT_SECRET.set(secret);
-}
+/// GraphQL auth guard: queries are public, mutations require JWT Claims in context.
+/// Claims are injected by GraphQLService from the Authorization header.
+pub struct GraphqlAuthGuard;
 
-pub fn set_admin_schema(schema: GraphqlSchema) {
-    let _ = ADMIN_SCHEMA.set(schema);
-}
-
-/// Fallback handler for /gql/* paths that axum routing can't match
-/// Dispatches to playground (GET /gql/playground) or admin (POST /gql/admin)
-pub async fn gql_fallback_handler(req: axum::extract::Request) -> axum::response::Response {
-    use axum::http::StatusCode;
-    use axum::response::IntoResponse;
-
-    let path = req.uri().path();
-    let method = req.method();
-
-    match (method, path) {
-        (&axum::http::Method::GET, "/gql/playground") => {
-            let config = async_graphql::http::GraphQLPlaygroundConfig::new("/graphql");
-            axum::response::Html(async_graphql::http::playground_source(config)).into_response()
+impl LifecycleHooksInterface for GraphqlAuthGuard {
+    fn entity_guard(
+        &self,
+        ctx: &async_graphql::dynamic::ResolverContext,
+        entity: &str,
+        action: OperationType,
+    ) -> GuardAction {
+        let has_claims = ctx.data_opt::<crate::middleware::Claims>().is_some();
+        tracing::warn!(
+            "entity_guard: entity={}, action={:?}, has_claims={}",
+            entity, action, has_claims
+        );
+        match action {
+            OperationType::Read => GuardAction::Allow,
+            OperationType::Create | OperationType::Update | OperationType::Delete => {
+                if has_claims {
+                    GuardAction::Allow
+                } else {
+                    GuardAction::Block(Some(
+                        "Authentication required for mutations.".to_string(),
+                    ))
+                }
+            }
         }
-        (&axum::http::Method::POST, "/gql/admin") => {
-            // Extract headers and body from request
-            let (parts, body) = req.into_parts();
-            let headers = parts.headers;
-            let body_bytes = match axum::body::to_bytes(body, 1024 * 1024).await {
-                Ok(bytes) => bytes,
-                Err(_) => return (StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": "body_too_large"}))).into_response(),
-            };
-            let body_str = match std::str::from_utf8(&body_bytes) {
-                Ok(s) => s.to_string(),
-                Err(_) => return (StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": "invalid_utf8"}))).into_response(),
-            };
-            graphql_admin_handler_inner(headers, body_str).await
-        }
-        _ => (StatusCode::NOT_FOUND, axum::Json(serde_json::json!({"error": "not_found"}))).into_response(),
     }
 }
 
-async fn graphql_admin_handler_inner(
-    headers: axum::http::HeaderMap,
-    body: String,
-) -> axum::response::Response {
-    use axum::http::StatusCode;
-    use axum::response::IntoResponse;
+// ============================================================================
+// JWT extraction helper
+// ============================================================================
+
+/// Extract JWT Claims from Authorization header.
+/// Returns None if no valid JWT is present (public queries still work).
+pub fn extract_claims_from_headers(
+    headers: &axum::http::HeaderMap,
+    jwt_secret: &str,
+) -> Option<crate::middleware::Claims> {
     use jsonwebtoken::{decode, DecodingKey, Validation};
 
-    let jwt_secret = match JWT_SECRET.get() {
-        Some(s) => s,
-        None => return (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "server_not_ready"}))).into_response(),
-    };
-
-    let schema = match ADMIN_SCHEMA.get() {
-        Some(s) => s,
-        None => return (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "server_not_ready"}))).into_response(),
-    };
-
-    // Validate JWT
     let auth_header = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "));
+        .and_then(|s| s.strip_prefix("Bearer "))?;
 
-    let _claims = match auth_header {
-        Some(token) => {
-            let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
-            validation.validate_exp = true;
-            match decode::<crate::middleware::Claims>(token, &DecodingKey::from_secret(jwt_secret.as_bytes()), &validation) {
-                Ok(data) => data.claims,
-                Err(_) => return (StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "invalid_token"}))).into_response(),
-            }
+    let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+    validation.validate_exp = true;
+
+    decode::<crate::middleware::Claims>(
+        auth_header,
+        &DecodingKey::from_secret(jwt_secret.as_bytes()),
+        &validation,
+    )
+    .ok()
+    .map(|data| data.claims)
+}
+
+// ============================================================================
+// GraphQL Service (POST + GET handler)
+// ============================================================================
+
+/// Custom tower Service that handles GraphQL requests on /graphql.
+/// - GET: returns GraphiQL interactive IDE HTML
+/// - POST: executes GraphQL query/mutation with JWT extraction
+///
+/// JWT Claims are injected into async_graphql context for LifecycleHooks entity_guard.
+/// Queries are public (no JWT required), mutations require valid JWT.
+#[derive(Clone)]
+pub struct GraphQLService {
+    schema: GraphqlSchema,
+    jwt_secret: String,
+    endpoint: String,
+}
+
+impl GraphQLService {
+    pub fn new(schema: GraphqlSchema, jwt_secret: String) -> Self {
+        Self {
+            schema,
+            jwt_secret,
+            endpoint: "/graphql".to_string(),
         }
-        None => return (StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "missing_authorization"}))).into_response(),
-    };
-
-    // Execute GraphQL request
-    let request: async_graphql::Request = match serde_json::from_str(&body) {
-        Ok(req) => req,
-        Err(e) => return (StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": format!("invalid request: {e}")}))).into_response(),
-    };
-
-    let response = schema.execute(request).await;
-    axum::Json(response).into_response()
+    }
 }
 
-/// GraphQL admin handler: validates JWT, then executes GraphQL request
-/// This protects mutations while /graphql remains public for queries
-pub async fn graphql_admin_handler(
-    headers: axum::http::HeaderMap,
-    body: String,
-) -> axum::response::Response {
-    graphql_admin_handler_inner(headers, body).await
+impl tower::Service<axum::extract::Request> for GraphQLService {
+    type Response = axum::response::Response;
+    type Error = std::convert::Infallible;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: axum::extract::Request) -> Self::Future {
+        let schema = self.schema.clone();
+        let jwt_secret = self.jwt_secret.clone();
+        let endpoint = self.endpoint.clone();
+
+        Box::pin(async move {
+            match req.method() {
+                // GET → GraphiQL interactive IDE
+                &axum::http::Method::GET => {
+                    let html = async_graphql::http::GraphiQLSource::build()
+                        .endpoint(&endpoint)
+                        .finish();
+                    Ok(axum::response::Html(html).into_response())
+                }
+                // POST → Execute GraphQL query/mutation
+                &axum::http::Method::POST => {
+                    let has_jwt =
+                        crate::graphql::extract_claims_from_headers(req.headers(), &jwt_secret);
+
+                    let bytes = match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
+                        Ok(b) => b,
+                        Err(_) => {
+                            return Ok((
+                                axum::http::StatusCode::BAD_REQUEST,
+                                axum::Json(serde_json::json!({"error": "body_too_large"})),
+                            )
+                                .into_response());
+                        }
+                    };
+
+                    let mut request: async_graphql::Request =
+                        match serde_json::from_slice(&bytes) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                return Ok((
+                                    axum::http::StatusCode::BAD_REQUEST,
+                                    axum::Json(serde_json::json!({"error":
+                                        format!("invalid request: {e}")})),
+                                )
+                                    .into_response());
+                            }
+                        };
+
+                    // Inject Claims into GraphQL context if JWT was valid
+                    // This enables seaography LifecycleHooks entity_guard (if it works)
+                    // AND also serves as a fallback auth check:
+                    // If the request contains a mutation but no JWT, reject it.
+                    if let Some(claims) = has_jwt {
+                        request = request.data(claims);
+                    } else {
+                        // Check if request contains mutations (simple heuristic: look for "mutation" keyword)
+                        // If so, reject without JWT
+                        let body_str = String::from_utf8_lossy(&bytes);
+                        if body_str.contains("mutation") {
+                            return Ok((
+                                axum::http::StatusCode::UNAUTHORIZED,
+                                axum::Json(serde_json::json!({
+                                    "errors": [{"message": "Authentication required for mutations. Provide a valid JWT via Authorization header."}]
+                                })),
+                            )
+                                .into_response());
+                        }
+                    }
+
+                    let response = schema.execute(request).await;
+                    Ok(axum::Json(response).into_response())
+                }
+                _ => Ok(axum::http::StatusCode::METHOD_NOT_ALLOWED.into_response()),
+            }
+        })
+    }
 }
+
+// ============================================================================
+// Schema builder
+// ============================================================================
 
 #[derive(Copy, Clone, Debug, sea_orm::EnumIter)]
 enum NoRelation {}
@@ -154,7 +237,10 @@ where
 }
 
 pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<GraphqlSchema> {
-    let context: &'static BuilderContext = Box::leak(Box::new(BuilderContext::default()));
+    let context: &'static BuilderContext = Box::leak(Box::new(BuilderContext {
+        hooks: LifecycleHooks::new(GraphqlAuthGuard),
+        ..Default::default()
+    }));
 
     let mut builder = Builder::new(context, db.clone());
 

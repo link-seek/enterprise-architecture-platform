@@ -84,14 +84,23 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
     // 合并 schemas 到 OpenAPI spec
     let api = crate::api_doc::merge_schemas(api);
 
-    // GraphQL: public endpoint (queries + mutations + introspection)
-    // TODO: Add /gql/admin with JWT protection for mutations (axum 0.8 route merge issue)
-    // TODO: Add /gql/playground for GraphQL Playground UI
-    let graphql_public = async_graphql_axum::GraphQL::new(graphql_schema);
+    // === GraphQL 路由 (用 route_service 注册，参照 nakamuraos 模式) ===
+    //
+    // 架构：
+    //   POST /graphql   → GraphQL handler (JWT 提取 + LifecycleHooks 鉴权)
+    //     - Query: 公开（无需 JWT）
+    //     - Mutation: 需要 JWT（LifecycleHooks entity_guard 检查 Claims）
+    //   GET  /graphql   → GraphiQL 交互式 IDE（生产环境可禁用）
+    //
+    // 用 route_service 而非 route，因为 utoipa-axum 的 split_for_parts()
+    // 返回 Router<()>，后续 route() 注册的路由在运行时无法匹配（axum 0.8 已知问题）
+
+    let graphql_service =
+        crate::graphql::GraphQLService::new(graphql_schema.clone(), jwt_secret);
 
     router
         .merge(crate::api_doc::swagger_ui_from(api))
-        .route_service("/graphql", graphql_public)
+        .route_service("/graphql", graphql_service)
         .layer(governor_limiter)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -127,10 +136,4 @@ async fn health_handler(State(state): State<AppState>) -> Json<serde_json::Value
         "db": db_status,
         "llm": llm_status,
     }))
-}
-
-/// GraphQL Playground HTML page
-async fn graphql_playground_handler() -> axum::response::Html<String> {
-    let config = async_graphql::http::GraphQLPlaygroundConfig::new("/graphql");
-    axum::response::Html(async_graphql::http::playground_source(config))
 }
