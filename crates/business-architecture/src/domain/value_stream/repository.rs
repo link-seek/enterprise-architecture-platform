@@ -7,7 +7,16 @@ use super::super::error::DomainError;
 #[async_trait]
 pub trait ValueStreamRepository: Send + Sync + 'static {
     async fn find_by_id(&self, id: Uuid) -> Result<Option<ValueStream>, DomainError>;
+    async fn find_active_by_logical_id(
+        &self,
+        logical_id: Uuid,
+    ) -> Result<Option<ValueStream>, DomainError>;
+    async fn find_all_versions(
+        &self,
+        logical_id: Uuid,
+    ) -> Result<Vec<ValueStream>, DomainError>;
     async fn save(&self, vs: &ValueStream) -> Result<ValueStream, DomainError>;
+    async fn archive(&self, id: Uuid) -> Result<(), DomainError>;
     async fn soft_delete(&self, id: Uuid) -> Result<(), DomainError>;
     async fn list_active(
         &self,

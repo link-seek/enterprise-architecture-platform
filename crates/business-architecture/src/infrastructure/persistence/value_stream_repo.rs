@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    Set,
+    Set, QueryOrder,
 };
+use sea_orm::Order;
 use shared_common::enums::LifecycleStatus;
 use uuid::Uuid;
 
@@ -70,6 +71,45 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
             .one(&self.db)
             .await?;
         Ok(model.map(Into::into))
+    }
+
+    async fn find_active_by_logical_id(
+        &self,
+        logical_id: Uuid,
+    ) -> Result<Option<ValueStream>, DomainError> {
+        let model = value_stream::Entity::find()
+            .filter(value_stream::Column::LogicalId.eq(logical_id))
+            .filter(value_stream::Column::Status.eq(LifecycleStatus::Active))
+            .filter(value_stream::Column::DeletedAt.is_null())
+            .one(&self.db)
+            .await?;
+        Ok(model.map(Into::into))
+    }
+
+    async fn find_all_versions(
+        &self,
+        logical_id: Uuid,
+    ) -> Result<Vec<ValueStream>, DomainError> {
+        let models = value_stream::Entity::find()
+            .filter(value_stream::Column::LogicalId.eq(logical_id))
+            .filter(value_stream::Column::DeletedAt.is_null())
+            .order_by_desc(value_stream::Column::CreatedAt)
+            .all(&self.db)
+            .await?;
+        Ok(models.into_iter().map(Into::into).collect())
+    }
+
+    async fn archive(&self, id: Uuid) -> Result<(), DomainError> {
+        let model = value_stream::Entity::find_by_id(id)
+            .one(&self.db)
+            .await?
+            .ok_or(DomainError::ValueStreamNotFound)?;
+
+        let mut active: value_stream::ActiveModel = model.into();
+        active.status = Set(LifecycleStatus::Archived);
+        active.updated_at = Set(chrono::Utc::now());
+        active.update(&self.db).await?;
+        Ok(())
     }
 
     async fn save(&self, vs: &ValueStream) -> Result<ValueStream, DomainError> {

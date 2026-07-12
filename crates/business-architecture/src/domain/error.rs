@@ -14,6 +14,18 @@ pub enum DomainError {
     CannotReferenceArchived,
     #[error("only owner or admin can modify")]
     NotOwner,
+    #[error("invalid lifecycle transition: {from} → {to} on {entity}")]
+    InvalidTransition {
+        from: String,
+        to: String,
+        entity: String,
+    },
+    #[error("cannot modify archived {entity}")]
+    CannotModifyArchived {
+        entity: String,
+    },
+    #[error("validation error: {0}")]
+    Validation(String),
     #[error("semver error: {0}")]
     Semver(String),
     #[error("database error: {0}")]
