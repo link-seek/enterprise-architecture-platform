@@ -3,7 +3,6 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
     Set, QueryOrder,
 };
-use sea_orm::Order;
 use shared_common::enums::LifecycleStatus;
 use uuid::Uuid;
 
