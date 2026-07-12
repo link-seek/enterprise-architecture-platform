@@ -1,6 +1,7 @@
 use axum::response::IntoResponse;
 use sea_orm::DatabaseConnection;
 use seaography::{Builder, BuilderContext, GuardAction, LifecycleHooks, LifecycleHooksInterface, OperationType, RelatedEntityFilter, RelationBuilder, TimeLibrary, TypesMapConfig};
+use uuid::Uuid;
 
 use user_management::infrastructure::persistence::entities::{
     oauth_authorization_code, refresh_token, user,
@@ -9,6 +10,10 @@ use business_architecture::infrastructure::persistence::entities::{
     business_capability, business_process, capability_process, process_step, stage_capability,
     value_stream, value_stream_stage,
 };
+use business_architecture::application::value_stream_service::ValueStreamService;
+use business_architecture::domain::value_stream::entity::ValueStream as DomainValueStream;
+use business_architecture::infrastructure::persistence::value_stream_repo::SeaOrmValueStreamRepo;
+use shared_common::enums::ValueStreamImportance;
 
 pub type GraphqlSchema = async_graphql::dynamic::Schema;
 
@@ -28,7 +33,7 @@ impl LifecycleHooksInterface for GraphqlAuthGuard {
         action: OperationType,
     ) -> GuardAction {
         let has_claims = ctx.data_opt::<crate::middleware::Claims>().is_some();
-        tracing::warn!(
+        tracing::debug!(
             "entity_guard: entity={}, action={:?}, has_claims={}",
             entity, action, has_claims
         );
@@ -161,14 +166,10 @@ impl tower::Service<axum::extract::Request> for GraphQLService {
                         };
 
                     // Inject Claims into GraphQL context if JWT was valid
-                    // This enables seaography LifecycleHooks entity_guard (if it works)
-                    // AND also serves as a fallback auth check:
-                    // If the request contains a mutation but no JWT, reject it.
                     if let Some(claims) = has_jwt {
                         request = request.data(claims);
                     } else {
-                        // Check if request contains mutations (simple heuristic: look for "mutation" keyword)
-                        // If so, reject without JWT
+                        // Fallback: reject mutation requests without JWT
                         let body_str = String::from_utf8_lossy(&bytes);
                         if body_str.contains("mutation") {
                             return Ok((
@@ -236,6 +237,194 @@ where
     builder.register_entity_mutations::<T, A>();
 }
 
+// ============================================================================
+// Domain → SeaORM Model conversion (for FieldValue::owned_any)
+// ============================================================================
+
+/// Convert a domain ValueStream back to a SeaORM Model so that
+/// seaography's field resolvers can downcast and resolve all fields.
+fn domain_vs_to_model(vs: &DomainValueStream) -> value_stream::Model {
+    value_stream::Model {
+        id: vs.id,
+        logical_id: vs.logical_id,
+        business_version: vs.business_version.clone(),
+        status: vs.status,
+        name: vs.name.clone(),
+        description: vs.description.clone(),
+        triggering_event: vs.triggering_event.clone(),
+        end_deliverable: vs.end_deliverable.clone(),
+        owner_id: vs.owner_id,
+        importance: vs.importance,
+        stakeholders: vs.stakeholders.clone(),
+        performance_metrics: vs.performance_metrics.clone(),
+        created_by: vs.created_by,
+        updated_by: vs.updated_by,
+        created_at: vs.created_at,
+        updated_at: vs.updated_at,
+        deleted_at: vs.deleted_at,
+    }
+}
+
+// ============================================================================
+// Custom ValueStream Domain Mutations
+// ============================================================================
+
+/// Parse a GraphQL enum/string into ValueStreamImportance.
+fn parse_importance(s: &str) -> async_graphql::Result<ValueStreamImportance> {
+    match s {
+        "Critical" => Ok(ValueStreamImportance::Critical),
+        "High" => Ok(ValueStreamImportance::High),
+        "Medium" => Ok(ValueStreamImportance::Medium),
+        "Low" => Ok(ValueStreamImportance::Low),
+        _ => Err(async_graphql::Error::new(format!(
+            "Invalid importance: '{}'. Expected: Critical, High, Medium, Low",
+            s
+        ))),
+    }
+}
+
+/// Register custom ValueStream mutations that go through the domain model.
+/// These replace seaography's auto-generated CRUD mutations for value_stream.
+fn register_value_stream_domain_mutations(builder: &mut Builder) {
+    use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, TypeRef};
+
+    // ── valueStreamCreate ──────────────────────────────────────────────
+    let create_field = Field::new(
+        "valueStreamCreate",
+        TypeRef::named_nn("ValueStreams"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+
+                let name = ctx.args.try_get("name")?.string()?.to_owned();
+                let description = ctx.args.try_get("description")?.string()?.to_owned();
+                let business_version = ctx.args.try_get("businessVersion")?.string()?.to_owned();
+                let importance = parse_importance(ctx.args.try_get("importance")?.enum_name()?)?;
+
+                let repo = SeaOrmValueStreamRepo::new(db.clone());
+                let service = ValueStreamService::new(repo);
+                let vs = service
+                    .create(name, description, business_version, importance)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                let model = domain_vs_to_model(&vs);
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("businessVersion", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("importance", TypeRef::named_nn(TypeRef::STRING)));
+
+    builder.mutations.push(create_field);
+
+    // ── valueStreamUpdate ──────────────────────────────────────────────
+    let update_field = Field::new(
+        "valueStreamUpdate",
+        TypeRef::named_nn("ValueStreams"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+
+                let id_str = ctx.args.try_get("id")?.string()?;
+                let id = Uuid::parse_str(id_str)
+                    .map_err(|e| async_graphql::Error::new(format!("Invalid UUID: {e}")))?;
+
+                let name = ctx.args.get("name").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+                let description = ctx.args.get("description").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+                let importance = match ctx.args.get("importance") {
+                    Some(v) if !v.is_null() => Some(parse_importance(v.enum_name()?)?),
+                    _ => None,
+                };
+
+                let repo = SeaOrmValueStreamRepo::new(db.clone());
+                let service = ValueStreamService::new(repo);
+                let vs = service
+                    .update(id, name, description, importance)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                let model = domain_vs_to_model(&vs);
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("importance", TypeRef::named(TypeRef::STRING)));
+
+    builder.mutations.push(update_field);
+
+    // ── valueStreamArchive ─────────────────────────────────────────────
+    let archive_field = Field::new(
+        "valueStreamArchive",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+
+                let id_str = ctx.args.try_get("id")?.string()?;
+                let id = Uuid::parse_str(id_str)
+                    .map_err(|e| async_graphql::Error::new(format!("Invalid UUID: {e}")))?;
+
+                let repo = SeaOrmValueStreamRepo::new(db.clone());
+                let service = ValueStreamService::new(repo);
+                service
+                    .archive(id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+
+    builder.mutations.push(archive_field);
+
+    // ── valueStreamCreateVersion ───────────────────────────────────────
+    let create_version_field = Field::new(
+        "valueStreamCreateVersion",
+        TypeRef::named_nn("ValueStreams"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+
+                let current_id_str = ctx.args.try_get("currentId")?.string()?;
+                let current_id = Uuid::parse_str(current_id_str)
+                    .map_err(|e| async_graphql::Error::new(format!("Invalid UUID: {e}")))?;
+
+                let new_version = ctx.args.try_get("newVersion")?.string()?.to_owned();
+                let new_name = ctx.args.get("newName").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+                let new_description = ctx.args.get("newDescription").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+
+                let repo = SeaOrmValueStreamRepo::new(db.clone());
+                let service = ValueStreamService::new(repo);
+                let vs = service
+                    .create_version(current_id, new_version, new_name, new_description)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                let model = domain_vs_to_model(&vs);
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("currentId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("newVersion", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("newName", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("newDescription", TypeRef::named(TypeRef::STRING)));
+
+    builder.mutations.push(create_version_field);
+}
+
+// ============================================================================
+// Build schema
+// ============================================================================
+
 pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<GraphqlSchema> {
     let context: &'static BuilderContext = Box::leak(Box::new(BuilderContext {
         hooks: LifecycleHooks::new(GraphqlAuthGuard),
@@ -249,18 +438,25 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
 
     let mut builder = Builder::new(context, db.clone());
 
+    // ── User management: seaography CRUD (queries + mutations) ────────
     register_entity_with_mutations::<user::Entity, user::ActiveModel>(&mut builder);
     register_entity_with_mutations::<refresh_token::Entity, refresh_token::ActiveModel>(&mut builder);
     register_entity_with_mutations::<oauth_authorization_code::Entity, oauth_authorization_code::ActiveModel>(&mut builder);
 
+    // ── Business architecture: queries only via seaography ────────────
+    // Mutations for value_stream go through the domain model (DDD)
     register_entity_with_mutations::<business_capability::Entity, business_capability::ActiveModel>(&mut builder);
     register_entity_with_mutations::<business_process::Entity, business_process::ActiveModel>(&mut builder);
     register_entity_with_mutations::<process_step::Entity, process_step::ActiveModel>(&mut builder);
-    register_entity_with_mutations::<value_stream::Entity, value_stream::ActiveModel>(&mut builder);
+    register_entity::<value_stream::Entity>(&mut builder);  // queries only
     register_entity_with_mutations::<value_stream_stage::Entity, value_stream_stage::ActiveModel>(&mut builder);
     register_entity_with_mutations::<capability_process::Entity, capability_process::ActiveModel>(&mut builder);
     register_entity_with_mutations::<stage_capability::Entity, stage_capability::ActiveModel>(&mut builder);
 
+    // ── Custom domain mutations for ValueStream ───────────────────────
+    register_value_stream_domain_mutations(&mut builder);
+
+    // ── DataLoaders ───────────────────────────────────────────────────
     builder = builder
         .register_entity_dataloader_one_to_one(user::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_many(user::Entity, tokio::spawn)
