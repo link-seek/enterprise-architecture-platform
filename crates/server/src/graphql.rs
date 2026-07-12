@@ -376,6 +376,34 @@ fn domain_vs_to_model(vs: &DomainValueStream) -> value_stream::Model {
 // Custom ValueStream Domain Mutations
 // ============================================================================
 
+/// Check authentication and authorization for ValueStream domain mutations.
+/// This mirrors the entity_guard logic that seaography applies to auto-generated mutations.
+fn check_value_stream_auth(
+    ctx: &async_graphql::dynamic::ResolverContext,
+    action: OperationType,
+) -> async_graphql::Result<()> {
+    let claims = ctx
+        .data_opt::<crate::middleware::Claims>()
+        .ok_or_else(|| async_graphql::Error::new("Authentication required for mutations."))?;
+
+    let role = claims.user_role();
+
+    let allowed = match action {
+        OperationType::Create => role.can_create(),
+        OperationType::Update => role.can_update(),
+        OperationType::Delete => role.can_delete(),
+        OperationType::Read => true,
+    };
+
+    if !allowed {
+        return Err(async_graphql::Error::new(
+            "Insufficient permissions for this operation.",
+        ));
+    }
+
+    Ok(())
+}
+
 /// Parse a GraphQL enum/string into ValueStreamImportance.
 fn parse_importance(s: &str) -> async_graphql::Result<ValueStreamImportance> {
     match s {
@@ -401,6 +429,8 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
         TypeRef::named_nn("ValueStreams"),
         |ctx| {
             FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Create)?;
+
                 let db = ctx.data::<DatabaseConnection>()?;
 
                 let name = ctx.args.try_get("name")?.string()?.to_owned();
@@ -433,6 +463,8 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
         TypeRef::named_nn("ValueStreams"),
         |ctx| {
             FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Update)?;
+
                 let db = ctx.data::<DatabaseConnection>()?;
 
                 let id_str = ctx.args.try_get("id")?.string()?;
@@ -471,6 +503,8 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
         TypeRef::named_nn(TypeRef::BOOLEAN),
         |ctx| {
             FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Delete)?;
+
                 let db = ctx.data::<DatabaseConnection>()?;
 
                 let id_str = ctx.args.try_get("id")?.string()?;
@@ -498,6 +532,8 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
         TypeRef::named_nn("ValueStreams"),
         |ctx| {
             FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Create)?;
+
                 let db = ctx.data::<DatabaseConnection>()?;
 
                 let current_id_str = ctx.args.try_get("currentId")?.string()?;
