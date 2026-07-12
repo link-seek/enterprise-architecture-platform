@@ -120,11 +120,34 @@ impl UserRole {
     pub fn is_architect(&self) -> bool {
         matches!(self, UserRole::Architect)
     }
+    pub fn is_viewer(&self) -> bool {
+        matches!(self, UserRole::Viewer)
+    }
     pub fn can_create(&self) -> bool {
+        matches!(self, UserRole::Admin | UserRole::Architect)
+    }
+    pub fn can_update(&self) -> bool {
+        matches!(self, UserRole::Admin | UserRole::Architect)
+    }
+    pub fn can_delete(&self) -> bool {
         matches!(self, UserRole::Admin | UserRole::Architect)
     }
     pub fn can_use_ai(&self) -> bool {
         matches!(self, UserRole::Admin | UserRole::Architect)
+    }
+    pub fn can_manage_users(&self) -> bool {
+        matches!(self, UserRole::Admin)
+    }
+    pub fn can_transfer_owner(&self) -> bool {
+        matches!(self, UserRole::Admin)
+    }
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "admin" => Some(UserRole::Admin),
+            "architect" => Some(UserRole::Architect),
+            "viewer" => Some(UserRole::Viewer),
+            _ => None,
+        }
     }
 }
 

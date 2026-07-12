@@ -32,4 +32,9 @@ impl User {
     pub fn can_modify(&self, actor_id: Uuid, actor_role: UserRole) -> bool {
         actor_role.is_admin() || self.id == actor_id
     }
+
+    pub fn set_role(&mut self, new_role: UserRole) {
+        self.role = new_role;
+        self.updated_at = Utc::now();
+    }
 }

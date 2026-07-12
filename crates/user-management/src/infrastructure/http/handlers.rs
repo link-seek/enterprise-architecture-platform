@@ -553,3 +553,54 @@ pub async fn oauth_token(
         expires_in: service.jwt_expires_in,
     }))
 }
+
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+pub struct UpdateRoleInput {
+    pub user_id: Uuid,
+    pub role: String,
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/auth/role",
+    tag = "auth",
+    request_body = UpdateRoleInput,
+    responses(
+        (status = 200, description = "角色更新成功", body = UserDto),
+        (status = 401, description = "未认证"),
+        (status = 403, description = "无权限"),
+    )
+)]
+pub async fn update_role(
+    State(service): State<Arc<AuthService>>,
+    headers: HeaderMap,
+    Json(input): Json<UpdateRoleInput>,
+) -> Result<Json<UserDto>, ApiError> {
+    let token = extract_bearer_token(&headers)?;
+    let claims = verify_jwt(&service.jwt_secret, &token)?;
+
+    let actor_role = UserRole::from_str(&claims.role)
+        .ok_or_else(|| ApiError(shared_common::AppError::Unauthorized("invalid token role".into())))?;
+
+    if !actor_role.can_manage_users() {
+        return Err(ApiError(shared_common::AppError::Forbidden(
+            "only admins can change user roles".into(),
+        )));
+    }
+
+    let new_role = UserRole::from_str(&input.role)
+        .ok_or_else(|| ApiError(shared_common::AppError::BadRequest(
+            format!("invalid role: '{}'. expected: admin, architect, viewer", input.role),
+        )))?;
+
+    let repo = service.user_repo();
+    let mut user = repo
+        .find_by_id(input.user_id)
+        .await?
+        .ok_or_else(|| ApiError(shared_common::AppError::NotFound("user not found".into())))?;
+
+    user.set_role(new_role);
+    let saved = repo.save(&user).await?;
+
+    Ok(Json(user_to_dto(&saved)))
+}

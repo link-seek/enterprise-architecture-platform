@@ -75,6 +75,9 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
         .routes(utoipa_axum::routes!(
             user_management::infrastructure::http::handlers::oauth_token
         ))
+        .routes(utoipa_axum::routes!(
+            user_management::infrastructure::http::handlers::update_role
+        ))
         .with_state(auth_service);
 
     // 合并所有 router 和 OpenAPI spec

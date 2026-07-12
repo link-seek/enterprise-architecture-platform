@@ -13,6 +13,13 @@ pub struct Claims {
     pub role: String,
 }
 
+impl Claims {
+    pub fn user_role(&self) -> shared_common::enums::UserRole {
+        shared_common::enums::UserRole::from_str(&self.role)
+            .unwrap_or(shared_common::enums::UserRole::Viewer)
+    }
+}
+
 /// JWT authentication middleware for protected routes
 pub async fn jwt_auth_middleware(
     State(jwt_secret): State<String>,

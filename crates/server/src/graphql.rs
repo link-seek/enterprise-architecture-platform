@@ -21,8 +21,30 @@ pub type GraphqlSchema = async_graphql::dynamic::Schema;
 // GraphQL Auth Guard (seaography LifecycleHooks)
 // ============================================================================
 
-/// GraphQL auth guard: queries are public, mutations require JWT Claims in context.
-/// Claims are injected by GraphQLService from the Authorization header.
+/// Entities that support ownership (have `created_by` field).
+const OWNED_ENTITIES: &[&str] = &[
+    "business_capabilities",
+    "business_processes",
+    "value_streams",
+];
+
+/// User-management entities: only Admin can manage users.
+const USER_ENTITIES: &[&str] = &[
+    "users",
+    "refresh_tokens",
+    "oauth_authorization_codes",
+];
+
+/// Fields hidden from all users (including Admin) in queries.
+const HIDDEN_FIELDS: &[(&str, &str)] = &[
+    ("users", "password_hash"),
+];
+
+/// Fields restricted to Admin only.
+const ADMIN_ONLY_FIELDS: &[(&str, &str)] = &[
+    ("users", "email"),
+];
+
 pub struct GraphqlAuthGuard;
 
 impl LifecycleHooksInterface for GraphqlAuthGuard {
@@ -32,23 +54,108 @@ impl LifecycleHooksInterface for GraphqlAuthGuard {
         entity: &str,
         action: OperationType,
     ) -> GuardAction {
-        let has_claims = ctx.data_opt::<crate::middleware::Claims>().is_some();
+        let claims = ctx.data_opt::<crate::middleware::Claims>();
         tracing::debug!(
             "entity_guard: entity={}, action={:?}, has_claims={}",
-            entity, action, has_claims
+            entity, action, claims.is_some()
         );
+
         match action {
             OperationType::Read => GuardAction::Allow,
-            OperationType::Create | OperationType::Update | OperationType::Delete => {
-                if has_claims {
-                    GuardAction::Allow
-                } else {
-                    GuardAction::Block(Some(
-                        "Authentication required for mutations.".to_string(),
-                    ))
+
+            OperationType::Create => {
+                let Some(claims) = claims else {
+                    return GuardAction::Block(Some("Authentication required for mutations.".to_string()));
+                };
+                let role = claims.user_role();
+
+                if USER_ENTITIES.contains(&entity) && !role.can_manage_users() {
+                    return GuardAction::Block(Some(
+                        "Only admins can create user records.".to_string(),
+                    ));
                 }
+
+                if !role.can_create() {
+                    return GuardAction::Block(Some(
+                        "Viewers cannot create resources.".to_string(),
+                    ));
+                }
+
+                GuardAction::Allow
+            }
+
+            OperationType::Update => {
+                let Some(claims) = claims else {
+                    return GuardAction::Block(Some("Authentication required for mutations.".to_string()));
+                };
+                let role = claims.user_role();
+
+                if USER_ENTITIES.contains(&entity) && !role.can_manage_users() {
+                    return GuardAction::Block(Some(
+                        "Only admins can update user records.".to_string(),
+                    ));
+                }
+
+                if !role.can_update() {
+                    return GuardAction::Block(Some(
+                        "Viewers cannot update resources.".to_string(),
+                    ));
+                }
+
+                GuardAction::Allow
+            }
+
+            OperationType::Delete => {
+                let Some(claims) = claims else {
+                    return GuardAction::Block(Some("Authentication required for mutations.".to_string()));
+                };
+                let role = claims.user_role();
+
+                if USER_ENTITIES.contains(&entity) && !role.can_manage_users() {
+                    return GuardAction::Block(Some(
+                        "Only admins can delete user records.".to_string(),
+                    ));
+                }
+
+                if !role.can_delete() {
+                    return GuardAction::Block(Some(
+                        "Viewers cannot delete resources.".to_string(),
+                    ));
+                }
+
+                GuardAction::Allow
             }
         }
+    }
+
+    fn field_guard(
+        &self,
+        ctx: &async_graphql::dynamic::ResolverContext,
+        entity: &str,
+        field: &str,
+        _action: OperationType,
+    ) -> GuardAction {
+        if HIDDEN_FIELDS.iter().any(|&(e, f)| e == entity && f == field) {
+            return GuardAction::Block(Some(
+                format!("Field '{}' on '{}' is not accessible.", field, entity),
+            ));
+        }
+
+        if ADMIN_ONLY_FIELDS.iter().any(|&(e, f)| e == entity && f == field) {
+            let claims = ctx.data_opt::<crate::middleware::Claims>();
+            let Some(claims) = claims else {
+                return GuardAction::Block(Some(
+                    format!("Field '{}' on '{}' requires authentication.", field, entity),
+                ));
+            };
+            if !claims.user_role().is_admin() {
+                return GuardAction::Block(Some(
+                    format!("Field '{}' on '{}' is admin-only.", field, entity),
+                ));
+            }
+        }
+
+        GuardAction::Allow
     }
 }
 
