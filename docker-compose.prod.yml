@@ -1,11 +1,11 @@
 services:
   frontend:
-    image: swr.cn-north-9.myhuaweicloud.com/eap/frontend:latest
+    image: swr.cn-north-9.myhuaweicloud.com/linkseed/eap-frontend:latest
     ports:
       - "80:80"
 
   backend:
-    image: swr.cn-north-9.myhuaweicloud.com/eap/backend:latest
+    image: swr.cn-north-9.myhuaweicloud.com/linkseed/eap-backend:latest
     volumes:
       - ./data:/app/data
     environment:
