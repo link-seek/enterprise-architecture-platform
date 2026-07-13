@@ -64,4 +64,50 @@ impl Configuration {
         let cfg: Self = builder.build()?.try_deserialize()?;
         Ok(cfg)
     }
+
+    /// Fill in empty config values with sensible defaults for development.
+    ///
+    /// - JWT secret: generate random 32-byte hex if empty
+    /// - SQLite data/ directory: create if it doesn't exist
+    /// - LLM api_key: warn if empty (degraded mode, non-blocking)
+    pub fn ensure_defaults(&mut self) -> anyhow::Result<()> {
+        if self.jwt.rsa_private_key_pem.is_empty() {
+            let random_bytes: [u8; 32] = rand::random();
+            let hex_secret: String = random_bytes.iter().map(|b| format!("{b:02x}")).collect();
+            tracing::warn!(
+                "JWT secret (rsa_private_key_pem) is empty — generated random secret for development. \
+                 Set a fixed value in production via environment variable APP_JWT__RSA_PRIVATE_KEY_PEM."
+            );
+            self.jwt.rsa_private_key_pem = hex_secret;
+        }
+
+        if self.jwt.rsa_public_key_pem.is_empty() {
+            self.jwt.rsa_public_key_pem = self.jwt.rsa_private_key_pem.clone();
+        }
+
+        if let Some(data_dir) = self.extract_sqlite_data_dir() {
+            if !data_dir.exists() {
+                tracing::warn!("SQLite data directory {:?} does not exist — creating it.", data_dir);
+                std::fs::create_dir_all(&data_dir)?;
+            }
+        }
+
+        if self.llm.api_key.as_ref().is_none_or(|k| k.is_empty()) {
+            tracing::warn!(
+                "LLM api_key is empty — AI features will be degraded. \
+                 Set APP_LLM__API_KEY to enable."
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Extract the directory path from a `sqlite://./data/foo.db?mode=rwc` URL.
+    fn extract_sqlite_data_dir(&self) -> Option<std::path::PathBuf> {
+        let url = &self.database.url;
+        let path_part = url.strip_prefix("sqlite://")?;
+        let path_part = path_part.split('?').next()?;
+        let path = std::path::Path::new(path_part);
+        path.parent().filter(|p| !p.as_os_str().is_empty()).map(std::path::PathBuf::from)
+    }
 }
