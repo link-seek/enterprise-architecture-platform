@@ -15,7 +15,8 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let cfg = config::Configuration::load()?;
+    let mut cfg = config::Configuration::load()?;
+    cfg.ensure_defaults()?;
     let state = state::AppState::new(cfg).await?;
 
     let graphql_schema = graphql::build_graphql_schema(&state.db).await?;

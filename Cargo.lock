@@ -3578,6 +3578,7 @@ dependencies = [
  "jsonwebtoken",
  "migration",
  "moka",
+ "rand 0.8.6",
  "sea-orm",
  "sea-orm-migration",
  "seaography",
