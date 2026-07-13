@@ -37,5 +37,6 @@ utoipa-swagger-ui.workspace = true
 utoipa-axum.workspace = true
 moka.workspace = true
 jsonwebtoken.workspace = true
+argon2.workspace = true
 rand.workspace = true
 futures-util = "0.3"
