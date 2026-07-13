@@ -1,0 +1,38 @@
+services:
+  frontend:
+    build:
+      context: ../eap-frontend
+      args:
+        VITE_API_URL: ""
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  backend:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  litestream:
+    image: litestream/litestream:latest
+    command: replicate
+    volumes:
+      - ./data:/data
+      - ./litestream.yml:/etc/litestream.yml
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
