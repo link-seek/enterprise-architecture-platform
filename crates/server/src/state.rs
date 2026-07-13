@@ -19,6 +19,7 @@ impl AppState {
 
         // Auto-run migrations on startup
         migration::Migrator::up(&db, None).await?;
+        tracing::info!("Database migrations completed successfully");
 
         let cache = Cache::builder()
             .time_to_live(std::time::Duration::from_secs(300))
