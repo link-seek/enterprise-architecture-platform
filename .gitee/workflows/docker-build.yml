@@ -1,0 +1,31 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set tag
+        id: tag
+        run: echo "tag=$(git rev-parse --short=8 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build Docker image
+        run: docker build -t swr.cn-east-3.myhuaweicloud.com/enterprise-architecture/server:${{ steps.tag.outputs.tag }} -t swr.cn-east-3.myhuaweicloud.com/enterprise-architecture/server:latest .
+
+      - name: Login to SWR
+        env:
+          SWR_USER: ${{ secrets.SWR_USER }}
+          SWR_PASS: ${{ secrets.SWR_PASS }}
+        run: docker login -u "$SWR_USER" -p "$SWR_PASS" swr.cn-east-3.myhuaweicloud.com
+
+      - name: Push to SWR
+        run: |
+          docker push swr.cn-east-3.myhuaweicloud.com/enterprise-architecture/server:${{ steps.tag.outputs.tag }}
+          docker push swr.cn-east-3.myhuaweicloud.com/enterprise-architecture/server:latest
