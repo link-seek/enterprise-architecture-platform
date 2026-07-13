@@ -27,8 +27,11 @@ impl AppState {
         migration::Migrator::up(&db, None).await?;
         tracing::info!("Database migrations completed successfully");
 
-        // Seed admin test account
-        seed_admin(&db).await?;
+        // Seed admin test account (only in non-production environments)
+        let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
+        if app_env == "local" || app_env == "dev" {
+            seed_admin(&db).await?;
+        }
 
         let cache = Cache::builder()
             .time_to_live(std::time::Duration::from_secs(300))
@@ -43,21 +46,25 @@ impl AppState {
 }
 
 async fn seed_admin(db: &DatabaseConnection) -> anyhow::Result<()> {
+    let email = std::env::var("APP_SEED_ADMIN_EMAIL").unwrap_or_else(|_| "admin@test.com".to_string());
+    let password = std::env::var("APP_SEED_ADMIN_PASSWORD").unwrap_or_else(|_| "admin123456".to_string());
+    let name = std::env::var("APP_SEED_ADMIN_NAME").unwrap_or_else(|_| "Admin".to_string());
+
     let repo = SeaOrmUserRepo::new(db.clone());
-    if repo.find_by_email("admin@test.com").await?.is_none() {
+    if repo.find_by_email(&email).await?.is_none() {
         let salt = SaltString::generate(&mut OsRng);
         let hash = Argon2::default()
-            .hash_password("admin123456".as_bytes(), &salt)
+            .hash_password(password.as_bytes(), &salt)
             .map_err(|e| anyhow::anyhow!("password hash error: {e}"))?
             .to_string();
         let user = User::new(
-            "admin@test.com".into(),
-            "Admin".into(),
+            email.clone(),
+            name,
             hash,
             UserRole::Admin,
         );
         repo.save(&user).await?;
-        tracing::info!("Seeded admin user: admin@test.com / admin123456");
+        tracing::info!("Seeded admin user: {} (password set from config)", email);
     }
     Ok(())
 }
