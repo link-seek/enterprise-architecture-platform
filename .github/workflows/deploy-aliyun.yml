@@ -1,14 +1,14 @@
-name: Build and Push (ACR + OSS)
+name: Build and Push (ACR + ECS)
 
 # 两段式流水线:
 # 阶段1 GitHub Actions:
 #   后端 build → push ACR → 触发阿里云云效 Flow (SSH ECS pull+restart)
-#   前端 build → upload OSS (CDN www→OSS 私有回源)
+#   前端 build → scp ECS (CDN www→ECS:80) + upload OSS (备份)
 # 阶段2 阿里云云效 Flow (pipelineId=5143756):
 #   SSH ECS → podman pull ACR → restart → health check
 #
 # 访问:
-#   www.xieyucheng.top → CDN → OSS (私有回源) → 前端
+#   www.xieyucheng.top → CDN → ECS:80 (python http.server) → 前端
 #   api.xieyucheng.top → CDN → ECS:8080 → 后端
 
 on:
@@ -52,7 +52,7 @@ jobs:
             --pipelineId 5143756
         continue-on-error: true
 
-  # ==================== 前端: Build → Upload OSS (CDN 私有回源) ====================
+  # ==================== 前端: Build → SCP ECS + Upload OSS ====================
   build-frontend:
     runs-on: ubuntu-latest
     steps:
@@ -73,15 +73,26 @@ jobs:
           VITE_API_URL: https://api.xieyucheng.top/api
         run: npm run build
 
+      - name: Deploy to ECS via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.ECS_HOST }}
+          username: root
+          key: ${{ secrets.ECS_SSH_KEY }}
+          source: "frontend/dist/*"
+          target: "/opt/eap/frontend"
+          strip_components: 2
+
       - name: Install ossutil
         run: |
           curl -L -o ossutil https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64
           chmod +x ossutil && sudo mv ossutil /usr/local/bin/ossutil
 
-      - name: Sync to OSS
+      - name: Sync to OSS (backup)
         run: |
           ossutil config \
             -e "oss-${{ env.OSS_REGION }}.aliyuncs.com" \
             -i "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" \
             -k "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
           ossutil cp -rf frontend/dist/ "oss://${{ env.OSS_BUCKET }}/"
+        continue-on-error: true
