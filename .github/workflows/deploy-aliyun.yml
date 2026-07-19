@@ -37,8 +37,10 @@ jobs:
 
       - name: Trigger Aliyun Flow pipeline
         run: |
-          pip install aliyun-python-sdk-core aliyun-python-sdk-devops
-          aliyun devops StartPipelineRun \
+          curl -sL -o aliyun https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64
+          chmod +x aliyun
+          ./aliyun configure set --mode AK --access-key-id "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" --access-key-secret "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}" --region cn-hangzhou
+          ./aliyun devops StartPipelineRun \
             --organizationId 68c5519cf9c52e7d8c25f677 \
             --pipelineId 5143756
         continue-on-error: true
