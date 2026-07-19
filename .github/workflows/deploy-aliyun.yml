@@ -34,10 +34,11 @@ jobs:
         with:
           context: ./backend
           push: true
-          provenance: false
           tags: |
             ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:latest
             ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:cache
+          cache-to: type=registry,ref=${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:cache,mode=max
 
       - name: Deploy to ECS via SSH
         uses: appleboy/ssh-action@v1.0.0
@@ -103,10 +104,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         working-directory: frontend
-        run: npm install
+        run: npm ci
 
       - name: Build frontend
         working-directory: frontend
