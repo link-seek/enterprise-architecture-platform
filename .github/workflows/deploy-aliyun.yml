@@ -1,0 +1,150 @@
+name: Deploy to Aliyun (ACR + ECS + OSS)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  ACR_REGISTRY: crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com
+  ACR_NAMESPACE: eap-app
+  ECS_HOST: 120.77.76.20
+  OSS_REGION: cn-shenzhen
+  OSS_BUCKET: eap-frontend-xyc
+
+jobs:
+  # ==================== 后端: Build → ACR → ECS ====================
+  deploy-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:latest
+            ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:cache
+          cache-to: type=registry,ref=${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:cache,mode=max
+
+      - name: Deploy to ECS via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ env.ECS_HOST }}
+          username: root
+          key: ${{ secrets.ECS_SSH_KEY }}
+          script: |
+            export ACR_USERNAME='${{ secrets.ACR_USERNAME }}'
+            export ACR_PASSWORD='${{ secrets.ACR_PASSWORD }}'
+            bash -s << 'DEPLOY_EOF'
+            set -euo pipefail
+            ACR_REGISTRY="crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com"
+            ACR_NAMESPACE="eap-app"
+            FULL_IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/backend:latest"
+            CONTAINER_NAME="eap-backend"
+
+            echo "=== Deploy Backend to ECS ==="
+            echo "[1/5] Login ACR..."
+            echo "${ACR_PASSWORD}" | podman login -u "${ACR_USERNAME}" --password-stdin "${ACR_REGISTRY}"
+
+            echo "[2/5] Pull image..."
+            podman pull "${FULL_IMAGE}"
+
+            echo "[3/5] Stop old container..."
+            if podman ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+              podman stop "${CONTAINER_NAME}" 2>/dev/null || true
+              podman rm "${CONTAINER_NAME}" 2>/dev/null || true
+            fi
+
+            echo "[4/5] Start new container..."
+            mkdir -p /opt/eap/data
+            podman run -d \
+              --name "${CONTAINER_NAME}" \
+              --restart=always \
+              -p 8080:8080 \
+              -v /opt/eap/data:/app/data \
+              -e RUST_LOG=info \
+              "${FULL_IMAGE}"
+
+            echo "[5/5] Health check..."
+            sleep 3
+            for i in $(seq 1 10); do
+              if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
+                echo "✅ Backend healthy!"
+                exit 0
+              fi
+              echo "  Waiting... (${i}/10)"
+              sleep 2
+            done
+            echo "❌ Health check failed!"
+            podman logs "${CONTAINER_NAME}" --tail 20
+            exit 1
+            DEPLOY_EOF
+
+  # ==================== 前端: Build → OSS ====================
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_API_URL: https://api.xieyucheng.top/api
+        run: npm run build
+
+      - name: Install ossutil
+        run: |
+          curl -L -o ossutil https://gosspublic.alicdn.com/ossutil/v2/ossutil-2.0.3-beta.09261200-linux-amd64
+          chmod +x ossutil
+          sudo mv ossutil /usr/local/bin/ossutil
+
+      - name: Sync to OSS
+        run: |
+          ossutil config \
+            --access-key-id "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" \
+            --access-key-secret "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}" \
+            --region "${{ env.OSS_REGION }}"
+
+          # 上传前端文件到 OSS（删除旧文件，上传新文件）
+          ossutil cp -rf frontend/dist/ "oss://${{ env.OSS_BUCKET }}/" \
+            --include "*" \
+            --meta "Cache-Control:public, max-age=31536000" \
+            --exclude "index.html"
+
+          # index.html 不缓存
+          ossutil cp -f frontend/dist/index.html "oss://${{ env.OSS_BUCKET }}/index.html" \
+            --meta "Cache-Control:no-cache"
+
+      - name: Refresh CDN cache
+        run: |
+          # 刷新 CDN 缓存（需要 ALIYUN_ACCESS_KEY_ID/SECRET）
+          aliyun cdn RefreshObjectCaches \
+            --ObjectPath "https://www.xieyucheng.top/" \
+            --ObjectType Directory \
+            --RegionId cn-shenzhen
+        continue-on-error: true
