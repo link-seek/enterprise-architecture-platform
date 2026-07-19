@@ -67,15 +67,8 @@ jobs:
           ENDPOINT="oss-${{ env.OSS_REGION }}.aliyuncs.com"
           ossutil config -e "${ENDPOINT}" -i "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" -k "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
 
-          # 上传静态资源（长缓存）
-          ossutil cp -rf frontend/dist/ "oss://${{ env.OSS_BUCKET }}/" \
-            --include "*" \
-            --exclude "index.html" \
-            --header "Cache-Control:public, max-age=31536000"
-
-          # index.html 不缓存
-          ossutil cp -f frontend/dist/index.html "oss://${{ env.OSS_BUCKET }}/index.html" \
-            --header "Cache-Control:no-cache"
+          # 上传所有前端文件到 OSS
+          ossutil cp -rf frontend/dist/ "oss://${{ env.OSS_BUCKET }}/"
 
       - name: Refresh CDN cache
         run: |
