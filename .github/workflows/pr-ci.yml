@@ -51,27 +51,52 @@ jobs:
         run: |
           echo "Waiting for backend..."
           for i in $(seq 1 60); do
-            curl -sf http://localhost:8080/health && break
+            if curl -sf http://localhost:8080/health 2>/dev/null; then
+              echo "Backend healthy"
+              break
+            fi
             sleep 2
           done
           echo "Waiting for frontend..."
           for i in $(seq 1 30); do
-            curl -sf http://localhost:80/health && break
+            if curl -sf http://localhost:80/health 2>/dev/null; then
+              echo "Frontend healthy"
+              break
+            fi
             sleep 2
           done
 
       - name: Integration tests
         run: |
+          sleep 3
+          
           echo "=== Test 1: Backend health ==="
-          curl -sf http://localhost:8080/health
-          echo ""
+          for i in $(seq 1 5); do
+            RESPONSE=$(curl -s -w "\n%{http_code}" http://localhost:8080/health 2>/dev/null) && break
+            echo "Retry $i..."
+            sleep 2
+          done
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          echo "Backend health response: $RESPONSE"
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "FAIL: Backend health returned $HTTP_CODE"
+            docker compose -f docker-compose.ci.yml logs backend
+            exit 1
+          fi
+          echo "Backend OK"
 
           echo "=== Test 2: Frontend serves HTML ==="
-          curl -sf http://localhost:80/ | grep -q "html"
+          curl -s http://localhost:80/ | grep -qi "html"
           echo "Frontend OK"
 
           echo "=== Test 3: API proxy works ==="
-          curl -sf http://localhost:80/api/ -o /dev/null -w "%{http_code}" | grep -qv "502\|503\|504"
+          PROXY_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:80/api/ 2>/dev/null || echo "000")
+          echo "API proxy returned: $PROXY_CODE"
+          if echo "$PROXY_CODE" | grep -qE "50[234]|000"; then
+            echo "FAIL: API proxy returned $PROXY_CODE"
+            docker compose -f docker-compose.ci.yml logs frontend
+            exit 1
+          fi
           echo "API proxy OK"
 
       - name: Cleanup
