@@ -56,28 +56,26 @@ jobs:
           VITE_API_URL: https://api.xieyucheng.top/api
         run: npm run build
 
-      - name: Install ossutil v2
+      - name: Install ossutil v1
         run: |
-          curl -L -o ossutil https://gosspublic.alicdn.com/ossutil/v2/ossutil-2.0.3-beta.09261200-linux-amd64
+          curl -L -o ossutil https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64
           chmod +x ossutil
           sudo mv ossutil /usr/local/bin/ossutil
 
       - name: Sync to OSS
         run: |
-          ossutil config \
-            --access-key-id "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" \
-            --access-key-secret "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}" \
-            --region "${{ env.OSS_REGION }}"
+          ENDPOINT="oss-${{ env.OSS_REGION }}.aliyuncs.com"
+          ossutil config -e "${ENDPOINT}" -i "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" -k "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
 
           # 上传静态资源（长缓存）
           ossutil cp -rf frontend/dist/ "oss://${{ env.OSS_BUCKET }}/" \
             --include "*" \
-            --meta "Cache-Control:public, max-age=31536000" \
-            --exclude "index.html"
+            --exclude "index.html" \
+            --header "Cache-Control:public, max-age=31536000"
 
           # index.html 不缓存
           ossutil cp -f frontend/dist/index.html "oss://${{ env.OSS_BUCKET }}/index.html" \
-            --meta "Cache-Control:no-cache"
+            --header "Cache-Control:no-cache"
 
       - name: Refresh CDN cache
         run: |
