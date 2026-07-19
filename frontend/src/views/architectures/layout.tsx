@@ -75,8 +75,13 @@ export default function ArchLayout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto">
-        <Outlet />
+      <main className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 overflow-auto">
+          <Outlet />
+        </div>
+        <footer className="border-t px-6 py-3 text-center text-xs text-muted-foreground">
+          © 2025 企业架构平台
+        </footer>
       </main>
     </div>
   )
