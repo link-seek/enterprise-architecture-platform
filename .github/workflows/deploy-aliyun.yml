@@ -1,7 +1,9 @@
-name: Build and Push (ACR + OSS)
+name: Build and Push (ACR + ECS)
 
-# 两段式流水线 - 阶段1: GitHub Actions 只负责 build + push
-# 阶段2: ECS 上 systemd timer (eap-autodeploy) 自动轮询 ACR 拉取新镜像部署
+# 两段式流水线:
+# 阶段1 GitHub Actions: build 后端→push ACR, build 前端→scp ECS
+# 阶段2 ECS systemd timer: 自动轮询 ACR 拉取新镜像部署后端
+# 前端由 ECS 上 python http.server (port 80) serve, CDN www→ECS:80
 
 on:
   push:
@@ -11,8 +13,6 @@ on:
 env:
   ACR_REGISTRY: crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com
   ACR_NAMESPACE: eap-app
-  OSS_REGION: cn-shenzhen
-  OSS_BUCKET: eap-frontend-xyc
 
 jobs:
   # ==================== 后端: Build → Push ACR ====================
@@ -35,7 +35,7 @@ jobs:
           docker push "${IMAGE}:latest"
           docker push "${IMAGE}:${{ github.sha }}"
 
-  # ==================== 前端: Build → Push OSS ====================
+  # ==================== 前端: Build → SCP to ECS ====================
   build-frontend:
     runs-on: ubuntu-latest
     steps:
@@ -56,25 +56,12 @@ jobs:
           VITE_API_URL: https://api.xieyucheng.top/api
         run: npm run build
 
-      - name: Install ossutil v1
-        run: |
-          curl -L -o ossutil https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64
-          chmod +x ossutil
-          sudo mv ossutil /usr/local/bin/ossutil
-
-      - name: Sync to OSS
-        run: |
-          ENDPOINT="oss-${{ env.OSS_REGION }}.aliyuncs.com"
-          ossutil config -e "${ENDPOINT}" -i "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" -k "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
-
-          # 上传所有前端文件到 OSS
-          ossutil cp -rf frontend/dist/ "oss://${{ env.OSS_BUCKET }}/"
-
-      - name: Refresh CDN cache
-        run: |
-          pip install aliyun-python-sdk-cdn aliyun-python-sdk-core
-          aliyun cdn RefreshObjectCaches \
-            --ObjectPath "https://www.xieyucheng.top/" \
-            --ObjectType Directory \
-            --RegionId cn-shenzhen
-        continue-on-error: true
+      - name: Deploy to ECS via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.ECS_HOST }}
+          username: root
+          key: ${{ secrets.ECS_SSH_KEY }}
+          source: "frontend/dist/*"
+          target: "/opt/eap/frontend"
+          strip_components: 2
