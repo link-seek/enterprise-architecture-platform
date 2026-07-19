@@ -12,7 +12,6 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
       - uses: OpenHands/extensions/plugins/pr-review@main
         with:
