@@ -57,6 +57,9 @@ jobs:
             podman pull "${FULL_IMAGE}"
 
             echo "[3/5] Stop old container..."
+            # Kill any process on port 8080
+            fuser -k 8080/tcp 2>/dev/null || true
+            sleep 1
             if podman ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
               podman stop "${CONTAINER_NAME}" 2>/dev/null || true
               podman rm "${CONTAINER_NAME}" 2>/dev/null || true
