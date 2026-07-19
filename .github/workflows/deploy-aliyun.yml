@@ -1,4 +1,7 @@
-name: Deploy to Aliyun (ACR + ECS + OSS)
+name: Build and Push (ACR + OSS)
+
+# 两段式流水线 - 阶段1: GitHub Actions 只负责 build + push
+# 阶段2: ECS 上 systemd timer (eap-autodeploy) 自动轮询 ACR 拉取新镜像部署
 
 on:
   push:
@@ -8,13 +11,12 @@ on:
 env:
   ACR_REGISTRY: crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com
   ACR_NAMESPACE: eap-app
-  ECS_HOST: 120.77.76.20
   OSS_REGION: cn-shenzhen
   OSS_BUCKET: eap-frontend-xyc
 
 jobs:
-  # ==================== 后端: Build → ACR → ECS ====================
-  deploy-backend:
+  # ==================== 后端: Build → Push ACR ====================
+  build-backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,65 +35,8 @@ jobs:
           docker push "${IMAGE}:latest"
           docker push "${IMAGE}:${{ github.sha }}"
 
-      - name: Deploy to ECS via SSH
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ env.ECS_HOST }}
-          username: root
-          key: ${{ secrets.ECS_SSH_KEY }}
-          script: |
-            export ACR_USERNAME='${{ secrets.ACR_USERNAME }}'
-            export ACR_PASSWORD='${{ secrets.ACR_PASSWORD }}'
-            bash -s << 'DEPLOY_EOF'
-            set -euo pipefail
-            ACR_REGISTRY="crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com"
-            ACR_NAMESPACE="eap-app"
-            FULL_IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/backend:latest"
-            CONTAINER_NAME="eap-backend"
-
-            echo "=== Deploy Backend to ECS ==="
-            echo "[1/5] Login ACR..."
-            echo "${ACR_PASSWORD}" | podman login -u "${ACR_USERNAME}" --password-stdin "${ACR_REGISTRY}"
-
-            echo "[2/5] Pull image..."
-            podman pull "${FULL_IMAGE}"
-
-            echo "[3/5] Stop old container..."
-            # Kill any process on port 8080
-            fuser -k 8080/tcp 2>/dev/null || true
-            sleep 1
-            if podman ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-              podman stop "${CONTAINER_NAME}" 2>/dev/null || true
-              podman rm "${CONTAINER_NAME}" 2>/dev/null || true
-            fi
-
-            echo "[4/5] Start new container..."
-            mkdir -p /opt/eap/data
-            podman run -d \
-              --name "${CONTAINER_NAME}" \
-              --restart=always \
-              -p 8080:8080 \
-              -v /opt/eap/data:/app/data \
-              -e RUST_LOG=info \
-              "${FULL_IMAGE}"
-
-            echo "[5/5] Health check..."
-            sleep 3
-            for i in $(seq 1 10); do
-              if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
-                echo "✅ Backend healthy!"
-                exit 0
-              fi
-              echo "  Waiting... (${i}/10)"
-              sleep 2
-            done
-            echo "❌ Health check failed!"
-            podman logs "${CONTAINER_NAME}" --tail 20
-            exit 1
-            DEPLOY_EOF
-
-  # ==================== 前端: Build → OSS ====================
-  deploy-frontend:
+  # ==================== 前端: Build → Push OSS ====================
+  build-frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -111,7 +56,7 @@ jobs:
           VITE_API_URL: https://api.xieyucheng.top/api
         run: npm run build
 
-      - name: Install ossutil
+      - name: Install ossutil v2
         run: |
           curl -L -o ossutil https://gosspublic.alicdn.com/ossutil/v2/ossutil-2.0.3-beta.09261200-linux-amd64
           chmod +x ossutil
@@ -124,7 +69,7 @@ jobs:
             --access-key-secret "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}" \
             --region "${{ env.OSS_REGION }}"
 
-          # 上传前端文件到 OSS
+          # 上传静态资源（长缓存）
           ossutil cp -rf frontend/dist/ "oss://${{ env.OSS_BUCKET }}/" \
             --include "*" \
             --meta "Cache-Control:public, max-age=31536000" \
@@ -136,7 +81,7 @@ jobs:
 
       - name: Refresh CDN cache
         run: |
-          # 刷新 CDN 缓存
+          pip install aliyun-python-sdk-cdn aliyun-python-sdk-core
           aliyun cdn RefreshObjectCaches \
             --ObjectPath "https://www.xieyucheng.top/" \
             --ObjectType Directory \
