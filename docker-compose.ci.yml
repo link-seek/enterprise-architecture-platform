@@ -6,6 +6,8 @@ services:
     environment:
       - RUST_LOG=info
       - APP_DATABASE__URL=sqlite://./data/platform.db?mode=rwc
+      - APP_SERVER__HOST=0.0.0.0
+      - APP_SERVER__PORT=8080
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
       interval: 2s
