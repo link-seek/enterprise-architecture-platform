@@ -1,4 +1,5 @@
 FROM rust:1.94-slim AS builder
+RUN apt-get update && apt-get install -y curl pkg-config && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY . .
 RUN cargo build --release -p server
