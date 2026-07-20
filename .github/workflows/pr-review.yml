@@ -3,8 +3,6 @@ name: PR Review
 on:
   pull_request:
     types: [opened, synchronize, labeled]
-  pull_request_review:
-    types: [submitted]
 
 permissions:
   contents: read
@@ -14,7 +12,7 @@ permissions:
 
 jobs:
   review-ai:
-    if: github.event.action != 'labeled'
+    if: github.event.action == 'opened' || github.event.action == 'synchronize'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +25,7 @@ jobs:
           llm-model: ${{ secrets.LLM_MODEL || 'openai/glm-5.2' }}
           llm-base-url: ${{ secrets.LLM_BASE_URL || 'https://api.modelarts-maas.com/v2' }}
           llm-api-key: ${{ secrets.LLM_API_KEY }}
-          github-token: ${{ secrets.PAT_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check AI Review Verdict
         env:
@@ -36,7 +34,7 @@ jobs:
         run: |
           sleep 5
           VERDICT=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
-            --jq '[.[] | select(.user.login | test("openhands|all-hands|bot"))] | sort_by(.submitted_at) | last | .state' 2>/dev/null || echo "UNKNOWN")
+            --jq '[.[] | select(.user.login | test("github-actions|bot"))] | sort_by(.submitted_at) | last | .state' 2>/dev/null || echo "UNKNOWN")
 
           echo "Latest AI review verdict: $VERDICT"
 
