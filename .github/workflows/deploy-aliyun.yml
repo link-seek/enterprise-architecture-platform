@@ -42,9 +42,11 @@ jobs:
       - name: Build and push backend image
         run: |
           IMAGE="${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend"
-          docker build -t "${IMAGE}:latest" -t "${IMAGE}:${{ github.sha }}" ./backend
+          TAG="$(date -u +%Y%m%d%H%M%S)-${{ github.sha }}"
+          docker build -t "${IMAGE}:latest" -t "${IMAGE}:${TAG}" ./backend
           docker push "${IMAGE}:latest"
-          docker push "${IMAGE}:${{ github.sha }}"
+          docker push "${IMAGE}:${TAG}"
+          echo "PUSHED_TAG=$TAG" >> $GITHUB_ENV
 
       - name: Trigger Aliyun Flow pipeline
         run: |
@@ -53,32 +55,26 @@ jobs:
 
       - name: Clean old ACR tags (keep latest 10)
         run: |
-          # ACR 个人版 registry v2 API: 列出所有 tag，获取 digest，按时间排序，删旧的
+          # ACR 个人版 registry v2 API: tag 格式为 YYYYMMDDHHMMSS-sha, 字母排序=时间排序
           REGISTRY="${{ env.ACR_REGISTRY }}"
           REPO="${{ env.ACR_NAMESPACE }}/backend"
           AUTH="${{ secrets.ACR_USERNAME }}:${{ secrets.ACR_PASSWORD }}"
 
-          # 获取所有 tag
-          TAGS=$(curl -s -u "$AUTH" "https://$REGISTRY/v2/$REPO/tags/list" | jq -r '.tags[]' | grep -v latest | sort)
-
-          # 获取每个 tag 的 digest 和创建时间，按时间倒序
-          TAG_INFO=""
-          for TAG in $TAGS; do
-            DIGEST=$(curl -s -I -u "$AUTH" -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-              "https://$REGISTRY/v2/$REPO/manifests/$TAG" | grep -i "Docker-Content-Digest" | awk '{print $2}' | tr -d '\r')
-            if [ -n "$DIGEST" ]; then
-              TAG_INFO="$TAG_INFO$TAG $DIGEST\n"
-            fi
-          done
+          # 获取所有 tag (排除 latest), 按时间戳前缀排序
+          TAGS=$(curl -s -u "$AUTH" "https://$REGISTRY/v2/$REPO/tags/list" | jq -r '.tags[]' | grep -v latest | sort -r)
 
           # 保留最新 10 个，删其余
-          COUNT=$(echo -e "$TAG_INFO" | grep -c . || true)
+          COUNT=$(echo "$TAGS" | grep -c . || true)
           echo "Current tags (excl latest): $COUNT"
           if [ "$COUNT" -gt 10 ]; then
-            OLD=$(echo -e "$TAG_INFO" | head -n $((COUNT - 10)))
-            echo "$OLD" | while read TAG DIGEST; do
-              echo "Deleting old ACR tag: $TAG (digest: $DIGEST)"
-              curl -s -X DELETE -u "$AUTH" "https://$REGISTRY/v2/$REPO/manifests/$DIGEST" || true
+            OLD=$(echo "$TAGS" | tail -n $((COUNT - 10)))
+            for TAG in $OLD; do
+              DIGEST=$(curl -s -I -u "$AUTH" -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+                "https://$REGISTRY/v2/$REPO/manifests/$TAG" | grep -i "Docker-Content-Digest" | awk '{print $2}' | tr -d '\r')
+              if [ -n "$DIGEST" ]; then
+                echo "Deleting old ACR tag: $TAG (digest: $DIGEST)"
+                curl -s -X DELETE -u "$AUTH" "https://$REGISTRY/v2/$REPO/manifests/$DIGEST" || true
+              fi
             done
           fi
 
