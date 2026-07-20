@@ -28,3 +28,17 @@ jobs:
           github-token: ${{ secrets.PAT_TOKEN }}
           issue-number: ${{ github.event.issue.number }}
           issue-type: issue
+
+      - name: Add auto-merge label to PR
+        if: success() && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          sleep 5
+          PR_NUMBER=$(gh pr list --head "agent/fix-issue-${{ github.event.issue.number }}" --json number -q '.[0].number' 2>/dev/null)
+          if [ -n "$PR_NUMBER" ]; then
+            gh pr edit $PR_NUMBER --add-label "auto-merge"
+            echo "Added auto-merge label to PR #$PR_NUMBER"
+          else
+            echo "No PR found on branch agent/fix-issue-${{ github.event.issue.number }}"
+          fi
