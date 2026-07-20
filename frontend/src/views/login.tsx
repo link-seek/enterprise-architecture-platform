@@ -27,7 +27,7 @@ export default function Login() {
     setError(null)
     try {
       await login(loginEmail, loginPassword)
-      navigate('/')
+      navigate('/architectures/value-streams')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed')
     } finally {
@@ -41,7 +41,7 @@ export default function Login() {
     setError(null)
     try {
       await register(regEmail, regName, regPassword)
-      navigate('/')
+      navigate('/architectures/value-streams')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed')
     } finally {
