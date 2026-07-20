@@ -39,6 +39,7 @@ jobs:
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
 
           REVIEW_BODY=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
+            --paginate \
             --jq '[.[] | select(.user.login == "github-actions[bot]" and (.state == "CHANGES_REQUESTED" or .state == "COMMENTED"))] | sort_by(.submitted_at) | last | .body')
           echo "review_body<<REVIEW_EOF" >> $GITHUB_OUTPUT
           echo "$REVIEW_BODY" >> $GITHUB_OUTPUT
@@ -46,7 +47,7 @@ jobs:
 
           REVIEW_COUNT=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
             --paginate \
-            --jq '[.[] | select(.user.login == "github-actions[bot]" and .state == "CHANGES_REQUESTED")] | length')
+            --jq '[.[] | select(.user.login == "github-actions[bot]" and (.state == "CHANGES_REQUESTED" or .state == "COMMENTED"))] | length')
           echo "iteration=$REVIEW_COUNT" >> $GITHUB_OUTPUT
 
           if [ "$REVIEW_COUNT" -gt 3 ]; then
