@@ -1,8 +1,9 @@
 name: PR Auto-Fix
 
 on:
-  pull_request_review:
-    types: [submitted]
+  workflow_run:
+    workflows: ["PR Review"]
+    types: [completed]
 
 permissions:
   contents: write
@@ -11,22 +12,44 @@ permissions:
 
 jobs:
   auto-fix:
-    if: |
-      github.event.review.state == 'changes_requested' &&
-      github.event.review.user.login == 'github-actions[bot]'
+    if: github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
     steps:
-      - name: Check max iterations
-        id: check-iter
+      - name: Get PR info
+        id: pr-info
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
+          FAILED_JOBS=$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs \
+            --jq '.jobs[] | select(.conclusion == "failure") | .name')
+          if ! echo "$FAILED_JOBS" | grep -q "review-ai"; then
+            echo "review-ai did not fail (failed: $FAILED_JOBS), skipping"
+            exit 0
+          fi
+
+          PR_NUMBER=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open" \
+            --paginate \
+            --jq ".[] | select(.head.sha == \"$HEAD_SHA\") | .number")
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No open PR found for SHA $HEAD_SHA"
+            exit 0
+          fi
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+          REVIEW_BODY=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
+            --paginate \
+            --jq '[.[] | select(.user.login == "github-actions[bot]" and (.state == "CHANGES_REQUESTED" or .state == "COMMENTED"))] | sort_by(.submitted_at) | last | .body')
+          echo "review_body<<REVIEW_EOF" >> $GITHUB_OUTPUT
+          echo "$REVIEW_BODY" >> $GITHUB_OUTPUT
+          echo "REVIEW_EOF" >> $GITHUB_OUTPUT
+
           REVIEW_COUNT=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
             --paginate \
-            --jq '[.[] | select(.user.login == "github-actions[bot]" and .state == "CHANGES_REQUESTED")] | length')
-          echo "CHANGES_REQUESTED count: $REVIEW_COUNT"
-          echo "count=$REVIEW_COUNT" >> $GITHUB_OUTPUT
+            --jq '[.[] | select(.user.login == "github-actions[bot]" and (.state == "CHANGES_REQUESTED" or .state == "COMMENTED"))] | length')
+          echo "iteration=$REVIEW_COUNT" >> $GITHUB_OUTPUT
+
           if [ "$REVIEW_COUNT" -gt 3 ]; then
             echo "::error::Max auto-fix iterations (3) exceeded"
             gh api repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments \
@@ -35,13 +58,15 @@ jobs:
           fi
 
       - uses: actions/checkout@v4
+        if: steps.pr-info.outputs.pr_number
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
           persist-credentials: true
           path: target-repo
 
       - name: Checkout issue-resolver scripts
+        if: steps.pr-info.outputs.pr_number
         uses: actions/checkout@v4
         with:
           repository: xieyucheng123/issue-resolver
@@ -50,22 +75,26 @@ jobs:
           token: ${{ secrets.PAT_TOKEN }}
 
       - name: Set up Python
+        if: steps.pr-info.outputs.pr_number
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Install uv
+        if: steps.pr-info.outputs.pr_number
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
 
       - name: Configure Git
+        if: steps.pr-info.outputs.pr_number
         shell: bash
         run: |
           git config --global user.name "ai-bot"
           git config --global user.email "bot@ai-resolver.dev"
 
       - name: Run Auto-Fix
+        if: steps.pr-info.outputs.pr_number
         shell: bash
         working-directory: target-repo
         env:
@@ -73,17 +102,17 @@ jobs:
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL || 'https://api.modelarts-maas.com/v2' }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
           REPO_NAME: ${{ github.repository }}
-          REVIEW_BODY: ${{ github.event.review.body }}
-          ITERATION: ${{ steps.check-iter.outputs.count }}
+          REVIEW_BODY: ${{ steps.pr-info.outputs.review_body }}
+          ITERATION: ${{ steps.pr-info.outputs.iteration }}
         run: |
           uv run --no-project --with openhands-sdk --with openhands-tools \
             python ../issue-resolver-scripts/scripts/auto_fix_pr.py
 
       - name: Upload logs
+        if: always() && steps.pr-info.outputs.pr_number
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: auto-fix-logs
           path: target-repo/*.log
