@@ -48,11 +48,11 @@ jobs:
 
       - name: Trigger Aliyun Flow pipeline
         run: |
-          npm install -g @aliyunapi/cli
-          aliyun devops StartPipelineRun \
-            --organizationId 68c5519cf9c52e7d8c25f677 \
-            --pipelineId 5143756 \
-            --yunxiao-access-token "${{ secrets.YUNXIAO_ACCESS_TOKEN }}"
+          curl -s -X POST \
+            "https://devops.cn-hangzhou.aliyuncs.com/organization/68c5519cf9c52e7d8c25f677/pipelines/5143756/run" \
+            -H "yunxiao-access-token: ${{ secrets.YUNXIAO_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{}'
 
   # ==================== 前端: Build → Upload OSS → Object 公共读 ====================
   build-frontend:
