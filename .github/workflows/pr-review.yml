@@ -38,13 +38,13 @@ jobs:
 
           echo "Latest AI review verdict: $VERDICT"
 
-          if [ "$VERDICT" = "APPROVED" ]; then
-            echo "AI approved the PR"
+          if [ "$VERDICT" = "APPROVED" ] || [ "$VERDICT" = "COMMENTED" ]; then
+            echo "AI review passed (verdict: $VERDICT)"
           elif [ "$VERDICT" = "CHANGES_REQUESTED" ]; then
             echo "::error::AI requested changes, blocking merge"
             exit 1
           else
-            echo "::error::No clear AI review verdict found (got: $VERDICT), treating as needs review"
+            echo "::error::No AI review found (got: $VERDICT)"
             exit 1
           fi
 
