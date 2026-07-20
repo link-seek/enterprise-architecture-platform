@@ -1,9 +1,0 @@
-[Unit]
-Description=EAP Backend Auto-Deploy (pull ACR + restart)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/opt/eap/eap-autodeploy.sh
-TimeoutStartSec=120

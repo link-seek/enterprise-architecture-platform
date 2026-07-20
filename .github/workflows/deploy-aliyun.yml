@@ -5,7 +5,10 @@ name: Build and Push (ACR + OSS)
 #   后端 build → push ACR → 触发阿里云云效 Flow (SSH ECS pull+restart)
 #   前端 build → upload OSS → object 设公共读 (CDN www→OSS 静态网站托管)
 # 阶段2 阿里云云效 Flow (pipelineId=5143756):
-#   SSH ECS → podman pull ACR → restart → health check
+#   SSH ECS → bash /opt/eap/eap-autodeploy.sh → podman pull ACR → restart → health check
+#
+# 部署触发: 云效 Flow 为唯一部署触发源 (已移除 ECS systemd timer 轮询)
+# Flow 触发使用云效个人访问令牌 (YUNXIAO_ACCESS_TOKEN)
 #
 # 访问:
 #   www.xieyucheng.top → CDN → OSS (object 公共读 + 静态网站托管) → 前端
@@ -46,11 +49,10 @@ jobs:
       - name: Trigger Aliyun Flow pipeline
         run: |
           npm install -g @aliyunapi/cli
-          aliyun configure set --mode AK --access-key-id "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" --access-key-secret "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}" --region cn-hangzhou
           aliyun devops StartPipelineRun \
             --organizationId 68c5519cf9c52e7d8c25f677 \
-            --pipelineId 5143756
-        continue-on-error: true
+            --pipelineId 5143756 \
+            --yunxiao-access-token "${{ secrets.YUNXIAO_ACCESS_TOKEN }}"
 
   # ==================== 前端: Build → Upload OSS → Object 公共读 ====================
   build-frontend:
