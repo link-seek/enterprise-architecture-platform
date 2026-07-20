@@ -2,119 +2,85 @@ name: PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, labeled]
+  pull_request_review:
+    types: [submitted]
 
 permissions:
   contents: read
   pull-requests: write
   issues: write
+  checks: write
 
 jobs:
-  review:
+  review-ai:
+    if: github.event.action != 'labeled'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: AI Strict Review
+      - name: Run OpenHands Review
+        uses: OpenHands/extensions/plugins/pr-review@main
+        with:
+          llm-model: ${{ secrets.LLM_MODEL || 'openai/glm-5.2' }}
+          llm-base-url: ${{ secrets.LLM_BASE_URL || 'https://api.modelarts-maas.com/v2' }}
+          llm-api-key: ${{ secrets.LLM_API_KEY }}
+          github-token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Check AI Review Verdict
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_MODEL: ${{ secrets.LLM_MODEL || 'openai/glm-5.2' }}
-          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL || 'https://api.modelarts-maas.com/v2' }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          pip install openai -q
+          sleep 5
+          VERDICT=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
+            --jq '[.[] | select(.user.login | test("openhands|all-hands|bot"))] | sort_by(.submitted_at) | last | .state' 2>/dev/null || echo "UNKNOWN")
 
-          DIFF=$(gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" 2>/dev/null | head -5000)
+          echo "Latest AI review verdict: $VERDICT"
 
-          python3 << 'PYEOF'
-          import os, json, subprocess
-          from openai import OpenAI
+          if [ "$VERDICT" = "APPROVED" ]; then
+            echo "AI approved the PR"
+          elif [ "$VERDICT" = "CHANGES_REQUESTED" ]; then
+            echo "::error::AI requested changes, blocking merge"
+            exit 1
+          else
+            echo "::error::No clear AI review verdict found (got: $VERDICT), treating as needs review"
+            exit 1
+          fi
 
-          diff = os.environ.get('DIFF', '')
-          pr_number = os.environ['PR_NUMBER']
-          pr_title = os.environ['PR_TITLE']
-          pr_body = os.environ.get('PR_BODY', '')
-          head_sha = os.environ['HEAD_SHA']
-          api_key = os.environ['LLM_API_KEY']
-          model = os.environ['LLM_MODEL']
-          base_url = os.environ['LLM_BASE_URL']
+  review-db:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-          client = OpenAI(api_key=api_key, base_url=base_url)
+      - name: Check Database Changes
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          CHANGED_FILES=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files --jq '.[].filename' 2>/dev/null)
 
-          prompt = f"""You are a strict code reviewer. Review the following PR diff carefully.
+          DB_FILES=$(echo "$CHANGED_FILES" | grep -iE '(migration|\.sql$|schema|database|\.prisma$|alembic|diesel)' || true)
 
-PR Title: {pr_title}
-PR Description: {pr_body}
+          if [ -z "$DB_FILES" ]; then
+            echo "No database-related files changed, auto-approved"
+            exit 0
+          fi
 
-Diff:
-{diff}
+          echo "Database files changed:"
+          echo "$DB_FILES"
 
-Review criteria:
-1. Security: No hardcoded secrets, no SQL injection, no XSS vulnerabilities
-2. Logic: No obvious bugs, edge cases handled, error handling present
-3. Style: Consistent with existing code patterns, no dead code
-4. Tests: New code has appropriate test coverage
-5. Breaking changes: Clearly documented and justified
+          if echo "$PR_LABELS" | grep -q "db-approved"; then
+            echo "PR has db-approved label, proceeding"
+            exit 0
+          fi
 
-Respond in JSON format:
-{{
-  "verdict": "approve" or "request_changes",
-  "summary": "one line summary",
-  "issues": ["issue1", "issue2", ...]
-}}
-
-If ANY issue is found, verdict must be "request_changes".
-Only "approve" if the code is production-ready with zero issues."""
-
-          resp = client.chat.completions.create(
-              model=model,
-              messages=[{"role": "user", "content": prompt}],
-              temperature=0.1,
-          )
-
-          content = resp.choices[0].message.content.strip()
-          if content.startswith('```'):
-              content = content.split('```')[1]
-              if content.startswith('json'):
-                  content = content[4:]
-          content = content.strip()
-
-          result = json.loads(content)
-          verdict = result.get('verdict', 'request_changes')
-          summary = result.get('summary', '')
-          issues = result.get('issues', [])
-
-          print(f"Verdict: {verdict}")
-          print(f"Summary: {summary}")
-          for i, issue in enumerate(issues):
-              print(f"  Issue {i+1}: {issue}")
-
-          body = f"## AI Review: {verdict.upper()}\n\n{summary}\n"
-          if issues:
-              body += "\n### Issues found:\n"
-              for i, issue in enumerate(issues):
-                  body += f"{i+1}. {issue}\n"
-
-          event = 'APPROVE' if verdict == 'approve' else 'REQUEST_CHANGES'
-
-          subprocess.run([
-              'gh', 'api',
-              f'repos/{os.environ["GITHUB_REPOSITORY"]}/pulls/{pr_number}/reviews',
-              '--method', 'POST',
-              '-f', f'event={event}',
-              '-f', f'body={body}',
-              '-f', f'commit_id={head_sha}',
-          ], check=True)
-
-          if verdict != 'approve':
-              print("::error::AI review found issues, requesting changes")
-              exit(1)
-          else:
-              print("AI review approved the PR")
-          PYEOF
+          echo "::error::Database changes detected. Manual approval required."
+          echo "::error::Add 'db-approved' label to approve these changes:"
+          echo "$DB_FILES"
+          exit 1
