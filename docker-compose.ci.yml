@@ -10,10 +10,7 @@ services:
       - APP_SERVER__HOST=0.0.0.0
       - APP_SERVER__PORT=8080
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
+      test: ["NONE"]
 
   frontend:
     build: ./frontend
@@ -21,7 +18,7 @@ services:
       - "80:80"
     depends_on:
       backend:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost/health"]
       interval: 2s

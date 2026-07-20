@@ -8,7 +8,7 @@ name: Build and Push (ACR + OSS)
 #   SSH ECS → bash /opt/eap/eap-autodeploy.sh → podman pull ACR → restart → health check
 #
 # 部署触发: 云效 Flow 为唯一部署触发源 (已移除 ECS systemd timer 轮询)
-# Flow 触发使用云效个人访问令牌 (YUNXIAO_ACCESS_TOKEN)
+# Flow 触发使用 Webhook URL (FLOW_WEBHOOK_URL secret)
 #
 # 访问:
 #   www.xieyucheng.top → CDN → OSS (object 公共读 + 静态网站托管) → 前端
@@ -42,17 +42,41 @@ jobs:
       - name: Build and push backend image
         run: |
           IMAGE="${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend"
-          docker build -t "${IMAGE}:latest" -t "${IMAGE}:${{ github.sha }}" ./backend
+          TAG="$(date -u +%Y%m%d%H%M%S)-${{ github.sha }}"
+          docker build -t "${IMAGE}:latest" -t "${IMAGE}:${TAG}" ./backend
           docker push "${IMAGE}:latest"
-          docker push "${IMAGE}:${{ github.sha }}"
+          docker push "${IMAGE}:${TAG}"
+          echo "PUSHED_TAG=$TAG" >> $GITHUB_ENV
 
       - name: Trigger Aliyun Flow pipeline
         run: |
-          curl -s --fail -X POST \
-            "https://devops.cn-hangzhou.aliyuncs.com/organization/68c5519cf9c52e7d8c25f677/pipelines/5143756/run" \
-            -H "yunxiao-access-token: ${{ secrets.YUNXIAO_ACCESS_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d '{}'
+          curl -s --fail -H "Content-Type: application/json" -X POST -d '{}' \
+            "${{ secrets.FLOW_WEBHOOK_URL }}"
+
+      - name: Clean old ACR tags (keep latest 10)
+        run: |
+          # ACR 个人版 registry v2 API: tag 格式为 YYYYMMDDHHMMSS-sha, 字母排序=时间排序
+          REGISTRY="${{ env.ACR_REGISTRY }}"
+          REPO="${{ env.ACR_NAMESPACE }}/backend"
+          AUTH="${{ secrets.ACR_USERNAME }}:${{ secrets.ACR_PASSWORD }}"
+
+          # 获取所有 tag (排除 latest), 按时间戳前缀排序
+          TAGS=$(curl -s -u "$AUTH" "https://$REGISTRY/v2/$REPO/tags/list" | jq -r '.tags[]' | grep -v latest | sort -r)
+
+          # 保留最新 10 个，删其余
+          COUNT=$(echo "$TAGS" | grep -c . || true)
+          echo "Current tags (excl latest): $COUNT"
+          if [ "$COUNT" -gt 10 ]; then
+            OLD=$(echo "$TAGS" | tail -n $((COUNT - 10)))
+            for TAG in $OLD; do
+              DIGEST=$(curl -s -I -u "$AUTH" -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+                "https://$REGISTRY/v2/$REPO/manifests/$TAG" | grep -i "Docker-Content-Digest" | awk '{print $2}' | tr -d '\r')
+              if [ -n "$DIGEST" ]; then
+                echo "Deleting old ACR tag: $TAG (digest: $DIGEST)"
+                curl -s -X DELETE -u "$AUTH" "https://$REGISTRY/v2/$REPO/manifests/$DIGEST" || true
+              fi
+            done
+          fi
 
   # ==================== 前端: Build → Upload OSS → Object 公共读 ====================
   build-frontend:

@@ -4,8 +4,7 @@ WORKDIR /app
 COPY . .
 RUN cargo build --release -p server
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y sqlite3 ca-certificates curl && rm -rf /var/lib/apt/lists/*
+FROM gcr.io/distroless/cc-debian12
 WORKDIR /app
 COPY --from=builder /app/target/release/server ./server-bin
 COPY --from=builder /app/config ./config
