@@ -2,7 +2,7 @@ name: PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, labeled]
 
 permissions:
   contents: read
@@ -10,12 +10,100 @@ permissions:
   issues: write
 
 jobs:
-  review:
+  review-ai:
+    if: github.event.action == 'opened' || github.event.action == 'synchronize'
     runs-on: ubuntu-latest
     steps:
-      - uses: OpenHands/extensions/plugins/pr-review@main
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run OpenHands Review
+        uses: OpenHands/extensions/plugins/pr-review@main
         with:
           llm-model: ${{ secrets.LLM_MODEL || 'openai/glm-5.2' }}
           llm-base-url: ${{ secrets.LLM_BASE_URL || 'https://api.modelarts-maas.com/v2' }}
           llm-api-key: ${{ secrets.LLM_API_KEY }}
-          github-token: ${{ secrets.PAT_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check AI Review Verdict
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          VERDICT="UNKNOWN"
+          REVIEW_BODY=""
+          for i in 1 2 3 4 5 6; do
+            sleep 5
+            REVIEW_JSON=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
+              --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.commit_id // \"\") == \"$HEAD_SHA\")] | sort_by(.submitted_at) | last | {state: .state, body: .body}" 2>/dev/null || echo "{}")
+            VERDICT=$(echo "$REVIEW_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('state','UNKNOWN'))" 2>/dev/null || echo "UNKNOWN")
+            if [ "$VERDICT" != "null" ] && [ "$VERDICT" != "UNKNOWN" ] && [ -n "$VERDICT" ]; then
+              REVIEW_BODY=$(echo "$REVIEW_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body',''))" 2>/dev/null || echo "")
+              break
+            fi
+            echo "Retry $i: verdict not ready yet ($VERDICT)"
+          done
+
+          echo "Latest AI review verdict: $VERDICT"
+
+          if [ "$VERDICT" = "APPROVED" ]; then
+            echo "AI approved the PR"
+          elif [ "$VERDICT" = "CHANGES_REQUESTED" ]; then
+            echo "::error::AI requested changes, blocking merge"
+            exit 1
+          elif [ "$VERDICT" = "COMMENTED" ]; then
+            if echo "$REVIEW_BODY" | grep -qE '🔴|🟠'; then
+              echo "::error::AI review has Critical/Important issues, blocking merge"
+              echo "Review body: $REVIEW_BODY"
+              exit 1
+            else
+              echo "AI review has no Critical/Important issues, passing"
+            fi
+          else
+            echo "::error::No AI review found (got: $VERDICT)"
+            exit 1
+          fi
+
+  review-db:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Database Changes
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set +e
+          CHANGED_FILES=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files --paginate --jq '.[].filename')
+          GH_EXIT=$?
+          set -e
+          if [ $GH_EXIT -ne 0 ]; then
+            echo "::error::Failed to fetch PR files, failing closed for safety"
+            exit 1
+          fi
+
+          DB_FILES=$(echo "$CHANGED_FILES" | grep -iE '(migration|\.sql$|/schema[/.]|/database[/.]|\.prisma$|alembic|diesel|/entit)' || true)
+
+          if [ -z "$DB_FILES" ]; then
+            echo "No database-related files changed, auto-approved"
+            exit 0
+          fi
+
+          echo "Database files changed:"
+          echo "$DB_FILES"
+
+          if echo "$PR_LABELS" | grep -q "db-approved"; then
+            echo "PR has db-approved label, proceeding"
+            exit 0
+          fi
+
+          echo "::error::Database changes detected. Manual approval required."
+          echo "::error::Add 'db-approved' label to approve these changes:"
+          echo "$DB_FILES"
+          exit 1
