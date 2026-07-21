@@ -34,11 +34,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          sleep 5
-          PR_NUMBER=$(gh pr list --head "agent/fix-issue-${{ github.event.issue.number }}" --json number -q '.[0].number' 2>/dev/null)
+          BRANCH="agent/fix-issue-${{ github.event.issue.number }}"
+          for i in $(seq 1 10); do
+            PR_NUMBER=$(gh pr list --head "$BRANCH" --json number -q '.[0].number' 2>/dev/null || true)
+            if [ -n "$PR_NUMBER" ]; then
+              break
+            fi
+            echo "Waiting for PR on branch $BRANCH... (attempt $i)"
+            sleep 10
+          done
           if [ -n "$PR_NUMBER" ]; then
-            gh pr edit $PR_NUMBER --add-label "auto-merge"
+            gh pr edit "$PR_NUMBER" --add-label "auto-merge"
             echo "Added auto-merge label to PR #$PR_NUMBER"
           else
-            echo "No PR found on branch agent/fix-issue-${{ github.event.issue.number }}"
+            echo "No PR found on branch $BRANCH after 100s"
           fi
