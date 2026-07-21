@@ -78,7 +78,7 @@ export default function Home() {
     <div className="min-h-screen bg-secondary flex flex-col">
       <header className="border-b bg-background">
         <div className="container mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-          <span className="text-lg font-semibold">企业架构平台</span>
+          <span className="text-lg font-semibold">技术实验与学习成果展示</span>
           <Link to={isAuthenticated ? '/architectures/value-streams' : '/login'}>
             <Button variant={isAuthenticated ? 'default' : 'outline'}>
               {isAuthenticated ? '进入平台' : '登录'}
@@ -90,10 +90,10 @@ export default function Home() {
       <main className="flex-1">
         <section className="container mx-auto max-w-6xl px-4 py-16 md:py-24 text-center">
           <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
-            企业架构平台
+            技术实验与学习成果展示
           </h1>
           <p className="mt-2 text-base md:text-lg text-muted-foreground">
-            Enterprise Architecture Platform
+            个人技术项目展示 · Rust + React 全栈应用
           </p>
           <p className="mx-auto mt-6 max-w-2xl text-base md:text-lg text-muted-foreground">
             一体化的企业架构建模与管理平台，帮助您梳理价值流、规划业务能力、编排业务流程，
@@ -147,7 +147,10 @@ export default function Home() {
 
       <footer className="border-t bg-background">
         <div className="container mx-auto max-w-6xl px-4 py-6 text-center text-sm text-muted-foreground">
-          © {new Date().getFullYear()} 企业架构平台 · Enterprise Architecture Platform
+          © {new Date().getFullYear()} 技术实验与学习成果展示 · 个人技术项目
+          <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer" className="hover:text-foreground ml-2">
+            粤ICP备2025471124号
+          </a>
         </div>
       </footer>
     </div>
