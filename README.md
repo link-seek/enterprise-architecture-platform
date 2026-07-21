@@ -1,6 +1,6 @@
 # Enterprise Architecture Platform (EAP)
 
-Enterprise Architecture Platform (EAP) is a full-stack enterprise application built with a Domain-Driven Design (DDD) architecture.
+Enterprise Architecture Platform — Rust + React Full-Stack Demo (EAP) is a full-stack enterprise application built with a Domain-Driven Design (DDD) architecture.
 
 The platform consists of two main components:
 
