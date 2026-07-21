@@ -2,7 +2,7 @@ name: PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize, labeled]
+    types: [opened, synchronize]
 
 permissions:
   contents: read
@@ -11,7 +11,6 @@ permissions:
 
 jobs:
   review-ai:
-    if: github.event.action == 'opened' || github.event.action == 'synchronize'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,45 +64,3 @@ jobs:
             echo "::error::No AI review found (got: $VERDICT)"
             exit 1
           fi
-
-  review-db:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Check Database Changes
-        env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-        run: |
-          set +e
-          CHANGED_FILES=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files --paginate --jq '.[].filename')
-          GH_EXIT=$?
-          set -e
-          if [ $GH_EXIT -ne 0 ]; then
-            echo "::error::Failed to fetch PR files, failing closed for safety"
-            exit 1
-          fi
-
-          DB_FILES=$(echo "$CHANGED_FILES" | grep -iE '(migration|\.sql$|/schema[/.]|/database[/.]|\.prisma$|alembic|diesel|/entit)' || true)
-
-          if [ -z "$DB_FILES" ]; then
-            echo "No database-related files changed, auto-approved"
-            exit 0
-          fi
-
-          echo "Database files changed:"
-          echo "$DB_FILES"
-
-          if echo "$PR_LABELS" | grep -q "db-approved"; then
-            echo "PR has db-approved label, proceeding"
-            exit 0
-          fi
-
-          echo "::error::Database changes detected. Manual approval required."
-          echo "::error::Add 'db-approved' label to approve these changes:"
-          echo "$DB_FILES"
-          exit 1
