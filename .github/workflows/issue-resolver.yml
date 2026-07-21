@@ -24,8 +24,10 @@ jobs:
     steps:
       - name: Install Obscura
         run: |
-          curl -L https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-linux -o /usr/local/bin/obscura
+          curl -L https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-x86_64-linux.tar.gz -o /tmp/obscura.tar.gz
+          tar xzf /tmp/obscura.tar.gz -C /usr/local/bin/
           chmod +x /usr/local/bin/obscura
+          obscura --version || true
 
       - uses: xieyucheng123/issue-resolver@main
         with:
@@ -47,8 +49,14 @@ jobs:
     steps:
       - name: Install Obscura
         run: |
-          curl -L https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-linux -o /usr/local/bin/obscura
+          curl -L https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-x86_64-linux.tar.gz -o /tmp/obscura.tar.gz
+          tar xzf /tmp/obscura.tar.gz -C /usr/local/bin/
           chmod +x /usr/local/bin/obscura
+          obscura --version || true
+
+      - name: Install Playwright
+        run: |
+          npx playwright install --with-deps chromium
 
       - uses: actions/checkout@v4
         with:
@@ -97,5 +105,14 @@ jobs:
         with:
           name: discuss-logs
           path: target-repo/*.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: discuss-screenshots
+          path: target-repo/screenshots/*.png
           retention-days: 7
           if-no-files-found: ignore
