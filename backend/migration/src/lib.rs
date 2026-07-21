@@ -12,6 +12,7 @@ mod m20250101_000009_create_capability_processes;
 mod m20250101_000010_create_stage_capabilities;
 mod m20250101_000011_add_logical_id;
 mod m20250101_000013_add_created_at_index_to_capabilities;
+mod m20250101_000014_add_status_to_capabilities;
 
 pub struct Migrator;
 
@@ -31,6 +32,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000010_create_stage_capabilities::Migration),
             Box::new(m20250101_000011_add_logical_id::Migration),
             Box::new(m20250101_000013_add_created_at_index_to_capabilities::Migration),
+            Box::new(m20250101_000014_add_status_to_capabilities::Migration),
         ]
     }
 }

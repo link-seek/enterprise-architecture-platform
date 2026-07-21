@@ -7,3 +7,6 @@ rust-version.workspace = true
 [dependencies]
 sea-orm-migration.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+sea-orm = { workspace = true, features = ["sqlx-sqlite", "runtime-tokio-rustls"] }

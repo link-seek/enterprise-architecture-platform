@@ -2,7 +2,8 @@ use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use shared_common::enums::{
-    BusinessValueRating, CapabilityLevel, CostRating, LifecycleStatus, MaturityLevel,
+    BusinessValueRating, CapabilityLevel, CapabilityStatus, CostRating, LifecycleStatus,
+    MaturityLevel,
 };
 use uuid::Uuid;
 
@@ -14,6 +15,7 @@ pub struct Model {
     pub logical_id: Uuid,
     pub business_version: String,
     pub status: LifecycleStatus,
+    pub capability_status: CapabilityStatus,
     pub name: String,
     pub description: String,
     pub level: CapabilityLevel,

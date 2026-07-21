@@ -18,6 +18,7 @@ impl From<business_capability::Model> for BusinessCapability {
             logical_id: m.logical_id,
             business_version: m.business_version,
             status: m.status,
+            capability_status: m.capability_status,
             name: m.name,
             description: m.description,
             level: m.level,
@@ -64,6 +65,7 @@ impl CapabilityRepository for SeaOrmCapabilityRepo {
             let mut active: business_capability::ActiveModel = model.into();
             active.business_version = Set(cap.business_version.clone());
             active.status = Set(cap.status);
+            active.capability_status = Set(cap.capability_status);
             active.name = Set(cap.name.clone());
             active.description = Set(cap.description.clone());
             active.level = Set(cap.level);
@@ -80,6 +82,7 @@ impl CapabilityRepository for SeaOrmCapabilityRepo {
                 logical_id: Set(cap.logical_id),
                 business_version: Set(cap.business_version.clone()),
                 status: Set(cap.status),
+                capability_status: Set(cap.capability_status),
                 name: Set(cap.name.clone()),
                 description: Set(cap.description.clone()),
                 level: Set(cap.level),

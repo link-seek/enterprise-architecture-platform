@@ -80,6 +80,31 @@ pub enum LifecycleStatus {
     Archived,
 }
 
+/// Tracks the operational state of a business capability.
+///
+/// Stored in the `capability_status` column of `business_capabilities`
+/// (the `status` column is already used by [`LifecycleStatus`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityStatus {
+    #[sea_orm(string_value = "active")]
+    #[serde(rename = "active")]
+    Active,
+    #[sea_orm(string_value = "inactive")]
+    #[serde(rename = "inactive")]
+    Inactive,
+    #[sea_orm(string_value = "draft")]
+    #[serde(rename = "draft")]
+    Draft,
+}
+
+impl Default for CapabilityStatus {
+    fn default() -> Self {
+        CapabilityStatus::Active
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
 #[serde(rename_all = "snake_case")]
