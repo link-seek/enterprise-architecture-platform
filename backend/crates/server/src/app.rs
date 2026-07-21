@@ -153,8 +153,22 @@ async fn health_handler(State(state): State<AppState>) -> Json<serde_json::Value
 )]
 async fn version_handler() -> Json<serde_json::Value> {
     Json(json!({
-        "version": "1.0.0",
+        "version": env!("CARGO_PKG_VERSION"),
         "name": "enterprise-architecture-platform",
-        "rust_version": "1.75.0",
+        "rust_version": env!("CARGO_PKG_RUST_VERSION"),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn version_handler_reports_cargo_metadata() {
+        let Json(value) = version_handler().await;
+
+        assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(value["name"], "enterprise-architecture-platform");
+        assert_eq!(value["rust_version"], env!("CARGO_PKG_RUST_VERSION"));
+    }
 }
