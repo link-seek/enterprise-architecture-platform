@@ -11,7 +11,6 @@ mod m20250101_000008_create_value_stream_stages;
 mod m20250101_000009_create_capability_processes;
 mod m20250101_000010_create_stage_capabilities;
 mod m20250101_000011_add_logical_id;
-mod m20250101_000012_add_description_to_value_streams;
 
 pub struct Migrator;
 
@@ -30,7 +29,6 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000009_create_capability_processes::Migration),
             Box::new(m20250101_000010_create_stage_capabilities::Migration),
             Box::new(m20250101_000011_add_logical_id::Migration),
-            Box::new(m20250101_000012_add_description_to_value_streams::Migration),
         ]
     }
 }

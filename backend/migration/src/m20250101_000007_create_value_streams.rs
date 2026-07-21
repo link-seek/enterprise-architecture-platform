@@ -15,7 +15,7 @@ impl MigrationTrait for Migration {
                     .col(string(ValueStreams::BusinessVersion))
                     .col(string(ValueStreams::Status))
                     .col(string(ValueStreams::Name))
-                    .col(text(ValueStreams::Description))
+                    .col(text_null(ValueStreams::Description))
                     .col(string_null(ValueStreams::TriggeringEvent))
                     .col(string_null(ValueStreams::EndDeliverable))
                     .col(uuid_null(ValueStreams::OwnerId))

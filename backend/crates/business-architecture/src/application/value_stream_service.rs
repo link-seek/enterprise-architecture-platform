@@ -72,7 +72,7 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         &self,
         id: Uuid,
         name: Option<String>,
-        description: Option<String>,
+        description: Option<Option<String>>,
         importance: Option<shared_common::enums::ValueStreamImportance>,
     ) -> Result<ValueStream, DomainError> {
         let mut vs = self.repo.find_by_id(id).await?.ok_or(DomainError::ValueStreamNotFound)?;

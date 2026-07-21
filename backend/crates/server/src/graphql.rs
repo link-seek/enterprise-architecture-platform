@@ -472,7 +472,11 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     .map_err(|e| async_graphql::Error::new(format!("Invalid UUID: {e}")))?;
 
                 let name = ctx.args.get("name").and_then(|v| v.string().ok()).map(|s| s.to_owned());
-                let description = ctx.args.get("description").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+                let description = match ctx.args.get("description") {
+                    Some(v) if v.is_null() => Some(None),
+                    Some(v) => v.string().ok().map(|s| Some(s.to_owned())),
+                    None => None,
+                };
                 let importance = match ctx.args.get("importance") {
                     Some(v) if !v.is_null() => Some(parse_importance(v.enum_name()?)?),
                     _ => None,

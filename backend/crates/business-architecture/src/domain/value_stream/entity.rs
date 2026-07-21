@@ -128,7 +128,7 @@ impl ValueStream {
     pub fn update(
         &mut self,
         name: Option<String>,
-        description: Option<String>,
+        description: Option<Option<String>>,
         importance: Option<ValueStreamImportance>,
         now: DateTime<Utc>,
     ) -> Result<(), DomainError> {
@@ -138,7 +138,7 @@ impl ValueStream {
             });
         }
         if let Some(n) = name { self.name = n; }
-        if let Some(d) = description { self.description = Some(d); }
+        if let Some(d) = description { self.description = d; }
         if let Some(i) = importance { self.importance = i; }
         self.updated_at = now;
         Ok(())
