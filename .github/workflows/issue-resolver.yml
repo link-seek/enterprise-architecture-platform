@@ -5,21 +5,28 @@ on:
     types: [labeled]
   issue_comment:
     types: [created]
+  discussion_comment:
+    types: [created]
 
 permissions:
   contents: write
   pull-requests: write
   issues: write
+  discussions: write
 
 jobs:
   resolve:
     if: |
       github.event.label.name == 'fix-me' ||
-      github.event.label.name == 'build-feature' ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@openhands-agent') &&
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@oh') &&
         (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'COLLABORATOR' || github.event.comment.author_association == 'MEMBER'))
     runs-on: ubuntu-latest
     steps:
+      - name: Install Obscura
+        run: |
+          curl -L https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-linux -o /usr/local/bin/obscura
+          chmod +x /usr/local/bin/obscura
+
       - uses: xieyucheng123/issue-resolver@main
         with:
           llm-model: ${{ secrets.LLM_MODEL || 'openai/glm-5.2' }}
@@ -28,24 +35,67 @@ jobs:
           github-token: ${{ secrets.PAT_TOKEN }}
           issue-number: ${{ github.event.issue.number }}
           issue-type: issue
-
-      - name: Add auto-merge label to PR
-        if: success() && github.event_name == 'issues'
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          SEARCH_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          AGENT_ENABLE_BROWSING: "true"
+
+  discuss:
+    if: |
+      github.event_name == 'discussion_comment' && contains(github.event.comment.body, '@oh') &&
+      (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'COLLABORATOR' || github.event.comment.author_association == 'MEMBER')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Obscura
         run: |
-          BRANCH="agent/fix-issue-${{ github.event.issue.number }}"
-          for i in $(seq 1 10); do
-            PR_NUMBER=$(gh pr list --head "$BRANCH" --json number -q '.[0].number' 2>/dev/null || true)
-            if [ -n "$PR_NUMBER" ]; then
-              break
-            fi
-            echo "Waiting for PR on branch $BRANCH... (attempt $i)"
-            sleep 10
-          done
-          if [ -n "$PR_NUMBER" ]; then
-            gh pr edit "$PR_NUMBER" --add-label "auto-merge"
-            echo "Added auto-merge label to PR #$PR_NUMBER"
-          else
-            echo "No PR found on branch $BRANCH after 100s"
-          fi
+          curl -L https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-linux -o /usr/local/bin/obscura
+          chmod +x /usr/local/bin/obscura
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          path: target-repo
+
+      - name: Checkout issue-resolver scripts
+        uses: actions/checkout@v4
+        with:
+          repository: xieyucheng123/issue-resolver
+          ref: main
+          path: issue-resolver-scripts
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Run Discussion Agent
+        shell: bash
+        working-directory: target-repo
+        env:
+          LLM_MODEL: ${{ secrets.LLM_MODEL || 'openai/glm-5.2' }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL || 'https://api.modelarts-maas.com/v2' }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          SEARCH_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          AGENT_ENABLE_BROWSING: "true"
+          DISCUSSION_NODE_ID: ${{ github.event.discussion.node_id }}
+          DISCUCTION_COMMENT_ID: ${{ github.event.comment.node_id }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          uv run --no-project --with openhands-sdk --with openhands-tools \
+            python ../issue-resolver-scripts/scripts/discuss.py
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: discuss-logs
+          path: target-repo/*.log
+          retention-days: 7
+          if-no-files-found: ignore
