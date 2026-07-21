@@ -110,6 +110,18 @@ jobs:
           uv run --no-project --with openhands-sdk --with openhands-tools \
             python ../issue-resolver-scripts/scripts/auto_fix_pr.py
 
+      - name: Approve pending CI workflows
+        if: steps.pr-info.outputs.pr_number
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          PR_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          sleep 10
+          for run_id in $(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_branch=$PR_BRANCH&status=action_required" --jq '.workflow_runs[].id' 2>/dev/null); do
+            echo "Approving workflow run $run_id..."
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/approve" -X POST 2>/dev/null && echo "Approved $run_id" || echo "Failed to approve $run_id"
+          done
+
       - name: Upload logs
         if: always() && steps.pr-info.outputs.pr_number
         uses: actions/upload-artifact@v4
