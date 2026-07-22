@@ -56,6 +56,7 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
         .routes(utoipa_axum::routes!(health_handler))
         .routes(utoipa_axum::routes!(health_status_handler))
         .routes(utoipa_axum::routes!(version_handler))
+        .routes(utoipa_axum::routes!(info_handler))
         .routes(utoipa_axum::routes!(crate::ai::handlers::suggest_handler))
         .routes(utoipa_axum::routes!(crate::ai::handlers::stream_handler))
         .with_state(state.clone());
@@ -166,6 +167,23 @@ async fn version_handler() -> Json<serde_json::Value> {
     }))
 }
 
+/// 系统基本信息
+#[utoipa::path(
+    get,
+    path = "/api/info",
+    tag = "health",
+    responses(
+        (status = 200, description = "系统基本信息", body = inline(serde_json::Value)),
+    )
+)]
+async fn info_handler() -> Json<serde_json::Value> {
+    Json(json!({
+        "name": "enterprise-architecture-platform",
+        "version": env!("CARGO_PKG_VERSION"),
+        "rust_version": env!("CARGO_PKG_RUST_VERSION"),
+    }))
+}
+
 /// 详细健康状态。不查询数据库，仅返回基本状态信息。
 #[utoipa::path(
     get,
@@ -225,6 +243,15 @@ mod tests {
 
         assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(value["name"], "enterprise-architecture-platform");
+        assert_eq!(value["rust_version"], env!("CARGO_PKG_RUST_VERSION"));
+    }
+
+    #[tokio::test]
+    async fn info_handler_reports_system_info() {
+        let Json(value) = info_handler().await;
+
+        assert_eq!(value["name"], "enterprise-architecture-platform");
+        assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(value["rust_version"], env!("CARGO_PKG_RUST_VERSION"));
     }
 
