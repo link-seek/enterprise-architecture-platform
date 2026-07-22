@@ -21,7 +21,7 @@ jobs:
           password: ${{ secrets.PAT_TOKEN }}
       - name: Build and push backend
         env:
-          IMAGE: ghcr.io/xieyucheng123/eap-backend
+          IMAGE: ghcr.io/link-seek/eap-backend
         run: |
           docker build -t "${IMAGE}:latest" -t "${IMAGE}:${{ github.sha }}" ./backend
           docker push "${IMAGE}:latest"
@@ -31,8 +31,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          IDS=$(gh api /users/xieyucheng123/packages/container/eap-backend/versions --paginate -q '. | sort_by(.created_at) | reverse | .[5:] | .[].id' 2>/dev/null)
+          IDS=$(gh api /users/link-seek/packages/container/eap-backend/versions --paginate -q '. | sort_by(.created_at) | reverse | .[5:] | .[].id' 2>/dev/null)
           for id in $IDS; do
             echo "Deleting old GHCR version: $id"
-            gh api -X DELETE /users/xieyucheng123/packages/container/eap-backend/versions/$id || true
+            gh api -X DELETE /users/link-seek/packages/container/eap-backend/versions/$id || true
           done
