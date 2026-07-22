@@ -69,7 +69,7 @@ jobs:
         if: steps.pr-info.outputs.pr_number
         uses: actions/checkout@v4
         with:
-          repository: xieyucheng123/issue-resolver
+          repository: link-seek/issue-resolver
           ref: main
           path: issue-resolver-scripts
           token: ${{ secrets.PAT_TOKEN }}
