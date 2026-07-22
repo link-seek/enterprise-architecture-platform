@@ -1,3 +1,4 @@
 pub mod user;
 pub mod refresh_token;
 pub mod oauth_authorization_code;
+pub mod organization;
