@@ -57,6 +57,7 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
         .routes(utoipa_axum::routes!(health_status_handler))
         .routes(utoipa_axum::routes!(version_handler))
         .routes(utoipa_axum::routes!(info_handler))
+        .routes(utoipa_axum::routes!(pipeline_test_handler))
         .routes(utoipa_axum::routes!(crate::ai::handlers::suggest_handler))
         .routes(utoipa_axum::routes!(crate::ai::handlers::stream_handler))
         .with_state(state.clone());
@@ -204,6 +205,22 @@ async fn health_status_handler() -> Json<serde_json::Value> {
     }))
 }
 
+/// 流水线测试端点。返回固定的测试标记和时间戳，用于验证部署流水线。
+#[utoipa::path(
+    get,
+    path = "/api/pipeline-test",
+    tag = "health",
+    responses(
+        (status = 200, description = "流水线测试结果", body = inline(serde_json::Value)),
+    )
+)]
+async fn pipeline_test_handler() -> Json<serde_json::Value> {
+    Json(json!({
+        "test": true,
+        "timestamp": 1784711731,
+    }))
+}
+
 /// 将 `Duration` 格式化为紧凑的人类可读字符串，例如 `1h 2m 3s`、`45s`、`0s`。
 fn format_uptime(duration: std::time::Duration) -> String {
     let total_secs = duration.as_secs();
@@ -264,6 +281,14 @@ mod tests {
         assert_eq!(value["db"], "connected");
         assert!(value["uptime"].is_string(), "uptime should be a string");
         assert!(!value["uptime"].as_str().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn pipeline_test_handler_returns_expected_payload() {
+        let Json(value) = pipeline_test_handler().await;
+
+        assert_eq!(value["test"], true);
+        assert_eq!(value["timestamp"], 1784711731);
     }
 
     #[test]
