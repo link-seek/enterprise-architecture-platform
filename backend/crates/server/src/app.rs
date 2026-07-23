@@ -217,7 +217,7 @@ async fn health_status_handler() -> Json<serde_json::Value> {
 async fn pipeline_test_handler() -> Json<serde_json::Value> {
     Json(json!({
         "test": true,
-        "timestamp": 1784735898,
+        "timestamp": 1784772793,
     }))
 }
 
@@ -288,7 +288,7 @@ mod tests {
         let Json(value) = pipeline_test_handler().await;
 
         assert_eq!(value["test"], true);
-        assert_eq!(value["timestamp"], 1784735898);
+        assert_eq!(value["timestamp"], 1784772793);
     }
 
     #[test]
