@@ -58,6 +58,7 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
         .routes(utoipa_axum::routes!(version_handler))
         .routes(utoipa_axum::routes!(info_handler))
         .routes(utoipa_axum::routes!(pipeline_test_handler))
+        .routes(utoipa_axum::routes!(verify_config_handler))
         .routes(utoipa_axum::routes!(crate::ai::handlers::suggest_handler))
         .routes(utoipa_axum::routes!(crate::ai::handlers::stream_handler))
         .with_state(state.clone());
@@ -221,6 +222,43 @@ async fn pipeline_test_handler() -> Json<serde_json::Value> {
     }))
 }
 
+/// 配置验证端点。返回非敏感的配置摘要，用于验证配置驱动的流水线流程。
+#[utoipa::path(
+    get,
+    path = "/api/verify-config",
+    tag = "health",
+    responses(
+        (status = 200, description = "配置验证结果", body = inline(serde_json::Value)),
+    )
+)]
+async fn verify_config_handler(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let cfg = &state.config;
+
+    Json(json!({
+        "ok": true,
+        "server": {
+            "host": cfg.server.host,
+            "port": cfg.server.port,
+        },
+        "database": {
+            "url": cfg.database.url,
+        },
+        "jwt": {
+            "access_token_ttl_minutes": cfg.jwt.access_token_ttl_minutes,
+            "refresh_token_ttl_days": cfg.jwt.refresh_token_ttl_days,
+        },
+        "oauth": {
+            "clients_count": cfg.oauth.clients.len(),
+        },
+        "llm": {
+            "backend": cfg.llm.backend,
+            "model": cfg.llm.model,
+            "endpoint": cfg.llm.endpoint,
+            "api_key_set": cfg.llm.api_key.as_ref().is_some_and(|k| !k.is_empty()),
+        },
+    }))
+}
+
 /// 将 `Duration` 格式化为紧凑的人类可读字符串，例如 `1h 2m 3s`、`45s`、`0s`。
 fn format_uptime(duration: std::time::Duration) -> String {
     let total_secs = duration.as_secs();
@@ -289,6 +327,47 @@ mod tests {
 
         assert_eq!(value["test"], true);
         assert_eq!(value["timestamp"], 1784772793);
+    }
+
+    #[tokio::test]
+    async fn verify_config_handler_reports_non_sensitive_config() {
+        let state = crate::state::AppState::new(test_config()).await.unwrap();
+        let Json(value) = verify_config_handler(State(state)).await;
+
+        assert_eq!(value["ok"], true);
+        assert_eq!(value["server"]["host"], "127.0.0.1");
+        assert_eq!(value["server"]["port"], 0);
+        assert_eq!(value["oauth"]["clients_count"], 0);
+        assert_eq!(value["llm"]["backend"], "openai");
+        assert_eq!(value["llm"]["api_key_set"], false);
+        // Sensitive fields must not be present in the response.
+        assert!(value.get("jwt").unwrap().get("rsa_private_key_pem").is_none());
+        assert!(value.get("llm").unwrap().get("api_key").is_none());
+    }
+
+    fn test_config() -> crate::config::Configuration {
+        crate::config::Configuration {
+            server: crate::config::ServerConfig {
+                host: "127.0.0.1".to_string(),
+                port: 0,
+            },
+            database: crate::config::DatabaseConfig {
+                url: "sqlite::memory:".to_string(),
+            },
+            jwt: crate::config::JwtConfig {
+                access_token_ttl_minutes: 15,
+                refresh_token_ttl_days: 7,
+                rsa_private_key_pem: "secret".to_string(),
+                rsa_public_key_pem: "secret".to_string(),
+            },
+            oauth: crate::config::OAuthConfig { clients: vec![] },
+            llm: crate::config::LlmConfig {
+                backend: "openai".to_string(),
+                api_key: None,
+                model: Some("gpt-4o-mini".to_string()),
+                endpoint: None,
+            },
+        }
     }
 
     #[test]
