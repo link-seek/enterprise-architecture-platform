@@ -73,3 +73,36 @@ export async function fetchMe(): Promise<LoginResponse['user'] | null> {
   useAuthStore.getState().setUser(data)
   return data
 }
+
+export async function createUser(
+  email: string,
+  name: string,
+  password: string,
+  role?: string,
+): Promise<LoginResponse['user']> {
+  const token = useAuthStore.getState().token
+  const res = await fetch(`${API_BASE}/auth/users`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ email, name, password, role }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: 'Create user failed' }))
+    throw new Error(err.message || 'Create user failed')
+  }
+  return res.json()
+}
+
+export async function updateRole(userId: string, role: string): Promise<LoginResponse['user']> {
+  const token = useAuthStore.getState().token
+  const res = await fetch(`${API_BASE}/auth/role`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ user_id: userId, role }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: 'Update role failed' }))
+    throw new Error(err.message || 'Update role failed')
+  }
+  return res.json()
+}

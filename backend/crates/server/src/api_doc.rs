@@ -2,7 +2,7 @@ use utoipa::OpenApi as OpenApiTrait;
 use utoipa::openapi::OpenApi;
 
 use user_management::infrastructure::http::dto::{ErrorResponse as AuthErrorResponse, LogoutInput};
-use user_management::application::register::{AuthOutput, RegisterInput, UserDto};
+use user_management::application::register::{AuthOutput, CreateUserInput, RegisterInput, UserDto};
 use user_management::application::login::LoginInput;
 use user_management::application::token::{Claims, RefreshInput, RefreshOutput};
 use user_management::application::oauth::{TokenInput, TokenOutput};
@@ -25,7 +25,7 @@ use shared_common::PageInfo;
             // shared-common pagination
             PageInfo,
             // auth DTOs
-            RegisterInput, LoginInput, AuthOutput, UserDto,
+            RegisterInput, CreateUserInput, LoginInput, AuthOutput, UserDto,
             RefreshInput, RefreshOutput, Claims,
             TokenInput, TokenOutput,
             LogoutInput, AuthErrorResponse,

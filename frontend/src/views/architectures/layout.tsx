@@ -10,12 +10,17 @@ import {
   Boxes,
   Workflow,
   LogOut,
+  Users,
 } from 'lucide-react'
 
 const menuItems = [
   { path: '/architectures/value-streams', label: '价值流', icon: LayoutDashboard },
   { path: '/architectures/capabilities', label: '业务能力', icon: Boxes },
   { path: '/architectures/processes', label: '业务流程', icon: Workflow },
+]
+
+const adminMenuItems = [
+  { path: '/architectures/users', label: '用户管理', icon: Users },
 ]
 
 export default function ArchLayout() {
@@ -50,6 +55,29 @@ export default function ArchLayout() {
               </Link>
             )
           })}
+          {user?.role === 'admin' && (
+            <>
+              <Separator className="my-2" />
+              {adminMenuItems.map((item) => {
+                const Icon = item.icon
+                const active = location.pathname.startsWith(item.path)
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                      active
+                        ? 'bg-primary text-primary-foreground'
+                        : 'hover:bg-accent hover:text-accent-foreground'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </>
+          )}
         </nav>
         <Separator />
         <div className="p-3">

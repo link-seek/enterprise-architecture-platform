@@ -40,6 +40,10 @@ export const router = createBrowserRouter([
             path: 'processes',
             lazy: async () => ({ Component: (await import('@/views/architectures/processes')).default }),
           },
+          {
+            path: 'users',
+            lazy: async () => ({ Component: (await import('@/views/architectures/users')).default }),
+          },
         ],
       },
     ],

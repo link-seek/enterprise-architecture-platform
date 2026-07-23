@@ -17,7 +17,7 @@ use validator::Validate;
 
 use crate::application::login::LoginInput;
 use crate::application::oauth::{AuthorizeInput, TokenInput, TokenOutput};
-use crate::application::register::{AuthOutput, RegisterInput, UserDto};
+use crate::application::register::{AuthOutput, CreateUserInput, RegisterInput, UserDto};
 use crate::application::token::{Claims, RefreshInput, RefreshOutput};
 use crate::domain::auth::entity::{OAuthAuthorizationCode, RefreshToken};
 use crate::domain::auth::repository::{AuthCodeRepository, RefreshTokenRepository};
@@ -228,6 +228,7 @@ fn validate_input<T: Validate>(input: &T) -> Result<(), ApiError> {
     responses(
         (status = 201, description = "注册成功", body = AuthOutput),
         (status = 400, description = "参数错误"),
+        (status = 403, description = "公开注册已关闭"),
         (status = 409, description = "邮箱已存在"),
     )
 )]
@@ -235,6 +236,15 @@ pub async fn register(
     State(service): State<Arc<AuthService>>,
     Json(input): Json<RegisterInput>,
 ) -> Result<Json<AuthOutput>, ApiError> {
+    let allow = std::env::var("APP_ALLOW_PUBLIC_REGISTER")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+    if !allow {
+        return Err(ApiError(shared_common::AppError::Forbidden(
+            "public registration is disabled".into(),
+        )));
+    }
+
     validate_input(&input)?;
 
     let repo = service.user_repo();
@@ -259,6 +269,61 @@ pub async fn register(
         expires_in: service.jwt_expires_in,
         user: user_to_dto(&user),
     }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/auth/users",
+    tag = "auth",
+    request_body = CreateUserInput,
+    responses(
+        (status = 201, description = "用户创建成功", body = UserDto),
+        (status = 400, description = "参数错误"),
+        (status = 401, description = "未认证"),
+        (status = 403, description = "无权限"),
+        (status = 409, description = "邮箱已存在"),
+    )
+)]
+pub async fn create_user(
+    State(service): State<Arc<AuthService>>,
+    headers: HeaderMap,
+    Json(input): Json<CreateUserInput>,
+) -> Result<Json<UserDto>, ApiError> {
+    let token = extract_bearer_token(&headers)?;
+    let claims = verify_jwt(&service.jwt_secret, &token)?;
+
+    let actor_role = UserRole::from_str(&claims.role)
+        .ok_or_else(|| ApiError(shared_common::AppError::Unauthorized("invalid token role".into())))?;
+
+    if !actor_role.can_manage_users() {
+        return Err(ApiError(shared_common::AppError::Forbidden(
+            "only admins can create users".into(),
+        )));
+    }
+
+    validate_input(&input)?;
+
+    let repo = service.user_repo();
+    if repo.find_by_email(&input.email).await?.is_some() {
+        return Err(ApiError(shared_common::AppError::Conflict("email already exists".into())));
+    }
+
+    let role = match input.role.as_deref() {
+        Some("admin") => UserRole::Admin,
+        Some("architect") => UserRole::Architect,
+        Some("viewer") | None => UserRole::Viewer,
+        Some(other) => {
+            return Err(ApiError(shared_common::AppError::BadRequest(
+                format!("invalid role: '{}'. expected: admin, architect, viewer", other),
+            )));
+        }
+    };
+
+    let password_hash = hash_password(&input.password)?;
+    let user = User::new(input.email, input.name, password_hash, role);
+    let saved = repo.save(&user).await?;
+
+    Ok(Json(user_to_dto(&saved)))
 }
 
 #[utoipa::path(

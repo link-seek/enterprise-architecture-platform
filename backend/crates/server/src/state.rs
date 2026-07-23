@@ -27,11 +27,28 @@ impl AppState {
         migration::Migrator::up(&db, None).await?;
         tracing::info!("Database migrations completed successfully");
 
-        // Seed admin test account (only in non-production environments)
+        // Seed admin account.
+        // - If APP_SEED_ADMIN_EMAIL is set, always seed (regardless of APP_ENV).
+        // - Otherwise: local/dev use default admin@test.com/admin123456;
+        //   production logs a warning prompting the operator to set the env var.
         let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
-        if app_env == "local" || app_env == "dev" {
-            if let Err(e) = seed_admin(&db).await {
-                tracing::warn!("Seed admin failed (non-fatal): {e}");
+        let explicit_email = std::env::var("APP_SEED_ADMIN_EMAIL").ok();
+        match explicit_email {
+            Some(_) => {
+                if let Err(e) = seed_admin(&db).await {
+                    tracing::warn!("Seed admin failed (non-fatal): {e}");
+                }
+            }
+            None if app_env == "local" || app_env == "dev" => {
+                if let Err(e) = seed_admin(&db).await {
+                    tracing::warn!("Seed admin failed (non-fatal): {e}");
+                }
+            }
+            None => {
+                tracing::warn!(
+                    "No admin seed configured. Set APP_SEED_ADMIN_EMAIL and \
+                     APP_SEED_ADMIN_PASSWORD to bootstrap the first admin account."
+                );
             }
         }
 
@@ -50,8 +67,16 @@ impl AppState {
 async fn seed_admin(db: &DatabaseConnection) -> anyhow::Result<()> {
     let email = std::env::var("APP_SEED_ADMIN_EMAIL")
         .unwrap_or_else(|_| "admin@test.com".to_string());
+    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
+    let is_production = !(app_env == "local" || app_env == "dev");
     let password = match std::env::var("APP_SEED_ADMIN_PASSWORD") {
         Ok(p) => p,
+        Err(_) if is_production => {
+            anyhow::bail!(
+                "APP_SEED_ADMIN_PASSWORD is required in production-like environments \
+                 (APP_ENV='{app_env}'); refusing to seed admin with a default weak password"
+            );
+        }
         Err(_) => {
             tracing::warn!(
                 "APP_SEED_ADMIN_PASSWORD not set, using default test password. \

@@ -12,6 +12,17 @@ pub struct RegisterInput {
     pub password: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+pub struct CreateUserInput {
+    #[validate(email)]
+    pub email: String,
+    #[validate(length(min = 1, max = 100))]
+    pub name: String,
+    #[validate(length(min = 8, max = 128))]
+    pub password: String,
+    pub role: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct AuthOutput {
     pub access_token: String,
