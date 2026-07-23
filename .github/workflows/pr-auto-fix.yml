@@ -15,10 +15,17 @@ jobs:
     if: github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Get PR info
         id: pr-info
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
@@ -72,7 +79,7 @@ jobs:
           repository: link-seek/issue-resolver
           ref: main
           path: issue-resolver-scripts
-          token: ${{ secrets.PAT_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Set up Python
         if: steps.pr-info.outputs.pr_number
@@ -101,7 +108,7 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL || 'openai/glm-5.2' }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL || 'https://api.modelarts-maas.com/v2' }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
           REPO_NAME: ${{ github.repository }}
           REVIEW_BODY: ${{ steps.pr-info.outputs.review_body }}
@@ -113,7 +120,7 @@ jobs:
       - name: Approve pending CI workflows
         if: steps.pr-info.outputs.pr_number
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           sleep 10
