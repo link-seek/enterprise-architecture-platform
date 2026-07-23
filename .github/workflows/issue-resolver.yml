@@ -19,4 +19,7 @@ permissions:
 jobs:
   auto-resolve:
     uses: link-seek/issue-resolver/.github/workflows/auto-resolve.yml@main
+    with:
+      trigger-label: "fix-me"
+      mention: "@oh"
     secrets: inherit

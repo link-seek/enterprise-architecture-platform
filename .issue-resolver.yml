@@ -1,0 +1,43 @@
+# Issue Resolver 配置 — 消费仓与流程仓的契约
+# 流程仓 (issue-resolver) 读取此文件，不再硬编码消费仓路径
+
+# 触发配置
+trigger:
+  label: "fix-me"
+  mention: "@oh"
+
+# 风险检测 — 匹配这些 pattern 的文件变动需要人工审查
+risk_detection:
+  file_patterns:
+    - "migration"
+    - "\\.sql$"
+    - "/schema"
+    - "/database"
+    - "\\.prisma$"
+    - "alembic"
+    - "diesel"
+    - "/entit"
+
+# 测试 — 如何运行消费仓的测试
+test:
+  command: "cargo test --workspace"
+
+# 流程测试 — 如何触发每种流程（用于 pipeline_test.py 验证）
+pipeline_test:
+  # 自动合并分支：创建一个无害的非 DB 改动
+  auto_merge:
+    title_template: "Pipeline Test: 更新 /api/pipeline-test 端点返回时间戳 {ts}"
+    body_template: "在 backend 添加一个 /api/pipeline-test 端点，返回 JSON `{\"test\": true, \"timestamp\": {ts}}`。这是一个无害的测试端点。"
+  # 人工审查分支：创建一个 DB 改动，触发风险检测
+  human_review:
+    title_template: "Pipeline Test: 给 organizations 表添加 pipeline_test_{ts} nullable 列"
+    body_template: "在 backend/migration 中添加一个迁移，给 organizations 表添加 `pipeline_test_{ts}` 列（类型 String，nullable，默认 null）。这是一个无害的测试列。"
+  # 讨论流程
+  discussion:
+    category: "General"
+    body: "@oh 请分析下项目的整体架构和模块划分"
+
+# 部署验证
+deploy:
+  url: "https://api.xieyucheng.top"
+  health_endpoint: "/health"
