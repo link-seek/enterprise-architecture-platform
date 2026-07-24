@@ -8,6 +8,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+  actions: write
 
 jobs:
   review-ai:
@@ -58,11 +59,20 @@ jobs:
             echo "AI approved the PR"
           elif [ "$VERDICT" = "CHANGES_REQUESTED" ]; then
             echo "::error::AI requested changes, blocking merge"
+            echo "Dispatching PR Auto-Fix..."
+            gh workflow run pr-auto-fix.yml \
+              -f pr_number="$PR_NUMBER" \
+              -f head_branch="${{ github.event.pull_request.head.ref }}" \
+              -f head_sha="$HEAD_SHA" || echo "Failed to dispatch auto-fix"
             exit 1
           elif [ "$VERDICT" = "COMMENTED" ]; then
             if echo "$REVIEW_BODY" | grep -qE '🔴|🟠'; then
               echo "::error::AI review has Critical/Important issues, blocking merge"
-              echo "Review body: $REVIEW_BODY"
+              echo "Dispatching PR Auto-Fix..."
+              gh workflow run pr-auto-fix.yml \
+                -f pr_number="$PR_NUMBER" \
+                -f head_branch="${{ github.event.pull_request.head.ref }}" \
+                -f head_sha="$HEAD_SHA" || echo "Failed to dispatch auto-fix"
               exit 1
             else
               echo "AI review has no Critical/Important issues, passing"
