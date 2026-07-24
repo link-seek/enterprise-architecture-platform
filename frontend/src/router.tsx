@@ -7,6 +7,16 @@ function ProtectedRoute() {
   return <Outlet />
 }
 
+function AdminRoute() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const user = useAuthStore((s) => s.user)
+  // While authenticated but user data hasn't loaded yet (e.g. after refresh),
+  // block access instead of letting a non-admin sneak through.
+  if (isAuthenticated && !user) return null
+  if (user && user.role !== 'admin') return <Navigate to="/architectures/value-streams" replace />
+  return <Outlet />
+}
+
 export const router = createBrowserRouter([
   {
     path: '/',
@@ -41,8 +51,13 @@ export const router = createBrowserRouter([
             lazy: async () => ({ Component: (await import('@/views/architectures/processes')).default }),
           },
           {
-            path: 'users',
-            lazy: async () => ({ Component: (await import('@/views/architectures/users')).default }),
+            element: <AdminRoute />,
+            children: [
+              {
+                path: 'users',
+                lazy: async () => ({ Component: (await import('@/views/architectures/users')).default }),
+              },
+            ],
           },
         ],
       },

@@ -35,14 +35,10 @@ impl AppState {
         let explicit_email = std::env::var("APP_SEED_ADMIN_EMAIL").ok();
         match explicit_email {
             Some(_) => {
-                if let Err(e) = seed_admin(&db).await {
-                    tracing::warn!("Seed admin failed (non-fatal): {e}");
-                }
+                seed_admin(&db).await?;
             }
             None if app_env == "local" || app_env == "dev" => {
-                if let Err(e) = seed_admin(&db).await {
-                    tracing::warn!("Seed admin failed (non-fatal): {e}");
-                }
+                seed_admin(&db).await?;
             }
             None => {
                 tracing::warn!(

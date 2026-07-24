@@ -61,7 +61,20 @@ impl LifecycleHooksInterface for GraphqlAuthGuard {
         );
 
         match action {
-            OperationType::Read => GuardAction::Allow,
+            OperationType::Read => {
+                let Some(claims) = claims else {
+                    return GuardAction::Block(Some("Authentication required.".to_string()));
+                };
+                let role = claims.user_role();
+
+                if USER_ENTITIES.contains(&entity) && !role.can_manage_users() {
+                    return GuardAction::Block(Some(
+                        "Only admins can read user records.".to_string(),
+                    ));
+                }
+
+                GuardAction::Allow
+            }
 
             OperationType::Create => {
                 let Some(claims) = claims else {

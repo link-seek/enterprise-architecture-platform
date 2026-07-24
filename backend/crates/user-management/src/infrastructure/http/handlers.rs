@@ -9,7 +9,7 @@ use axum::Json;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::Utc;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use sea_orm::DatabaseConnection;
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, Set, TransactionTrait};
 use sha2::{Digest, Sha256};
 use shared_common::enums::{UserRole, UserStatus};
 use uuid::Uuid;
@@ -26,6 +26,7 @@ use crate::domain::user::entity::User;
 use crate::domain::user::repository::UserRepository;
 use crate::infrastructure::http::dto::{user_to_dto, ErrorResponse, LogoutInput};
 use crate::infrastructure::persistence::auth_repo::{SeaOrmAuthCodeRepo, SeaOrmRefreshTokenRepo};
+use crate::infrastructure::persistence::entities::user;
 use crate::infrastructure::persistence::user_repo::SeaOrmUserRepo;
 
 pub struct OAuthClientConfig {
@@ -39,6 +40,7 @@ pub struct AuthService {
     jwt_expires_in: u64,
     refresh_expires_in: u64,
     oauth_clients: Vec<OAuthClientConfig>,
+    allow_public_register: bool,
 }
 
 impl AuthService {
@@ -48,6 +50,7 @@ impl AuthService {
         jwt_expires_in: u64,
         refresh_expires_in: u64,
         oauth_clients: Vec<OAuthClientConfig>,
+        allow_public_register: bool,
     ) -> Self {
         Self {
             db,
@@ -55,11 +58,16 @@ impl AuthService {
             jwt_expires_in,
             refresh_expires_in,
             oauth_clients,
+            allow_public_register,
         }
     }
 
     fn user_repo(&self) -> SeaOrmUserRepo {
         SeaOrmUserRepo::new(self.db.clone())
+    }
+
+    fn db(&self) -> &DatabaseConnection {
+        &self.db
     }
 
     fn refresh_token_repo(&self) -> SeaOrmRefreshTokenRepo {
@@ -75,7 +83,23 @@ impl AuthService {
     }
 }
 
+#[derive(Debug)]
 pub struct ApiError(pub shared_common::AppError);
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl From<sea_orm::TransactionError<ApiError>> for ApiError {
+    fn from(e: sea_orm::TransactionError<ApiError>) -> Self {
+        match e {
+            sea_orm::TransactionError::Connection(db_err) => ApiError(db_err.into()),
+            sea_orm::TransactionError::Transaction(api_err) => api_err,
+        }
+    }
+}
 
 impl From<DomainError> for ApiError {
     fn from(e: DomainError) -> Self {
@@ -236,9 +260,7 @@ pub async fn register(
     State(service): State<Arc<AuthService>>,
     Json(input): Json<RegisterInput>,
 ) -> Result<Json<AuthOutput>, ApiError> {
-    let allow = std::env::var("APP_ALLOW_PUBLIC_REGISTER")
-        .map(|v| v == "true" || v == "1")
-        .unwrap_or(false);
+    let allow = service.allow_public_register;
     if !allow {
         return Err(ApiError(shared_common::AppError::Forbidden(
             "public registration is disabled".into(),
@@ -664,25 +686,55 @@ pub async fn update_role(
         .await?
         .ok_or_else(|| ApiError(shared_common::AppError::NotFound("user not found".into())))?;
 
-    // Guard against lockout: refuse to demote an admin to a non-admin role when
-    // it would remove the last admin, and refuse self-demotion outright so an
-    // admin cannot accidentally strip their own access.
-    if user.role.is_admin() && !new_role.is_admin() {
-        if input.user_id == claims.user_id {
-            return Err(ApiError(shared_common::AppError::Forbidden(
-                "cannot demote your own admin role".into(),
-            )));
-        }
-        let admin_count = repo.count_by_role(UserRole::Admin).await?;
-        if admin_count <= 1 {
-            return Err(ApiError(shared_common::AppError::Forbidden(
-                "cannot demote the last remaining admin".into(),
-            )));
-        }
+    // Guard against lockout: refuse self-demotion outright so an admin cannot
+    // accidentally strip their own access.
+    if user.role.is_admin() && !new_role.is_admin() && input.user_id == claims.user_id {
+        return Err(ApiError(shared_common::AppError::Forbidden(
+            "cannot demote your own admin role".into(),
+        )));
     }
 
-    user.set_role(new_role);
-    let saved = repo.save(&user).await?;
+    // Atomically check the last-admin guard and apply the role change inside a
+    // single transaction to eliminate the TOCTOU race between counting admins
+    // and saving the demotion.
+    let is_demotion = user.role.is_admin() && !new_role.is_admin();
+    let db = service.db();
 
-    Ok(Json(user_to_dto(&saved)))
+    let saved = db
+        .transaction::<_, user::Model, ApiError>(|txn| {
+            Box::pin(async move {
+                if is_demotion {
+                    let admin_count = user::Entity::find()
+                        .filter(user::Column::Role.eq(UserRole::Admin))
+                        .filter(user::Column::DeletedAt.is_null())
+                        .count(txn)
+                        .await?;
+                    if admin_count <= 1 {
+                        return Err(ApiError(shared_common::AppError::Forbidden(
+                            "cannot demote the last remaining admin".into(),
+                        )));
+                    }
+                }
+
+                let model = user::Entity::find_by_id(user.id)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| {
+                        ApiError(shared_common::AppError::NotFound("user not found".into()))
+                    })?;
+
+                let mut active: user::ActiveModel = model.into();
+                active.role = Set(new_role);
+                active.updated_at = Set(Utc::now());
+                let updated = active.update(txn).await?;
+
+                Ok(updated)
+            })
+        })
+        .await?;
+
+    user = saved.into();
+    user.set_role(new_role);
+
+    Ok(Json(user_to_dto(&user)))
 }

@@ -13,6 +13,8 @@ pub struct Configuration {
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+    #[serde(default)]
+    pub allow_public_register: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

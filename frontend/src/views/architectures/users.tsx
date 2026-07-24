@@ -76,11 +76,13 @@ export default function UsersPage() {
 
   async function handleRoleChange(userId: string, newRole: string) {
     setRoleUpdating(userId)
+    setError(null)
     try {
       await updateRole(userId, newRole)
       await refetch()
+      setConfirmRole(null)
     } catch (err) {
-      console.error('Update role failed:', err)
+      setError(err instanceof Error ? err.message : '修改角色失败')
     } finally {
       setRoleUpdating(null)
     }
@@ -221,7 +223,7 @@ export default function UsersPage() {
       <Dialog
         open={confirmRole !== null}
         onOpenChange={(open) => {
-          if (!open) setConfirmRole(null)
+          if (!open && roleUpdating === null) setConfirmRole(null)
         }}
       >
         <DialogContent>
@@ -233,8 +235,17 @@ export default function UsersPage() {
                 : `即将把 ${confirmRole?.user.name} 的角色修改为 ${confirmRole?.newRole}。`}
             </DialogDescription>
           </DialogHeader>
+          {error && (
+            <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+              {error}
+            </div>
+          )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmRole(null)}>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmRole(null)}
+              disabled={roleUpdating !== null}
+            >
               取消
             </Button>
             <Button
@@ -242,9 +253,7 @@ export default function UsersPage() {
               disabled={roleUpdating !== null}
               onClick={() => {
                 if (!confirmRole) return
-                const { user, newRole } = confirmRole
-                setConfirmRole(null)
-                handleRoleChange(user.id, newRole)
+                handleRoleChange(confirmRole.user.id, confirmRole.newRole)
               }}
             >
               {roleUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : '确认'}

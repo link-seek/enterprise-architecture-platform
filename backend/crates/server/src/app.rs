@@ -37,6 +37,7 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
                 redirect_uris: c.redirect_uris.clone(),
             })
             .collect(),
+        state.config.server.allow_public_register,
     ));
 
     // Rate limiter: generous for GraphQL + REST
