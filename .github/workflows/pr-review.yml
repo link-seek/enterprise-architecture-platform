@@ -36,6 +36,7 @@ jobs:
       - name: Check AI Review Verdict
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          DISPATCH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
@@ -60,7 +61,7 @@ jobs:
           elif [ "$VERDICT" = "CHANGES_REQUESTED" ]; then
             echo "::error::AI requested changes, blocking merge"
             echo "Dispatching PR Auto-Fix..."
-            gh workflow run pr-auto-fix.yml \
+            GH_TOKEN="$DISPATCH_TOKEN" gh workflow run pr-auto-fix.yml \
               -f pr_number="$PR_NUMBER" \
               -f head_branch="${{ github.event.pull_request.head.ref }}" \
               -f head_sha="$HEAD_SHA" || echo "Failed to dispatch auto-fix"
@@ -69,7 +70,7 @@ jobs:
             if echo "$REVIEW_BODY" | grep -qE '🔴|🟠'; then
               echo "::error::AI review has Critical/Important issues, blocking merge"
               echo "Dispatching PR Auto-Fix..."
-              gh workflow run pr-auto-fix.yml \
+              GH_TOKEN="$DISPATCH_TOKEN" gh workflow run pr-auto-fix.yml \
                 -f pr_number="$PR_NUMBER" \
                 -f head_branch="${{ github.event.pull_request.head.ref }}" \
                 -f head_sha="$HEAD_SHA" || echo "Failed to dispatch auto-fix"
