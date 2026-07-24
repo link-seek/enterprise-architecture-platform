@@ -21,6 +21,11 @@ spec:
         secretKeyRef:
           name: eap-secrets
           key: ADMIN_PASSWORD
+    - name: APP_DATABASE__URL
+      value: "sqlite:///app/data/platform.db?mode=rwc"
+    ports:
+    - containerPort: 8080
+      hostPort: 8080
     volumeMounts:
     - name: data
       mountPath: /app/data

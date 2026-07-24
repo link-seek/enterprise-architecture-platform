@@ -1,14 +1,14 @@
-name: Build and Push (ACR + OSS)
+name: Build and Deploy
 
-# 两段式流水线:
-# 阶段1 GitHub Actions:
-#   后端 build → push ACR → 触发阿里云云效 Flow (SSH ECS pull+restart)
-#   前端 build → upload OSS → object 设公共读 (CDN www→OSS 静态网站托管)
-# 阶段2 阿里云云效 Flow (pipelineId=5143756):
-#   SSH ECS → bash /opt/eap/eap-autodeploy.sh → podman pull ACR → restart → health check
+# 纯 GitHub Actions 流水线:
+#   后端 build → push ACR (GitHub-hosted runner)
+#   前端 build → upload OSS (GitHub-hosted runner)
+#   deploy → podman play kube (self-hosted runner on ECS, production environment)
 #
-# 部署触发: 云效 Flow 为唯一部署触发源 (已移除 ECS systemd timer 轮询)
-# Flow 触发使用 Webhook URL (FLOW_WEBHOOK_URL secret)
+# 安全:
+#   - deploy job 只在 push to main 时触发 (fork PR 不会跑)
+#   - production environment 保护 secrets (fork PR 无法访问)
+#   - Repo Settings 禁止 fork PR 使用 self-hosted runner
 #
 # 访问:
 #   www.xieyucheng.top → CDN → OSS (object 公共读 + 静态网站托管) → 前端
@@ -19,6 +19,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 env:
   ACR_REGISTRY: crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com
   ACR_NAMESPACE: eap-app
@@ -26,7 +30,7 @@ env:
   OSS_BUCKET: eap-frontend-xyc
 
 jobs:
-  # ==================== 后端: Build → Push ACR → 触发云效 Flow ====================
+  # ==================== 后端: Build → Push ACR ====================
   build-backend:
     runs-on: ubuntu-latest
     steps:
@@ -46,24 +50,15 @@ jobs:
           docker build -t "${IMAGE}:latest" -t "${IMAGE}:${TAG}" ./backend
           docker push "${IMAGE}:latest"
           docker push "${IMAGE}:${TAG}"
-          echo "PUSHED_TAG=$TAG" >> $GITHUB_ENV
-
-      - name: Trigger Aliyun Flow pipeline
-        run: |
-          curl -s --fail -H "Content-Type: application/json" -X POST -d '{}' \
-            "${{ secrets.FLOW_WEBHOOK_URL }}"
 
       - name: Clean old ACR tags (keep latest 10)
         run: |
-          # ACR 个人版 registry v2 API: tag 格式为 YYYYMMDDHHMMSS-sha, 字母排序=时间排序
           REGISTRY="${{ env.ACR_REGISTRY }}"
           REPO="${{ env.ACR_NAMESPACE }}/backend"
           AUTH="${{ secrets.ACR_USERNAME }}:${{ secrets.ACR_PASSWORD }}"
 
-          # 获取所有 tag (排除 latest), 按时间戳前缀排序
           TAGS=$(curl -s -u "$AUTH" "https://$REGISTRY/v2/$REPO/tags/list" | jq -r '.tags[]' | grep -v latest | sort -r)
 
-          # 保留最新 10 个，删其余
           COUNT=$(echo "$TAGS" | grep -c . || true)
           echo "Current tags (excl latest): $COUNT"
           if [ "$COUNT" -gt 10 ]; then
@@ -110,5 +105,38 @@ jobs:
             -e "oss-${{ env.OSS_REGION }}.aliyuncs.com" \
             -i "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" \
             -k "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
-          # 上传时直接指定 object ACL 为 public-read
           ossutil cp -rf frontend/dist/ "oss://${{ env.OSS_BUCKET }}/" --acl public-read
+
+  # ==================== 部署: self-hosted runner on ECS ====================
+  deploy:
+    runs-on: [self-hosted, eap-prod]
+    needs: [build-backend, build-frontend]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to ACR
+        run: |
+          podman login -u "${{ secrets.ACR_USERNAME }}" -p "${{ secrets.ACR_PASSWORD }}" "${{ env.ACR_REGISTRY }}"
+
+      - name: Deploy with podman
+        run: |
+          # Stop existing pod if any
+          podman pod rm -f eap-backend 2>/dev/null || true
+          # Deploy using Kubernetes Pod YAML
+          podman play kube deploy/pod.yml
+
+      - name: Health check
+        run: |
+          sleep 5
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:8080/api/health 2>/dev/null; then
+              echo "Health check passed"
+              exit 0
+            fi
+            echo "Waiting for service... ($i/10)"
+            sleep 3
+          done
+          echo "Health check failed"
+          exit 1
