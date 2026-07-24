@@ -14,35 +14,25 @@ permissions:
 
 jobs:
   continue-fix:
-    if: ${{ github.event_name == 'issue_comment' }}
+    if: ${{ github.event_name == 'issue_comment' && github.event.comment.body == 'continue-fix' && github.event.issue.pull_request != null && contains('OWNER,MEMBER,COLLABORATOR', github.event.comment.author_association) }}
     runs-on: ubuntu-latest
     steps:
-      - name: Check continue-fix comment
+      - name: Log continue-fix trigger
         env:
-          COMMENT_BODY: ${{ github.event.comment.body }}
           PR_NUMBER: ${{ github.event.issue.number }}
-          IS_PR: ${{ github.event.issue.pull_request != null }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          ASSOC: ${{ github.event.comment.author_association }}
         run: |
-          if [ "$IS_PR" != "true" ]; then
-            echo "Not a PR comment, skipping"
-            exit 0
-          fi
-          if [ "$COMMENT_BODY" != "continue-fix" ]; then
-            echo "Not a continue-fix comment ($COMMENT_BODY), skipping"
-            exit 0
-          fi
-          echo "continue-fix on PR #$PR_NUMBER"
+          echo "continue-fix on PR #$PR_NUMBER by $COMMENTER ($ASSOC)"
 
       - uses: actions/create-github-app-token@v1
         id: app-token
-        if: ${{ github.event.comment.body == 'continue-fix' && github.event.issue.pull_request != null }}
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
       - name: Get PR info and dispatch auto-fix
-        if: ${{ github.event.comment.body == 'continue-fix' && github.event.issue.pull_request != null }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           DISPATCH_TOKEN: ${{ github.token }}
@@ -63,7 +53,6 @@ jobs:
             -f max_iterations="6" || echo "Failed to dispatch auto-fix"
 
       - name: React to comment
-        if: ${{ github.event.comment.body == 'continue-fix' && github.event.issue.pull_request != null }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           COMMENT_ID: ${{ github.event.comment.id }}
@@ -74,6 +63,9 @@ jobs:
   review-ai:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
+    concurrency:
+      group: review-ai-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
       - uses: actions/create-github-app-token@v1
         id: app-token
