@@ -3,6 +3,8 @@ name: PR Review
 on:
   pull_request:
     types: [opened, synchronize]
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -11,7 +13,66 @@ permissions:
   actions: write
 
 jobs:
+  continue-fix:
+    if: ${{ github.event_name == 'issue_comment' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check continue-fix comment
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          IS_PR: ${{ github.event.issue.pull_request != null }}
+        run: |
+          if [ "$IS_PR" != "true" ]; then
+            echo "Not a PR comment, skipping"
+            exit 0
+          fi
+          if [ "$COMMENT_BODY" != "continue-fix" ]; then
+            echo "Not a continue-fix comment ($COMMENT_BODY), skipping"
+            exit 0
+          fi
+          echo "continue-fix on PR #$PR_NUMBER"
+
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        if: ${{ github.event.comment.body == 'continue-fix' && github.event.issue.pull_request != null }}
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Get PR info and dispatch auto-fix
+        if: ${{ github.event.comment.body == 'continue-fix' && github.event.issue.pull_request != null }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          DISPATCH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          PR_INFO=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER \
+            --jq '{head_branch: .head.ref, head_sha: .head.sha}')
+          HEAD_BRANCH=$(echo "$PR_INFO" | python3 -c "import sys,json; print(json.load(sys.stdin)['head_branch'])")
+          HEAD_SHA=$(echo "$PR_INFO" | python3 -c "import sys,json; print(json.load(sys.stdin)['head_sha'])")
+
+          echo "Dispatching auto-fix for PR #$PR_NUMBER (branch: $HEAD_BRANCH)"
+          echo "max_iterations=6 (3 original + 3 continue)"
+
+          GH_TOKEN="$DISPATCH_TOKEN" gh workflow run pr-auto-fix.yml \
+            -f pr_number="$PR_NUMBER" \
+            -f head_branch="$HEAD_BRANCH" \
+            -f head_sha="$HEAD_SHA" \
+            -f max_iterations="6" || echo "Failed to dispatch auto-fix"
+
+      - name: React to comment
+        if: ${{ github.event.comment.body == 'continue-fix' && github.event.issue.pull_request != null }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
+            -f content="rocket" 2>/dev/null || true
+
   review-ai:
+    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/create-github-app-token@v1

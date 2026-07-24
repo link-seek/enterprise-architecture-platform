@@ -15,6 +15,11 @@ on:
         description: "PR head SHA"
         required: true
         type: string
+      max_iterations:
+        description: "Max auto-fix iterations (default 3)"
+        required: false
+        type: string
+        default: "3"
 
 permissions:
   contents: write
@@ -40,10 +45,10 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
           HEAD_BRANCH: ${{ inputs.head_branch }}
           HEAD_SHA: ${{ inputs.head_sha }}
+          MAX_ITERATIONS: ${{ inputs.max_iterations || '3' }}
         run: |
-          PR_NUMBER="${PR_NUMBER}"
-          HEAD_SHA="${HEAD_SHA}"
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "max_iterations=$MAX_ITERATIONS" >> $GITHUB_OUTPUT
 
           REVIEW_BODY=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
             --paginate \
@@ -52,28 +57,38 @@ jobs:
           echo "$REVIEW_BODY" >> $GITHUB_OUTPUT
           echo "REVIEW_EOF" >> $GITHUB_OUTPUT
 
-          REVIEW_COUNT=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
-            --paginate \
-            --jq '[.[] | select(.user.login == "github-actions[bot]" and (.state == "CHANGES_REQUESTED" or .state == "COMMENTED"))] | length')
-          echo "iteration=$REVIEW_COUNT" >> $GITHUB_OUTPUT
-
-          if [ "$REVIEW_COUNT" -gt 3 ]; then
-            echo "::error::Max auto-fix iterations (3) exceeded"
-            gh api repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments \
-              -f body="⚠️ Auto-fix tried 3 times but review still fails. Manual intervention needed."
-            exit 1
-          fi
-
       - uses: actions/checkout@v4
-        if: steps.pr-info.outputs.pr_number
         with:
           ref: ${{ inputs.head_branch }}
           fetch-depth: 0
           persist-credentials: true
           path: target-repo
 
+      - name: Check iteration limit
+        id: iter-check
+        working-directory: target-repo
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
+          MAX_ITERATIONS: ${{ steps.pr-info.outputs.max_iterations }}
+        run: |
+          AUTO_FIX_COUNT=$(git log --oneline --grep="auto-fix" | wc -l | tr -d ' ')
+          echo "auto_fix_count=$AUTO_FIX_COUNT" >> $GITHUB_OUTPUT
+          echo "Auto-fix commits on branch: $AUTO_FIX_COUNT (max: $MAX_ITERATIONS)"
+
+          if [ "$AUTO_FIX_COUNT" -ge "$MAX_ITERATIONS" ]; then
+            echo "exceeded=true" >> $GITHUB_OUTPUT
+            echo "::error::Max auto-fix iterations ($MAX_ITERATIONS) reached (current: $AUTO_FIX_COUNT)"
+            BODY="⚠️ Auto-fix 已修 ${AUTO_FIX_COUNT} 轮，review 仍有问题。在 PR 上评论 \`continue-fix\` 可再跑 3 轮自动修复。"
+            gh api repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments \
+              -f body="$BODY"
+            exit 1
+          else
+            echo "exceeded=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout issue-resolver scripts
-        if: steps.pr-info.outputs.pr_number
+        if: ${{ steps.iter-check.outputs.exceeded == 'false' }}
         uses: actions/checkout@v4
         with:
           repository: link-seek/issue-resolver
@@ -82,26 +97,26 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Set up Python
-        if: steps.pr-info.outputs.pr_number
+        if: ${{ steps.iter-check.outputs.exceeded == 'false' }}
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Install uv
-        if: steps.pr-info.outputs.pr_number
+        if: ${{ steps.iter-check.outputs.exceeded == 'false' }}
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
 
       - name: Configure Git
-        if: steps.pr-info.outputs.pr_number
+        if: ${{ steps.iter-check.outputs.exceeded == 'false' }}
         shell: bash
         run: |
           git config --global user.name "ai-bot"
           git config --global user.email "bot@ai-resolver.dev"
 
       - name: Run Auto-Fix
-        if: steps.pr-info.outputs.pr_number
+        if: ${{ steps.iter-check.outputs.exceeded == 'false' }}
         shell: bash
         working-directory: target-repo
         env:
@@ -112,13 +127,13 @@ jobs:
           PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
           REPO_NAME: ${{ github.repository }}
           REVIEW_BODY: ${{ steps.pr-info.outputs.review_body }}
-          ITERATION: ${{ steps.pr-info.outputs.iteration }}
+          ITERATION: ${{ steps.iter-check.outputs.auto_fix_count }}
         run: |
           uv run --no-project --with openhands-sdk --with openhands-tools \
             python ../issue-resolver-scripts/scripts/auto_fix_pr.py
 
       - name: Approve pending CI workflows
-        if: steps.pr-info.outputs.pr_number
+        if: ${{ steps.iter-check.outputs.exceeded == 'false' }}
         env:
           GH_TOKEN: ${{ github.token }}
           PR_BRANCH: ${{ inputs.head_branch }}
@@ -130,7 +145,7 @@ jobs:
           done
 
       - name: Upload logs
-        if: always() && steps.pr-info.outputs.pr_number
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: auto-fix-logs
