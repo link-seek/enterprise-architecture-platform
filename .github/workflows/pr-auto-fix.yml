@@ -16,10 +16,10 @@ on:
         required: true
         type: string
       max_iterations:
-        description: "Max auto-fix iterations (default 3)"
+        description: "Max auto-fix iterations (default 10)"
         required: false
         type: string
-        default: "3"
+        default: "10"
 
 permissions:
   contents: write
@@ -34,6 +34,7 @@ concurrency:
 jobs:
   auto-fix:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     steps:
       - uses: actions/create-github-app-token@v1
         id: app-token
@@ -49,7 +50,7 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
           HEAD_BRANCH: ${{ inputs.head_branch }}
           HEAD_SHA: ${{ inputs.head_sha }}
-          MAX_ITERATIONS: ${{ inputs.max_iterations || '3' }}
+          MAX_ITERATIONS: ${{ inputs.max_iterations || '10' }}
         run: |
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
           echo "max_iterations=$MAX_ITERATIONS" >> $GITHUB_OUTPUT
@@ -132,8 +133,12 @@ jobs:
           REPO_NAME: ${{ github.repository }}
           REVIEW_BODY: ${{ steps.pr-info.outputs.review_body }}
           ITERATION: ${{ steps.iter-check.outputs.auto_fix_count }}
+          # For token auto-refresh
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
-          uv run --no-project --with openhands-sdk --with openhands-tools \
+          uv run --no-project --with openhands-sdk --with openhands-tools --with cryptography --with pyyaml \
             python ../issue-resolver-scripts/scripts/auto_fix_pr.py
 
       - name: Approve pending CI workflows
