@@ -1,41 +1,41 @@
 name: PR Auto-Fix
 
 on:
-  workflow_run:
-    workflows: ["PR Review"]
-    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to auto-fix"
+        required: true
+        type: string
+      head_branch:
+        description: "PR head branch name"
+        required: true
+        type: string
+      head_sha:
+        description: "PR head SHA"
+        required: true
+        type: string
 
 permissions:
   contents: write
   pull-requests: write
   issues: write
+  actions: write
 
 jobs:
   auto-fix:
-    if: github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
     steps:
       - name: Get PR info
         id: pr-info
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          HEAD_BRANCH: ${{ inputs.head_branch }}
+          HEAD_SHA: ${{ inputs.head_sha }}
         run: |
-          FAILED_JOBS=$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs \
-            --jq '.jobs[] | select(.conclusion == "failure") | .name')
-          if ! echo "$FAILED_JOBS" | grep -q "review-ai"; then
-            echo "review-ai did not fail (failed: $FAILED_JOBS), skipping"
-            exit 0
-          fi
-
-          PR_NUMBER=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open" \
-            --paginate \
-            --jq ".[] | select(.head.sha == \"$HEAD_SHA\") | .number")
-          if [ -z "$PR_NUMBER" ]; then
-            echo "No open PR found for SHA $HEAD_SHA"
-            exit 0
-          fi
+          PR_NUMBER="${PR_NUMBER}"
+          HEAD_SHA="${HEAD_SHA}"
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
 
           REVIEW_BODY=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
@@ -60,7 +60,7 @@ jobs:
       - uses: actions/checkout@v4
         if: steps.pr-info.outputs.pr_number
         with:
-          ref: ${{ github.event.workflow_run.head_branch }}
+          ref: ${{ inputs.head_branch }}
           fetch-depth: 0
           persist-credentials: true
           path: target-repo
@@ -113,10 +113,10 @@ jobs:
       - name: Approve pending CI workflows
         if: steps.pr-info.outputs.pr_number
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
-          PR_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          GH_TOKEN: ${{ github.token }}
+          PR_BRANCH: ${{ inputs.head_branch }}
         run: |
-          sleep 10
+          sleep 15
           for run_id in $(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_branch=$PR_BRANCH&status=action_required" --jq '.workflow_runs[].id' 2>/dev/null); do
             echo "Approving workflow run $run_id..."
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/approve" -X POST 2>/dev/null && echo "Approved $run_id" || echo "Failed to approve $run_id"
