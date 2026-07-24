@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: eap-backend
+spec:
+  containers:
+  - name: backend
+    image: crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com/eap-app/backend:latest
+    env:
+    - name: APP_ENV
+      value: production
+    - name: APP_LLM__BACKEND
+      value: llm
+    - name: APP_SEED_ADMIN_EMAIL
+      valueFrom:
+        secretKeyRef:
+          name: eap-secrets
+          key: ADMIN_EMAIL
+    - name: APP_SEED_ADMIN_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: eap-secrets
+          key: ADMIN_PASSWORD
+    volumeMounts:
+    - name: data
+      mountPath: /app/data
+  volumes:
+  - name: data
+    hostPath:
+      path: /opt/eap/data
