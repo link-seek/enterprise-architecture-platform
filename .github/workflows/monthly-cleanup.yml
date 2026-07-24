@@ -1,0 +1,11 @@
+name: Monthly Cleanup
+
+on:
+  schedule:
+    - cron: '0 3 1 * *'
+  workflow_dispatch: {}
+
+jobs:
+  cleanup:
+    uses: link-seek/issue-resolver/.github/workflows/monthly-cleanup.yml@main
+    secrets: inherit
