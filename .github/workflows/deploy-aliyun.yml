@@ -122,10 +122,20 @@ jobs:
 
       - name: Deploy with podman
         run: |
-          # Stop existing pod if any
-          podman pod rm -f eap-backend 2>/dev/null || true
-          # Deploy using Kubernetes Pod YAML
-          podman play kube deploy/pod.yml
+          # Stop existing container if any
+          podman rm -f eap-backend 2>/dev/null || true
+          # Pull latest image and run
+          podman pull "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:latest"
+          podman run -d --name eap-backend \
+            --replace \
+            -p 8080:8080 \
+            -v /opt/eap/data:/app/data \
+            -e APP_ENV=production \
+            -e APP_LLM__BACKEND=llm \
+            -e APP_SEED_ADMIN_EMAIL="${{ secrets.ADMIN_EMAIL }}" \
+            -e APP_SEED_ADMIN_PASSWORD="${{ secrets.ADMIN_PASSWORD }}" \
+            -e APP_DATABASE__URL="sqlite:///app/data/platform.db?mode=rwc" \
+            "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:latest"
 
       - name: Health check
         run: |
