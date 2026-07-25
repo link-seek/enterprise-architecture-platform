@@ -157,27 +157,30 @@ jobs:
 
           echo "Latest AI review verdict: $VERDICT"
 
-          if [ "$VERDICT" = "APPROVED" ]; then
-            echo "AI approved the PR"
-          elif [ "$VERDICT" = "CHANGES_REQUESTED" ]; then
-            echo "::error::AI requested changes, blocking merge"
+          # Severity check: 🔴 Critical / 🟠 Important → block + auto-fix
+          # 🟡 Medium / improvement → advisory, pass
+          # Also check text keywords for non-emoji reviews
+          has_blocking_severity() {
+            echo "$REVIEW_BODY" | grep -qE '🔴|🟠|critical bug|Critical issue|Important issue|🟠'
+          }
+
+          dispatch_autofix() {
             echo "Dispatching PR Auto-Fix..."
             GH_TOKEN="$DISPATCH_TOKEN" gh workflow run pr-auto-fix.yml \
               -f pr_number="$PR_NUMBER" \
               -f head_branch="${{ github.event.pull_request.head.ref }}" \
               -f head_sha="$HEAD_SHA" || echo "Failed to dispatch auto-fix"
-            exit 1
-          elif [ "$VERDICT" = "COMMENTED" ]; then
-            if echo "$REVIEW_BODY" | grep -qE '🔴|🟠'; then
+          }
+
+          if [ "$VERDICT" = "APPROVED" ]; then
+            echo "AI approved the PR"
+          elif [ "$VERDICT" = "CHANGES_REQUESTED" ] || [ "$VERDICT" = "COMMENTED" ]; then
+            if has_blocking_severity; then
               echo "::error::AI review has Critical/Important issues, blocking merge"
-              echo "Dispatching PR Auto-Fix..."
-              GH_TOKEN="$DISPATCH_TOKEN" gh workflow run pr-auto-fix.yml \
-                -f pr_number="$PR_NUMBER" \
-                -f head_branch="${{ github.event.pull_request.head.ref }}" \
-                -f head_sha="$HEAD_SHA" || echo "Failed to dispatch auto-fix"
+              dispatch_autofix
               exit 1
             else
-              echo "AI review has no Critical/Important issues, passing"
+              echo "AI review verdict: $VERDICT, but only advisory issues (🟡/no severity) — passing"
             fi
           else
             echo "::error::No AI review found (got: $VERDICT)"
