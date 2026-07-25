@@ -1,8 +1,16 @@
 import { ApolloClient, InMemoryCache, createHttpLink, from } from '@apollo/client'
 import { setContext } from '@apollo/client/link/context'
 
+// In production, frontend is served from OSS (www.xieyucheng.top) but
+// GraphQL API lives on the backend (api.xieyucheng.top). Use VITE_GRAPHQL_URL
+// or derive from VITE_API_URL to avoid sending requests to OSS (405 error).
+const graphqlUri = import.meta.env.VITE_GRAPHQL_URL
+  ?? (import.meta.env.VITE_API_URL
+    ? import.meta.env.VITE_API_URL.replace(/\/api\/?$/, '/graphql')
+    : '/graphql')
+
 const httpLink = createHttpLink({
-  uri: '/graphql',
+  uri: graphqlUri,
 })
 
 const authLink = setContext((_, { headers }) => {
