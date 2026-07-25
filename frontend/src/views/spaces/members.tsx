@@ -16,13 +16,12 @@ const SPACE_USER_BY_EMAIL = gql`
     spaceUserByEmail(spaceId: $spaceId, email: $email) {
       id
       name
-      email
     }
   }
 `
 
 interface UserResult {
-  spaceUserByEmail: { id: string; name: string; email: string } | null
+  spaceUserByEmail: { id: string; name: string } | null
 }
 
 export function SpaceMembersDialog({ spaceId, open, onOpenChange }: {
@@ -34,7 +33,7 @@ export function SpaceMembersDialog({ spaceId, open, onOpenChange }: {
   const [role, setRole] = useState<'editor' | 'owner'>('editor')
   const [error, setError] = useState<string | null>(null)
 
-  const { data, loading } = useQuery<{ spaceMembers: { nodes: SpaceMember[] } }>(
+  const { data, loading } = useQuery<{ spaceMembersBySpace: SpaceMember[] }>(
     GET_SPACE_MEMBERS,
     { variables: { spaceId }, skip: !open },
   )
@@ -66,7 +65,7 @@ export function SpaceMembersDialog({ spaceId, open, onOpenChange }: {
     addMember({ variables: { spaceId, userId: user.id, role } })
   }
 
-  const members = data?.spaceMembers?.nodes ?? []
+  const members = data?.spaceMembersBySpace ?? []
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

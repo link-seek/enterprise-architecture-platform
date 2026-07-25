@@ -103,11 +103,24 @@ impl SpaceRepository for SeaOrmSpaceRepo {
     }
 
     async fn count_owned_by(&self, user_id: Uuid) -> Result<u64, DomainError> {
-        let count = space_member::Entity::find()
+        // Count owner memberships only for non-archived spaces. Without this
+        // filter a non-admin who archives their only space would remain at the
+        // 1-space quota and could never create another.
+        let pairs = space_member::Entity::find()
             .filter(space_member::Column::UserId.eq(user_id))
             .filter(space_member::Column::Role.eq("owner"))
-            .count(&self.db)
+            .find_also_related(space::Entity)
+            .all(&self.db)
             .await?;
+        let count = pairs
+            .into_iter()
+            .filter(|(_, space_opt)| {
+                space_opt
+                    .as_ref()
+                    .map(|s| s.deleted_at.is_none())
+                    .unwrap_or(false)
+            })
+            .count() as u64;
         Ok(count)
     }
 }

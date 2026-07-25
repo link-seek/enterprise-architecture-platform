@@ -57,10 +57,8 @@ export const GET_SPACE = gql`
 export const GET_SPACE_MEMBERS = gql`
   ${SPACE_MEMBER_FIELDS}
   query GetSpaceMembers($spaceId: String!) {
-    spaceMembers(filters: { spaceId: { eq: $spaceId } }) {
-      nodes {
-        ...SpaceMemberFields
-      }
+    spaceMembersBySpace(spaceId: $spaceId) {
+      ...SpaceMemberFields
     }
   }
 `

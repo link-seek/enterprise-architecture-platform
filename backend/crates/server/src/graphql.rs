@@ -1177,15 +1177,26 @@ async fn ensure_space_read_access(
     Ok(())
 }
 
-/// Lightweight result type for `spaceUserByEmail`. Exposing only id/name/email
+/// Lightweight result type for `spaceUserByEmail`. Exposing only id/name
 /// avoids routing sub-field resolution through the `Users` entity object (whose
 /// `email` field is admin-only and `password_hash` is hidden), so a non-admin
-/// space owner can look up users to invite without needing global admin.
+/// space owner can look up users to invite without needing global admin. The
+/// `email` is intentionally NOT returned: the caller already supplied it, and
+/// echoing it back would re-expose admin-only PII and enable cross-tenant email
+/// enumeration through this endpoint.
 #[derive(Clone, Debug)]
 struct SpaceUserLookup {
     id: String,
     name: String,
-    email: String,
+}
+
+/// Result type for `myMembership`: returns only the caller's own role in a
+/// space (or null for non-members). This avoids the admin-gated auto-generated
+/// `spaceMembers` query so non-admin editors/owners can resolve their edit
+/// permissions without global admin.
+#[derive(Clone, Debug)]
+struct MyMembership {
+    role: String,
 }
 
 fn register_space_scoped_queries(builder: &mut Builder) {
@@ -1205,14 +1216,51 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                 let v = ctx.parent_value.try_downcast_ref::<SpaceUserLookup>()?;
                 Ok(Some(FieldValue::value(v.name.clone())))
             })
-        }))
-        .field(Field::new("email", TypeRef::named_nn(TypeRef::STRING), |ctx| {
-            FieldFuture::new(async move {
-                let v = ctx.parent_value.try_downcast_ref::<SpaceUserLookup>()?;
-                Ok(Some(FieldValue::value(v.email.clone())))
-            })
         }));
     builder.outputs.push(space_user_type);
+
+    // ── MyMembership output type ──────────────────────────────────────
+    let my_membership_type = Object::new("MyMembership")
+        .field(Field::new("role", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<MyMembership>()?;
+                Ok(Some(FieldValue::value(v.role.clone())))
+            })
+        }));
+    builder.outputs.push(my_membership_type);
+
+    // ── myMembership ──────────────────────────────────────────────────
+    // Returns the caller's own role in a space (or null for non-members).
+    // Unlike the admin-gated auto-generated `spaceMembers` query, this is
+    // safe for non-admin editors/owners and only discloses the caller's own
+    // membership — never other users'.
+    let my_membership_query = Field::new(
+        "myMembership",
+        TypeRef::named("MyMembership"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let claims = require_claims(&ctx)?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let service = SpaceService::new(
+                    SeaOrmSpaceRepo::new(db.clone()),
+                    SeaOrmMembershipRepo::new(db.clone()),
+                );
+                let membership = service
+                    .my_membership(space_id, claims.user_id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(membership.map(|m| FieldValue::owned_any(MyMembership {
+                    role: match m.role {
+                        SpaceRole::Owner => "owner".to_owned(),
+                        SpaceRole::Editor => "editor".to_owned(),
+                    },
+                })))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(my_membership_query);
 
     // ── spaceMembersBySpace ──────────────────────────────────────────
     let members_query = Field::new(
@@ -1270,9 +1318,9 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     // Allows a space owner/editor to look up a user by email for the purpose
     // of adding them as a member, without requiring global admin. Authorization
     // is enforced via `ensure_space_edit_access` (caller must be able to edit
-    // the space). The result is a SpaceUserLookup (id/name/email only) rather
-    // than the full Users entity, so sensitive fields (password_hash, tokens)
-    // and admin-only fields (email) are never exposed through this path.
+    // the space). The result is a SpaceUserLookup (id/name only) rather than
+    // the full Users entity, so sensitive fields (password_hash, tokens) and
+    // admin-only fields (email) are never exposed through this path.
     let user_lookup = Field::new(
         "spaceUserByEmail",
         TypeRef::named("SpaceUserLookup"),
@@ -1291,7 +1339,6 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                 Ok(model.map(|m| FieldValue::owned_any(SpaceUserLookup {
                     id: m.id.to_string(),
                     name: m.name,
-                    email: m.email,
                 })))
             })
         },
