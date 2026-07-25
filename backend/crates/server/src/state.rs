@@ -42,7 +42,7 @@ impl AppState {
         // - If APP_SEED_ADMIN_EMAIL is set, always seed (regardless of APP_ENV).
         // - Otherwise: local/dev use default admin@test.com/admin123456;
         //   production logs a warning prompting the operator to set the env var.
-        let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
+        let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
         let explicit_email = std::env::var("APP_SEED_ADMIN_EMAIL").ok();
         match explicit_email {
             Some(_) => {
@@ -121,7 +121,7 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
     // tests can create/update/delete entities within the test space. These are
     // only seeded in local/dev environments to avoid leaking test accounts into
     // production.
-    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
+    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
     if app_env == "local" || app_env == "dev" {
         let test_users = [
             ("test@example.com", "测试用户", "testpassword123"),
