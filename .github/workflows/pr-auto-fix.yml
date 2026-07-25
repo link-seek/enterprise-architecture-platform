@@ -55,11 +55,40 @@ jobs:
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
           echo "max_iterations=$MAX_ITERATIONS" >> $GITHUB_OUTPUT
 
+          # Get review feedback
           REVIEW_BODY=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
             --paginate \
             --jq '[.[] | select(.user.login == "github-actions[bot]" and (.state == "CHANGES_REQUESTED" or .state == "COMMENTED"))] | sort_by(.submitted_at) | last | .body')
+
+          # Also get failed CI checks and their logs
+          CI_FAILURES=""
+          # Fetch all failed check-runs with their IDs and names in one query
+          FAILED_CHECKS=$(gh api repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs \
+            --jq '.check_runs[] | select(.conclusion == "failure") | "\(.id)\t\(.name)"' 2>/dev/null)
+          while IFS=$'\t' read -r CHECK_ID CHECK_NAME; do
+            [ -z "$CHECK_ID" ] && continue
+            echo "CI check failed: $CHECK_NAME (ID: $CHECK_ID)"
+            CI_FAILURES+="\n## CI Check Failed: $CHECK_NAME\n"
+            # Download logs (zip archive), extract and grep for errors
+            TMP_LOGS_DIR=$(mktemp -d)
+            if gh api repos/$GITHUB_REPOSITORY/check-runs/$CHECK_ID/logs > "$TMP_LOGS_DIR/logs.zip" 2>/dev/null; then
+              (cd "$TMP_LOGS_DIR" && unzip -o -q logs.zip 2>/dev/null || true)
+              LOGS=$(grep -rhi "error\|fail\|panic\|not found\|FAIL:" "$TMP_LOGS_DIR" 2>/dev/null | tail -30 || echo "No error lines found in logs")
+            else
+              LOGS="Could not fetch logs"
+            fi
+            rm -rf "$TMP_LOGS_DIR"
+            CI_FAILURES+="\n\`\`\`\n$LOGS\n\`\`\`\n"
+          done <<< "$FAILED_CHECKS"
+
+          # Combine review + CI failures
+          COMBINED="$REVIEW_BODY"
+          if [ -n "$CI_FAILURES" ]; then
+            COMBINED+="\n\n## CI Test Failures (must fix)\n$CI_FAILURES"
+          fi
+
           echo "review_body<<REVIEW_EOF" >> $GITHUB_OUTPUT
-          echo "$REVIEW_BODY" >> $GITHUB_OUTPUT
+          echo -e "$COMBINED" >> $GITHUB_OUTPUT
           echo "REVIEW_EOF" >> $GITHUB_OUTPUT
 
       - uses: actions/checkout@v4
