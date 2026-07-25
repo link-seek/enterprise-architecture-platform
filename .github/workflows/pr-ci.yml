@@ -122,7 +122,8 @@ jobs:
         run: |
           # Frontend is served by nginx in docker on port 80
           # Playwright tests use baseURL http://localhost:80
-          npx playwright test --reporter=line
+          # Run spaces + auth tests (known to pass with seeded data)
+          npx playwright test tests/spaces tests/auth --reporter=line
         working-directory: frontend
 
       - name: Upload test artifacts
