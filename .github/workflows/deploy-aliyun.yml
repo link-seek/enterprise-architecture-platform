@@ -122,7 +122,20 @@ jobs:
 
       - name: Deploy with podman
         run: |
-          # === 1. Backup data for rollback ===
+          # === 1. Stop old container BEFORE backup (avoid SQLite WAL race) ===
+          if podman inspect eap-backend >/dev/null 2>&1; then
+            # Save current image digest for rollback (immutable, not :latest)
+            PREV_DIGEST=$(podman inspect eap-backend --format '{{.ImageDigest}}' 2>/dev/null || echo "")
+            if [ -n "$PREV_DIGEST" ] && [ "$PREV_DIGEST" != "" ]; then
+              # Save full registry ref with digest for podman pull
+              echo "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend@${PREV_DIGEST}" > /opt/eap/data/.previous-image
+              echo "Previous image saved: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend@${PREV_DIGEST}"
+            fi
+            # Stop container to release DB lock
+            podman rm -f eap-backend 2>/dev/null || true
+          fi
+
+          # === 2. Backup data (container stopped, DB is cold) ===
           DB_FILE="/opt/eap/data/platform.db"
           BAK_FILE="/opt/eap/data/.platform.db.pre-deploy"
           if [ -f "$DB_FILE" ]; then
@@ -132,18 +145,7 @@ jobs:
             echo "No existing database, fresh deploy"
           fi
 
-          # === 2. Save current image ref for rollback ===
-          # Use the full image:tag reference (not digest) so podman pull works
-          if podman inspect eap-backend >/dev/null 2>&1; then
-            PREV_IMAGE=$(podman inspect eap-backend --format '{{.ImageName}}' 2>/dev/null || echo "")
-            if [ -n "$PREV_IMAGE" ] && [ "$PREV_IMAGE" != "" ]; then
-              echo "$PREV_IMAGE" > /opt/eap/data/.previous-image
-              echo "Previous image saved: $PREV_IMAGE"
-            fi
-          fi
-
-          # === 3. Stop old container, pull new image, start ===
-          podman rm -f eap-backend 2>/dev/null || true
+          # === 3. Pull new image and start ===
           podman pull "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:latest"
           podman run -d --name eap-backend \
             --replace \
@@ -236,11 +238,12 @@ jobs:
 
           echo "All frontend smoke tests passed"
 
-  # ==================== Rollback: deploy 或 smoke test 失败时自动回滚 ====================
+  # ==================== Rollback: 只在 deploy/smoke-test 失败时触发 ====================
   rollback:
     runs-on: [self-hosted, eap-prod]
     needs: [deploy, smoke-test]
-    if: github.ref == 'refs/heads/main' && failure()
+    # Only rollback if deploy or smoke-test specifically failed (not build failures)
+    if: always() && github.ref == 'refs/heads/main' && (needs.deploy.result == 'failure' || needs.smoke-test.result == 'failure')
     environment: production
     steps:
       - name: Rollback to previous image + data
