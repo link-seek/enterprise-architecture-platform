@@ -201,7 +201,9 @@ impl<R: ValueStreamRepository, S: ValueStreamStageRepository> ValueStreamService
         self.stage_repo.save(&stage).await
     }
 
-    /// Update a stage's mutable fields.
+    /// Update a stage's mutable fields, including its `sequence_order`. When
+    /// the order changes the resulting flow is re-validated for uniqueness and
+    /// contiguity. The parent value stream must be active.
     #[allow(clippy::too_many_arguments)]
     pub async fn update_stage(
         &self,
@@ -209,6 +211,7 @@ impl<R: ValueStreamRepository, S: ValueStreamStageRepository> ValueStreamService
         name: Option<String>,
         description: Option<Option<String>>,
         stage_type: Option<StageType>,
+        sequence_order: Option<i32>,
         input: Option<Option<String>>,
         output: Option<Option<String>>,
         owner_id: Option<Option<Uuid>>,
@@ -220,10 +223,44 @@ impl<R: ValueStreamRepository, S: ValueStreamStageRepository> ValueStreamService
             .find_by_id(stage_id)
             .await?
             .ok_or(DomainError::StageNotFound)?;
+
+        // Parent-active guard: stages of an archived value stream are immutable.
+        let vs = self
+            .repo
+            .find_by_id(stage.value_stream_id)
+            .await?
+            .ok_or(DomainError::ValueStreamNotFound)?;
+        if !vs.is_active() {
+            return Err(DomainError::CannotModifyArchived {
+                entity: "ValueStream".to_string(),
+            });
+        }
+
         let now = Utc::now();
         stage.update(
             name, description, stage_type, input, output, owner_id, objectives, metrics, now,
         )?;
+
+        // Apply sequence-order change and validate the resulting flow.
+        if let Some(new_order) = sequence_order {
+            if new_order < 1 {
+                return Err(DomainError::InvalidStageOrder { order: new_order });
+            }
+            stage.sequence_order = new_order;
+            stage.updated_at = now;
+        }
+        let mut stages = self
+            .stage_repo
+            .find_by_value_stream_ordered(stage.value_stream_id)
+            .await?;
+        // Replace the in-memory copy of this stage with the updated one.
+        if let Some(slot) = stages.iter_mut().find(|s| s.id == stage.id) {
+            *slot = stage.clone();
+        } else {
+            stages.push(stage.clone());
+        }
+        validate_stage_flow(&stages, stage.value_stream_id)?;
+
         self.stage_repo.save(&stage).await
     }
 
@@ -251,14 +288,24 @@ impl<R: ValueStreamRepository, S: ValueStreamStageRepository> ValueStreamService
         self.stage_repo.save(&stage).await
     }
 
-    /// Remove a stage (soft delete).
+    /// Remove a stage (soft delete). The parent value stream must be active so
+    /// the flow of an archived (historical) version is never mutated.
     pub async fn remove_stage(&self, stage_id: Uuid) -> Result<(), DomainError> {
-        // Ensure the stage exists.
-        let _ = self
+        let stage = self
             .stage_repo
             .find_by_id(stage_id)
             .await?
             .ok_or(DomainError::StageNotFound)?;
+        let vs = self
+            .repo
+            .find_by_id(stage.value_stream_id)
+            .await?
+            .ok_or(DomainError::ValueStreamNotFound)?;
+        if !vs.is_active() {
+            return Err(DomainError::CannotModifyArchived {
+                entity: "ValueStream".to_string(),
+            });
+        }
         self.stage_repo.soft_delete(stage_id).await
     }
 

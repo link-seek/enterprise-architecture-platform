@@ -13,6 +13,7 @@ use business_architecture::infrastructure::persistence::entities::{
 use business_architecture::application::value_stream_service::ValueStreamService;
 use business_architecture::application::space_service::SpaceService;
 use business_architecture::domain::value_stream::entity::ValueStream as DomainValueStream;
+use business_architecture::domain::value_stream::entity::ValueStreamStage as DomainValueStreamStage;
 use business_architecture::domain::value_stream::repository::ValueStreamRepository;
 use business_architecture::domain::space::entity::{Space as DomainSpace, SpaceMember as DomainSpaceMember};
 use business_architecture::infrastructure::persistence::value_stream_repo::SeaOrmValueStreamRepo;
@@ -21,9 +22,8 @@ use shared_common::enums::ValueStreamImportance;
 use shared_common::enums::SpaceRole;
 use shared_common::enums::{
     BusinessValueRating, CapabilityLevel, CapabilityStatus, CostRating,
-    LifecycleStatus, MaturityLevel, StageType, StageStatus,
+    LifecycleStatus, MaturityLevel, StageType,
 };
-use shared_common::value_objects::{StringVec, StringStringMap};
 
 pub type GraphqlSchema = async_graphql::dynamic::Schema;
 
@@ -424,6 +424,28 @@ fn domain_vs_to_model(vs: &DomainValueStream) -> value_stream::Model {
         deleted_at: vs.deleted_at,
         space_id: vs.space_id,
         value_proposition: vs.value_proposition.clone(),
+    }
+}
+
+/// Convert a domain ValueStreamStage back to a SeaORM Model so that
+/// seaography's field resolvers can downcast and resolve all fields.
+fn domain_stage_to_model(stage: &DomainValueStreamStage) -> value_stream_stage::Model {
+    value_stream_stage::Model {
+        id: stage.id,
+        name: stage.name.clone(),
+        sequence_order: stage.sequence_order,
+        input: stage.input.clone(),
+        output: stage.output.clone(),
+        value_stream_id: stage.value_stream_id,
+        created_at: stage.created_at,
+        updated_at: stage.updated_at,
+        deleted_at: stage.deleted_at,
+        description: stage.description.clone(),
+        stage_type: stage.stage_type,
+        status: stage.status,
+        owner_id: stage.owner_id,
+        objectives: stage.objectives.clone(),
+        metrics: stage.metrics.clone(),
     }
 }
 
@@ -1471,28 +1493,26 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     .and_then(|v| v.string().ok())
                     .and_then(|s| Uuid::parse_str(s).ok());
 
-                let now = chrono::Utc::now();
-                let am = value_stream_stage::ActiveModel {
-                    id: Set(Uuid::now_v7()),
-                    name: Set(name),
-                    sequence_order: Set(sequence_order),
-                    input: Set(input),
-                    output: Set(output),
-                    value_stream_id: Set(value_stream_id),
-                    created_at: Set(now),
-                    updated_at: Set(now),
-                    deleted_at: NotSet,
-                    description: Set(description),
-                    stage_type: Set(stage_type),
-                    status: Set(StageStatus::Draft),
-                    owner_id: Set(owner_id),
-                    objectives: Set(StringVec::default()),
-                    metrics: Set(StringStringMap::default()),
-                };
-                let model = am
-                    .insert(db)
+                let service = ValueStreamService::new(
+                    SeaOrmValueStreamRepo::new(db.clone()),
+                    SeaOrmValueStreamRepo::new(db.clone()),
+                );
+                let stage = service
+                    .add_stage(
+                        value_stream_id,
+                        name,
+                        sequence_order,
+                        stage_type,
+                        description,
+                        input,
+                        output,
+                        owner_id,
+                        None,
+                        None,
+                    )
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                let model = domain_stage_to_model(&stage);
                 Ok(Some(FieldValue::owned_any(model)))
             })
         },
@@ -1525,64 +1545,66 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                 let space_id = space_of_value_stream(db, existing.value_stream_id).await?;
                 ensure_space_edit_access(&ctx, db, space_id).await?;
 
-                let mut am: value_stream_stage::ActiveModel = existing.into();
-                if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) {
-                    am.name = Set(v.to_owned());
-                }
-                if let Some(v) = ctx.args.get("sequenceOrder").and_then(|v| v.i64().ok()).map(|v| v as i32) {
-                    am.sequence_order = Set(v);
-                }
-                match ctx.args.get("input") {
-                    Some(v) if v.is_null() => am.input = Set(None),
-                    Some(v) => {
-                        if let Ok(s) = v.string() {
-                            am.input = Set(Some(s.to_owned()));
-                        }
-                    }
-                    None => {}
-                }
-                match ctx.args.get("output") {
-                    Some(v) if v.is_null() => am.output = Set(None),
-                    Some(v) => {
-                        if let Ok(s) = v.string() {
-                            am.output = Set(Some(s.to_owned()));
-                        }
-                    }
-                    None => {}
-                }
-                match ctx.args.get("description") {
-                    Some(v) if v.is_null() => am.description = Set(None),
-                    Some(v) => {
-                        if let Ok(s) = v.string() {
-                            am.description = Set(Some(s.to_owned()));
-                        }
-                    }
-                    None => {}
-                }
-                if let Some(t) = ctx
+                let name = ctx
+                    .args
+                    .get("name")
+                    .and_then(|v| v.string().ok())
+                    .map(|s| s.to_owned());
+                let sequence_order = ctx
+                    .args
+                    .get("sequenceOrder")
+                    .and_then(|v| v.i64().ok())
+                    .map(|v| v as i32);
+                let input = match ctx.args.get("input") {
+                    Some(v) if v.is_null() => Some(None),
+                    Some(v) => v.string().ok().map(|s| Some(s.to_owned())),
+                    None => None,
+                };
+                let output = match ctx.args.get("output") {
+                    Some(v) if v.is_null() => Some(None),
+                    Some(v) => v.string().ok().map(|s| Some(s.to_owned())),
+                    None => None,
+                };
+                let description = match ctx.args.get("description") {
+                    Some(v) if v.is_null() => Some(None),
+                    Some(v) => v.string().ok().map(|s| Some(s.to_owned())),
+                    None => None,
+                };
+                let stage_type = ctx
                     .args
                     .get("stageType")
                     .and_then(|v| v.enum_name().ok().map(|s| s.to_owned()))
-                    .and_then(|s| StageType::from_str(&s))
-                {
-                    am.stage_type = Set(t);
-                }
-                match ctx.args.get("ownerId") {
-                    Some(v) if v.is_null() => am.owner_id = Set(None),
-                    Some(v) => {
-                        if let Ok(s) = v.string() {
-                            if let Ok(u) = Uuid::parse_str(s) {
-                                am.owner_id = Set(Some(u));
-                            }
-                        }
-                    }
-                    None => {}
-                }
-                am.updated_at = Set(chrono::Utc::now());
-                let model = am
-                    .update(db)
+                    .and_then(|s| StageType::from_str(&s));
+                let owner_id = match ctx.args.get("ownerId") {
+                    Some(v) if v.is_null() => Some(None),
+                    Some(v) => v
+                        .string()
+                        .ok()
+                        .and_then(|s| Uuid::parse_str(s).ok())
+                        .map(Some),
+                    None => None,
+                };
+
+                let service = ValueStreamService::new(
+                    SeaOrmValueStreamRepo::new(db.clone()),
+                    SeaOrmValueStreamRepo::new(db.clone()),
+                );
+                let stage = service
+                    .update_stage(
+                        id,
+                        name,
+                        description,
+                        stage_type,
+                        sequence_order,
+                        input,
+                        output,
+                        owner_id,
+                        None,
+                        None,
+                    )
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                let model = domain_stage_to_model(&stage);
                 Ok(Some(FieldValue::owned_any(model)))
             })
         },
@@ -1615,8 +1637,12 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                 let space_id = space_of_value_stream(db, existing.value_stream_id).await?;
                 ensure_space_edit_access(&ctx, db, space_id).await?;
 
-                value_stream_stage::Entity::delete_by_id(id)
-                    .exec(db)
+                let service = ValueStreamService::new(
+                    SeaOrmValueStreamRepo::new(db.clone()),
+                    SeaOrmValueStreamRepo::new(db.clone()),
+                );
+                service
+                    .remove_stage(id)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
                 Ok(Some(async_graphql::Value::Boolean(true)))

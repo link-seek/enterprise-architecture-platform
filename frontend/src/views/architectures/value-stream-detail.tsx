@@ -46,11 +46,11 @@ const GET_VALUE_STREAM_STAGES = gql`
 `
 
 const STAGE_TYPE_LABELS: Record<string, string> = {
-  Design: '设计',
-  Production: '生产',
-  Sales: '销售',
-  Delivery: '交付',
-  Custom: '自定义',
+  design: '设计',
+  production: '生产',
+  sales: '销售',
+  delivery: '交付',
+  custom: '自定义',
 }
 
 export default function ValueStreamDetail() {

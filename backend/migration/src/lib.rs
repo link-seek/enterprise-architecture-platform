@@ -30,6 +30,7 @@ mod m20250101_000027_create_space_members;
 mod m20250101_000028_create_space_invitations;
 pub mod m20250101_000029_add_space_id_to_business_entities;
 pub mod m20250101_000030_enrich_value_stream_stages;
+mod m20250101_000031_unique_value_stream_stage_order;
 
 pub struct Migrator;
 
@@ -67,6 +68,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000028_create_space_invitations::Migration),
             Box::new(m20250101_000029_add_space_id_to_business_entities::Migration),
             Box::new(m20250101_000030_enrich_value_stream_stages::Migration),
+            Box::new(m20250101_000031_unique_value_stream_stage_order::Migration),
         ]
     }
 }
