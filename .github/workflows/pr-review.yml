@@ -119,22 +119,22 @@ jobs:
             fi
           fi
 
-          # Check for architecture view changes (value-stream, business-capabilities, business-processes)
-          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/views/architectures/value-streams"; then
+          # Check for architecture view changes (value-stream, capabilities, processes)
+          if echo "$FRONTEND_CHANGES" | grep -qE "frontend/src/views/architectures/value-stream"; then
             if ! find frontend/tests/value-stream -name "*.spec.ts" 2>/dev/null | grep -q .; then
               MISSING_COVERAGE+=("value-stream view changes but no tests/value-stream/*.spec.ts")
             fi
           fi
 
-          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/views/architectures/business-capabilities"; then
+          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/views/architectures/capabilities"; then
             if ! find frontend/tests/business-capabilities -name "*.spec.ts" 2>/dev/null | grep -q .; then
-              MISSING_COVERAGE+=("business-capabilities view changes but no tests/business-capabilities/*.spec.ts")
+              MISSING_COVERAGE+=("capabilities view changes but no tests/business-capabilities/*.spec.ts")
             fi
           fi
 
-          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/views/architectures/business-processes"; then
+          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/views/architectures/processes"; then
             if ! find frontend/tests/business-processes -name "*.spec.ts" 2>/dev/null | grep -q .; then
-              MISSING_COVERAGE+=("business-processes view changes but no tests/business-processes/*.spec.ts")
+              MISSING_COVERAGE+=("processes view changes but no tests/business-processes/*.spec.ts")
             fi
           fi
 
