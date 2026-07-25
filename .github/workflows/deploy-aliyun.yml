@@ -132,12 +132,13 @@ jobs:
             echo "No existing database, fresh deploy"
           fi
 
-          # === 2. Save current image digest for rollback ===
+          # === 2. Save current image ref for rollback ===
+          # Use the full image:tag reference (not digest) so podman pull works
           if podman inspect eap-backend >/dev/null 2>&1; then
-            PREV_DIGEST=$(podman inspect eap-backend --format '{{.ImageDigest}}' 2>/dev/null || podman inspect eap-backend --format '{{.Image}}' 2>/dev/null || echo "")
-            if [ -n "$PREV_DIGEST" ]; then
-              echo "$PREV_DIGEST" > /opt/eap/data/.previous-image
-              echo "Previous image saved: $PREV_DIGEST"
+            PREV_IMAGE=$(podman inspect eap-backend --format '{{.ImageName}}' 2>/dev/null || echo "")
+            if [ -n "$PREV_IMAGE" ] && [ "$PREV_IMAGE" != "" ]; then
+              echo "$PREV_IMAGE" > /opt/eap/data/.previous-image
+              echo "Previous image saved: $PREV_IMAGE"
             fi
           fi
 
