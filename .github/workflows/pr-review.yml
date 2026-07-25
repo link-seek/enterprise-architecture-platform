@@ -60,8 +60,68 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
             -f content="rocket" 2>/dev/null || true
 
+  e2e-coverage-check:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check E2E test coverage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Get list of changed files in the PR
+          CHANGED_FILES=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files --paginate --jq '.[].filename')
+
+          # Check if any testable frontend source files changed
+          # Inclusion list: only views/, api/, stores/, lib/apollo need E2E tests
+          FRONTEND_SRC_CHANGES=$(echo "$CHANGED_FILES" | grep -E '^frontend/src/' \
+            | grep -E '^frontend/src/(views/|api/|stores/|lib/apollo)' || true)
+
+          # If no frontend source files changed, skip E2E check
+          if [ -z "$FRONTEND_SRC_CHANGES" ]; then
+            echo "No testable frontend source changes — skipping E2E coverage check"
+            exit 0
+          fi
+
+          echo "Frontend source changes:"
+          echo "$FRONTEND_SRC_CHANGES"
+
+          # Source area → required test dir mapping
+          # Check each area: if source in area changed, PR must include test changes in the corresponding test dir
+          MISSING=()
+
+          check_area() {
+            local src_pattern="$1" test_dir="$2" label="$3"
+            if echo "$FRONTEND_SRC_CHANGES" | grep -qE "$src_pattern"; then
+              if ! echo "$CHANGED_FILES" | grep -qE "^frontend/tests/${test_dir}/.*\.spec\.ts$"; then
+                MISSING+=("$label: $src_pattern changed but no tests/${test_dir}/*.spec.ts in PR")
+              fi
+            fi
+          }
+
+          check_area 'frontend/src/(views/spaces|api/spaces)'   'spaces'              'spaces'
+          check_area 'frontend/src/(views/login|api/auth|stores/auth)' 'auth'         'auth'
+          check_area 'frontend/src/lib/apollo'                  'spaces'              'apollo'
+          check_area 'frontend/src/views/architectures/value-stream' 'value-stream'   'value-stream'
+          check_area 'frontend/src/views/architectures/capabilities' 'business-capabilities' 'capabilities'
+          check_area 'frontend/src/views/architectures/processes'    'business-processes'    'processes'
+          check_area 'frontend/src/views/architectures/(crud|layout|users|version-control)' 'spaces' 'architecture'
+
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo "::error::E2E test coverage missing:"
+            for msg in "${MISSING[@]}"; do
+              echo "  - $msg"
+            done
+            exit 1
+          fi
+
+          echo "E2E test coverage OK — PR includes corresponding test changes"
+
   review-ai:
     if: ${{ github.event_name == 'pull_request' }}
+    needs: [e2e-coverage-check]
     runs-on: ubuntu-latest
     timeout-minutes: 360
     concurrency:
