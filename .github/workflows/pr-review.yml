@@ -74,87 +74,40 @@ jobs:
           # Get list of changed files in the PR
           CHANGED_FILES=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files --paginate --jq '.[].filename')
 
-          # Check if any frontend source files changed
-          FRONTEND_CHANGES=$(echo "$CHANGED_FILES" | grep -E '^frontend/src/' || true)
+          # Check if any frontend source files changed (excluding tests)
+          FRONTEND_SRC_CHANGES=$(echo "$CHANGED_FILES" | grep -E '^frontend/src/' || true)
+          # Check if any E2E test files changed in this PR
+          PR_TEST_CHANGES=$(echo "$CHANGED_FILES" | grep -E '^frontend/tests/.*\.spec\.ts$' || true)
 
           # If no frontend source files changed, skip E2E check
-          if [ -z "$FRONTEND_CHANGES" ]; then
+          if [ -z "$FRONTEND_SRC_CHANGES" ]; then
             echo "No frontend source changes — skipping E2E coverage check"
             exit 0
           fi
 
-          echo "Frontend changes detected:"
-          echo "$FRONTEND_CHANGES"
+          echo "Frontend source changes:"
+          echo "$FRONTEND_SRC_CHANGES"
+          echo ""
+          echo "E2E test changes in this PR:"
+          echo "${PR_TEST_CHANGES:-none}"
+          echo ""
 
-          # Check for E2E test files
-          E2E_TESTS=$(find frontend/tests -name "*.spec.ts" 2>/dev/null || true)
-          if [ -z "$E2E_TESTS" ]; then
-            echo "::error::Frontend source changed but NO E2E tests found in frontend/tests/"
+          # If frontend source changed but PR includes NO test changes → block
+          if [ -z "$PR_TEST_CHANGES" ]; then
+            echo "::error::Frontend source changed but PR includes NO E2E test changes."
+            echo "Add corresponding E2E tests in frontend/tests/ for the changed source."
+            echo ""
+            echo "Source→test mapping:"
+            echo "  src/views/spaces, src/api/spaces → tests/spaces/*.spec.ts"
+            echo "  src/views/login, src/api/auth, src/stores/auth → tests/auth/*.spec.ts"
+            echo "  src/lib/apollo → tests/spaces/*.spec.ts"
+            echo "  src/views/architectures/value-stream* → tests/value-stream/*.spec.ts"
+            echo "  src/views/architectures/capabilities → tests/business-capabilities/*.spec.ts"
+            echo "  src/views/architectures/processes → tests/business-processes/*.spec.ts"
             exit 1
           fi
 
-          # Check if changed source files have corresponding test coverage
-          # Map source directories to test directories
-          # This repo uses frontend/src/views/ (not pages/)
-          MISSING_COVERAGE=()
-
-          # Check for spaces view changes without corresponding tests
-          if echo "$FRONTEND_CHANGES" | grep -qE "frontend/src/views/spaces|frontend/src/api/spaces"; then
-            if ! find frontend/tests/spaces -name "*.spec.ts" 2>/dev/null | grep -q .; then
-              MISSING_COVERAGE+=("spaces changes but no tests/spaces/*.spec.ts")
-            fi
-          fi
-
-          # Check for auth-related changes (views, api, stores)
-          if echo "$FRONTEND_CHANGES" | grep -qE "frontend/src/views/login|frontend/src/api/auth|frontend/src/stores/auth"; then
-            if ! find frontend/tests/auth -name "*.spec.ts" 2>/dev/null | grep -q .; then
-              MISSING_COVERAGE+=("auth changes but no tests/auth/*.spec.ts")
-            fi
-          fi
-
-          # Apollo changes affect all GraphQL queries
-          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/lib/apollo"; then
-            if ! find frontend/tests/spaces -name "*.spec.ts" 2>/dev/null | grep -q .; then
-              MISSING_COVERAGE+=("apollo.ts changed but no tests/spaces/*.spec.ts to verify GraphQL")
-            fi
-          fi
-
-          # Check for architecture view changes (value-stream, capabilities, processes)
-          if echo "$FRONTEND_CHANGES" | grep -qE "frontend/src/views/architectures/value-stream"; then
-            if ! find frontend/tests/value-stream -name "*.spec.ts" 2>/dev/null | grep -q .; then
-              MISSING_COVERAGE+=("value-stream view changes but no tests/value-stream/*.spec.ts")
-            fi
-          fi
-
-          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/views/architectures/capabilities"; then
-            if ! find frontend/tests/business-capabilities -name "*.spec.ts" 2>/dev/null | grep -q .; then
-              MISSING_COVERAGE+=("capabilities view changes but no tests/business-capabilities/*.spec.ts")
-            fi
-          fi
-
-          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/views/architectures/processes"; then
-            if ! find frontend/tests/business-processes -name "*.spec.ts" 2>/dev/null | grep -q .; then
-              MISSING_COVERAGE+=("processes view changes but no tests/business-processes/*.spec.ts")
-            fi
-          fi
-
-          # Check for other architecture view changes (crud, layout, users, version-control)
-          # These all use GraphQL, so verify spaces tests exist
-          if echo "$FRONTEND_CHANGES" | grep -qE "frontend/src/views/architectures/(crud|layout|users|version-control)"; then
-            if ! find frontend/tests/spaces -name "*.spec.ts" 2>/dev/null | grep -q .; then
-              MISSING_COVERAGE+=("architecture view changes but no tests/spaces/*.spec.ts to verify GraphQL")
-            fi
-          fi
-
-          if [ ${#MISSING_COVERAGE[@]} -gt 0 ]; then
-            echo "::error::E2E test coverage missing:"
-            for msg in "${MISSING_COVERAGE[@]}"; do
-              echo "  - $msg"
-            done
-            exit 1
-          fi
-
-          echo "E2E test coverage OK"
+          echo "E2E test coverage OK — PR includes test changes for frontend source changes"
 
   review-ai:
     if: ${{ github.event_name == 'pull_request' }}
