@@ -60,8 +60,92 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
             -f content="rocket" 2>/dev/null || true
 
+  e2e-coverage-check:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    outputs:
+      has-e2e-tests: ${{ steps.check.outputs.has-e2e-tests }}
+      coverage-msg: ${{ steps.check.outputs.coverage-msg }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check E2E test coverage
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Get list of changed files in the PR
+          CHANGED_FILES=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files --paginate --jq '.[].filename')
+
+          # Check if any frontend source files changed
+          FRONTEND_CHANGES=$(echo "$CHANGED_FILES" | grep -E '^frontend/src/' || true)
+          WORKFLOW_CHANGES=$(echo "$CHANGED_FILES" | grep -E '^\.github/workflows/' || true)
+          BACKEND_CHANGES=$(echo "$CHANGED_FILES" | grep -E '^backend/' || true)
+
+          # If only workflow/config files changed, skip E2E check
+          if [ -z "$FRONTEND_CHANGES" ]; then
+            echo "No frontend source changes — skipping E2E coverage check"
+            echo "has-e2e-tests=true" >> $GITHUB_OUTPUT
+            echo "coverage-msg=No frontend changes, E2E check skipped" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Frontend changes detected:"
+          echo "$FRONTEND_CHANGES"
+
+          # Check for E2E test files
+          E2E_TESTS=$(find frontend/tests -name "*.spec.ts" 2>/dev/null || true)
+          if [ -z "$E2E_TESTS" ]; then
+            echo "::error::Frontend source changed but NO E2E tests found in frontend/tests/"
+            echo "has-e2e-tests=false" >> $GITHUB_OUTPUT
+            echo "coverage-msg=BLOCKING: Frontend changes without E2E tests" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          # Check if changed source files have corresponding test coverage
+          # Map source directories to test directories
+          MISSING_COVERAGE=()
+
+          # Check for page/feature changes without corresponding tests
+          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/pages/spaces"; then
+            if ! find frontend/tests/spaces -name "*.spec.ts" 2>/dev/null | grep -q .; then
+              MISSING_COVERAGE+=("spaces page changes but no tests/spaces/*.spec.ts")
+            fi
+          fi
+
+          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/pages/auth\|frontend/src/api/auth"; then
+            if ! find frontend/tests/auth -name "*.spec.ts" 2>/dev/null | grep -q .; then
+              MISSING_COVERAGE+=("auth changes but no tests/auth/*.spec.ts")
+            fi
+          fi
+
+          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/lib/apollo"; then
+            # Apollo changes affect all GraphQL queries — check spaces tests
+            if ! find frontend/tests/spaces -name "*.spec.ts" 2>/dev/null | grep -q .; then
+              MISSING_COVERAGE+=("apollo.ts changed but no tests/spaces/*.spec.ts to verify GraphQL")
+            fi
+          fi
+
+          if [ ${#MISSING_COVERAGE[@]} -gt 0 ]; then
+            echo "::error::E2E test coverage missing:"
+            for msg in "${MISSING_COVERAGE[@]}"; do
+              echo "  - $msg"
+            done
+            echo "has-e2e-tests=false" >> $GITHUB_OUTPUT
+            echo "coverage-msg=BLOCKING: ${MISSING_COVERAGE[*]}" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "E2E test coverage OK"
+          echo "has-e2e-tests=true" >> $GITHUB_OUTPUT
+          echo "coverage-msg=E2E coverage verified" >> $GITHUB_OUTPUT
+
   review-ai:
     if: ${{ github.event_name == 'pull_request' }}
+    needs: [e2e-coverage-check]
     runs-on: ubuntu-latest
     timeout-minutes: 360
     concurrency:
