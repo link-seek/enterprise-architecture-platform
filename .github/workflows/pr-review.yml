@@ -107,23 +107,25 @@ jobs:
 
           # Check if changed source files have corresponding test coverage
           # Map source directories to test directories
+          # This repo uses frontend/src/views/ (not pages/)
           MISSING_COVERAGE=()
 
-          # Check for page/feature changes without corresponding tests
-          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/pages/spaces"; then
+          # Check for spaces view changes without corresponding tests
+          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/views/spaces"; then
             if ! find frontend/tests/spaces -name "*.spec.ts" 2>/dev/null | grep -q .; then
-              MISSING_COVERAGE+=("spaces page changes but no tests/spaces/*.spec.ts")
+              MISSING_COVERAGE+=("spaces view changes but no tests/spaces/*.spec.ts")
             fi
           fi
 
-          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/pages/auth\|frontend/src/api/auth"; then
+          # Check for auth/login view changes
+          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/views/login\|frontend/src/api/auth"; then
             if ! find frontend/tests/auth -name "*.spec.ts" 2>/dev/null | grep -q .; then
               MISSING_COVERAGE+=("auth changes but no tests/auth/*.spec.ts")
             fi
           fi
 
+          # Apollo changes affect all GraphQL queries
           if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/lib/apollo"; then
-            # Apollo changes affect all GraphQL queries — check spaces tests
             if ! find frontend/tests/spaces -name "*.spec.ts" 2>/dev/null | grep -q .; then
               MISSING_COVERAGE+=("apollo.ts changed but no tests/spaces/*.spec.ts to verify GraphQL")
             fi
