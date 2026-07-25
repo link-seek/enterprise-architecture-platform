@@ -122,22 +122,27 @@ jobs:
 
       - name: Deploy with podman
         run: |
-          # Save current image digest for rollback (use digest, not tag, for reliability)
+          # === 1. Backup data for rollback ===
+          DB_FILE="/opt/eap/data/platform.db"
+          BAK_FILE="/opt/eap/data/.platform.db.pre-deploy"
+          if [ -f "$DB_FILE" ]; then
+            cp "$DB_FILE" "$BAK_FILE"
+            echo "Database backed up to $BAK_FILE"
+          else
+            echo "No existing database, fresh deploy"
+          fi
+
+          # === 2. Save current image digest for rollback ===
           if podman inspect eap-backend >/dev/null 2>&1; then
             PREV_DIGEST=$(podman inspect eap-backend --format '{{.ImageDigest}}' 2>/dev/null || podman inspect eap-backend --format '{{.Image}}' 2>/dev/null || echo "")
             if [ -n "$PREV_DIGEST" ]; then
               echo "$PREV_DIGEST" > /opt/eap/data/.previous-image
               echo "Previous image saved: $PREV_DIGEST"
-            else
-              echo "Could not get previous image digest"
             fi
-          else
-            echo "No previous container found"
           fi
 
-          # Stop existing container if any
+          # === 3. Stop old container, pull new image, start ===
           podman rm -f eap-backend 2>/dev/null || true
-          # Pull latest image and run
           podman pull "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:latest"
           podman run -d --name eap-backend \
             --replace \
@@ -237,9 +242,23 @@ jobs:
     if: github.ref == 'refs/heads/main' && failure()
     environment: production
     steps:
-      - name: Rollback to previous image
+      - name: Rollback to previous image + data
         run: |
-          # Use persistent storage (mounted volume) instead of /tmp
+          # === 1. Restore database backup ===
+          DB_FILE="/opt/eap/data/platform.db"
+          BAK_FILE="/opt/eap/data/.platform.db.pre-deploy"
+          if [ -f "$BAK_FILE" ]; then
+            echo "Restoring database from $BAK_FILE"
+            # Stop container first to release the DB file lock
+            podman rm -f eap-backend 2>/dev/null || true
+            cp "$BAK_FILE" "$DB_FILE"
+            echo "Database restored"
+          else
+            echo "WARNING: No database backup found — rollback image only, data stays as-is"
+            podman rm -f eap-backend 2>/dev/null || true
+          fi
+
+          # === 2. Restore previous image ===
           PREV_FILE="/opt/eap/data/.previous-image"
           if [ ! -f "$PREV_FILE" ]; then
             echo "No previous image saved at $PREV_FILE, cannot rollback"
@@ -248,9 +267,8 @@ jobs:
           fi
 
           PREV_IMAGE=$(cat "$PREV_FILE")
-          echo "Rolling back to: $PREV_IMAGE"
+          echo "Rolling back to image: $PREV_IMAGE"
 
-          podman rm -f eap-backend 2>/dev/null || true
           podman pull "$PREV_IMAGE"
           podman run -d --name eap-backend \
             --replace \
@@ -263,11 +281,13 @@ jobs:
             -e APP_DATABASE__URL="sqlite:///app/data/platform.db?mode=rwc" \
             "$PREV_IMAGE"
 
-          # Verify rollback
+          # === 3. Verify rollback ===
           sleep 5
           for i in $(seq 1 10); do
             if curl -sf http://localhost:8080/health 2>/dev/null; then
-              echo "Rollback successful — backend healthy with previous image"
+              echo "Rollback successful — image + data restored to pre-deploy state"
+              # Clean up backup
+              rm -f "$BAK_FILE"
               exit 0
             fi
             sleep 3
