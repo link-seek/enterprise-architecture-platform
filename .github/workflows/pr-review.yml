@@ -67,7 +67,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Check E2E test coverage
-        id: check
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -117,6 +116,25 @@ jobs:
           if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/lib/apollo"; then
             if ! find frontend/tests/spaces -name "*.spec.ts" 2>/dev/null | grep -q .; then
               MISSING_COVERAGE+=("apollo.ts changed but no tests/spaces/*.spec.ts to verify GraphQL")
+            fi
+          fi
+
+          # Check for architecture view changes (value-stream, business-capabilities, business-processes)
+          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/views/architectures/value-streams"; then
+            if ! find frontend/tests/value-stream -name "*.spec.ts" 2>/dev/null | grep -q .; then
+              MISSING_COVERAGE+=("value-stream view changes but no tests/value-stream/*.spec.ts")
+            fi
+          fi
+
+          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/views/architectures/business-capabilities"; then
+            if ! find frontend/tests/business-capabilities -name "*.spec.ts" 2>/dev/null | grep -q .; then
+              MISSING_COVERAGE+=("business-capabilities view changes but no tests/business-capabilities/*.spec.ts")
+            fi
+          fi
+
+          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/views/architectures/business-processes"; then
+            if ! find frontend/tests/business-processes -name "*.spec.ts" 2>/dev/null | grep -q .; then
+              MISSING_COVERAGE+=("business-processes view changes but no tests/business-processes/*.spec.ts")
             fi
           fi
 
