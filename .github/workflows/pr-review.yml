@@ -99,9 +99,9 @@ jobs:
           MISSING_COVERAGE=()
 
           # Check for spaces view changes without corresponding tests
-          if echo "$FRONTEND_CHANGES" | grep -q "frontend/src/views/spaces"; then
+          if echo "$FRONTEND_CHANGES" | grep -qE "frontend/src/views/spaces|frontend/src/api/spaces"; then
             if ! find frontend/tests/spaces -name "*.spec.ts" 2>/dev/null | grep -q .; then
-              MISSING_COVERAGE+=("spaces view changes but no tests/spaces/*.spec.ts")
+              MISSING_COVERAGE+=("spaces changes but no tests/spaces/*.spec.ts")
             fi
           fi
 
