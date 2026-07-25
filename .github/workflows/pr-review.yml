@@ -163,8 +163,9 @@ jobs:
           # NOT every emoji in the body (review text may reference 🔴/🟠 in passing)
           has_blocking_severity() {
             # 1. Check first line — review-ai starts with overall severity emoji
+            #    Anchor with ^ to avoid matching 🔴/🟠 mentioned in prose
             FIRST_LINE=$(echo "$REVIEW_BODY" | head -1)
-            if echo "$FIRST_LINE" | grep -qE '🔴|🟠'; then
+            if echo "$FIRST_LINE" | grep -qE '^(🔴|🟠)'; then
               return 0
             fi
             # 2. Check [RISK ASSESSMENT] → [Overall PR] line for 🔴 or 🟠
