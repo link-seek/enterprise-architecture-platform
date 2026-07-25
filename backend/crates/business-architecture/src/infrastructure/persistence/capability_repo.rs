@@ -31,6 +31,7 @@ impl From<business_capability::Model> for BusinessCapability {
             created_at: m.created_at,
             updated_at: m.updated_at,
             deleted_at: m.deleted_at,
+            space_id: m.space_id,
         }
     }
 }
@@ -95,6 +96,7 @@ impl CapabilityRepository for SeaOrmCapabilityRepo {
                 created_at: Set(cap.created_at),
                 updated_at: Set(cap.updated_at),
                 deleted_at: Set(None),
+                space_id: Set(cap.space_id),
             };
             active.insert(&self.db).await?
         };

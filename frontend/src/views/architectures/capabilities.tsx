@@ -9,10 +9,12 @@ import { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useParams } from 'react-router-dom'
+import { useSpaceMembership } from '@/hooks/use-space-membership'
 
 const GET_CAPABILITIES = gql`
-  query GetCapabilities {
-    businessCapabilities {
+  query GetCapabilities($spaceId: String) {
+    businessCapabilities(filters: { spaceId: { eq: $spaceId } }) {
       nodes { id name description level maturity businessValue status }
       paginationInfo { total }
     }
@@ -20,20 +22,20 @@ const GET_CAPABILITIES = gql`
 `
 
 const CREATE_CAPABILITY = gql`
-  mutation CreateCapability($data: BusinessCapabilitiesInsertInput!) {
-    businessCapabilitiesCreateOne(data: $data) { id name }
+  mutation CreateCapability($spaceId: String!, $name: String!, $description: String!, $level: CapabilityLevel!, $maturity: MaturityLevel!, $businessValue: BusinessValueRating!) {
+    capabilityCreate(spaceId: $spaceId, name: $name, description: $description, level: $level, maturity: $maturity, businessValue: $businessValue) { id name }
   }
 `
 
 const UPDATE_CAPABILITY = gql`
-  mutation UpdateCapability($data: BusinessCapabilitiesUpdateInput!, $filter: BusinessCapabilitiesFilterInput!) {
-    businessCapabilitiesUpdate(data: $data, filter: $filter) { id name }
+  mutation UpdateCapability($id: String!, $name: String, $description: String, $level: CapabilityLevel, $maturity: MaturityLevel, $businessValue: BusinessValueRating) {
+    capabilityUpdate(id: $id, name: $name, description: $description, level: $level, maturity: $maturity, businessValue: $businessValue) { id name }
   }
 `
 
 const DELETE_CAPABILITY = gql`
-  mutation DeleteCapability($filter: BusinessCapabilitiesFilterInput!) {
-    businessCapabilitiesDelete(filter: $filter)
+  mutation DeleteCapability($id: String!) {
+    capabilityDelete(id: $id)
   }
 `
 
@@ -42,22 +44,23 @@ interface Capability {
   level: string; maturity: string; businessValue: string; status: string
 }
 
-function nowRFC3339() { return new Date().toISOString() }
-function newUUID() { return crypto.randomUUID() }
-
 export default function Capabilities() {
+  const { spaceId } = useParams<{ spaceId: string }>()
+  const { canEdit } = useSpaceMembership(spaceId)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Capability | null>(null)
   const [deleting, setDeleting] = useState<Capability | null>(null)
-  const { data, loading, error } = useQuery(GET_CAPABILITIES)
+  const { data, loading, error } = useQuery(GET_CAPABILITIES, { variables: { spaceId } })
 
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">业务能力</h1>
-        <Button onClick={() => { setEditing(null); setDialogOpen(true) }}>
-          <Plus className="h-4 w-4 mr-2" />新建能力
-        </Button>
+        {canEdit && (
+          <Button onClick={() => { setEditing(null); setDialogOpen(true) }}>
+            <Plus className="h-4 w-4 mr-2" />新建能力
+          </Button>
+        )}
       </div>
       <Card>
         <CardHeader><CardTitle>能力列表</CardTitle></CardHeader>
@@ -86,12 +89,16 @@ export default function Capabilities() {
                     <TableCell><Badge variant="outline">{cap.status}</Badge></TableCell>
                     <TableCell>
                       <div className="flex gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => { setEditing(cap); setDialogOpen(true) }}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => setDeleting(cap)}>
-                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                        </Button>
+                        {canEdit && (
+                          <>
+                            <Button variant="ghost" size="sm" onClick={() => { setEditing(cap); setDialogOpen(true) }}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setDeleting(cap)}>
+                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -101,14 +108,14 @@ export default function Capabilities() {
           )}
         </CardContent>
       </Card>
-      <CapabilityCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} />
-      <CapabilityDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} />
+      <CapabilityCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} />
+      <CapabilityDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
     </div>
   )
 }
 
-function CapabilityCrudDialog({ open, onOpenChange, editing }: {
-  open: boolean; onOpenChange: (v: boolean) => void; editing: Capability | null
+function CapabilityCrudDialog({ open, onOpenChange, editing, spaceId }: {
+  open: boolean; onOpenChange: (v: boolean) => void; editing: Capability | null; spaceId?: string
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -138,16 +145,13 @@ function CapabilityCrudDialog({ open, onOpenChange, editing }: {
     try {
       if (editing) {
         await updateMut({
-          variables: { data: { name, description, level, maturity, businessValue }, filter: { id: { eq: editing.id } } },
-          refetchQueries: [{ query: GET_CAPABILITIES }],
+          variables: { id: editing.id, name, description, level, maturity, businessValue },
+          refetchQueries: [{ query: GET_CAPABILITIES, variables: { spaceId } }],
         })
       } else {
-        const now = nowRFC3339()
         await createMut({
-          variables: {
-            data: { id: newUUID(), name, description, level, maturity, businessValue, status: 'active', businessVersion: 'v1.0', cost: 'low', createdAt: now, updatedAt: now }
-          },
-          refetchQueries: [{ query: GET_CAPABILITIES }],
+          variables: { spaceId, name, description, level, maturity, businessValue },
+          refetchQueries: [{ query: GET_CAPABILITIES, variables: { spaceId } }],
         })
       }
       onOpenChange(false)
@@ -194,12 +198,12 @@ function CapabilityCrudDialog({ open, onOpenChange, editing }: {
   )
 }
 
-function CapabilityDeleteDialog({ item, onConfirm }: { item: Capability | null; onConfirm: () => void }) {
+function CapabilityDeleteDialog({ item, onConfirm, spaceId }: { item: Capability | null; onConfirm: () => void; spaceId?: string }) {
   const [deleteMut] = useMutation(DELETE_CAPABILITY)
   const [loading, setLoading] = useState(false)
   async function handleDelete() {
     if (!item) return; setLoading(true)
-    try { await deleteMut({ variables: { filter: { id: { eq: item.id } } }, refetchQueries: [{ query: GET_CAPABILITIES }] }); onConfirm() }
+    try { await deleteMut({ variables: { id: item.id }, refetchQueries: [{ query: GET_CAPABILITIES, variables: { spaceId } }] }); onConfirm() }
     catch (err) { console.error(err) } finally { setLoading(false) }
   }
   return (

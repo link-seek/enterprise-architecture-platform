@@ -20,6 +20,7 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
     /// Create a new value stream (first version).
     pub async fn create(
         &self,
+        space_id: Uuid,
         name: String,
         description: Option<String>,
         business_version: String,
@@ -27,7 +28,7 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
     ) -> Result<ValueStream, DomainError> {
         let id = Uuid::now_v7();
         let now = Utc::now();
-        let vs = ValueStream::create(id, name, description, business_version, importance, now);
+        let vs = ValueStream::create(id, space_id, name, description, business_version, importance, now);
         self.repo.save(&vs).await
     }
 

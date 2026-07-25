@@ -6,9 +6,9 @@ test.describe('Navigation & Layout - Sidebar', () => {
     // Login before each test
     await page.goto('/login');
     await page.getByRole('textbox', { name: '邮箱' }).fill('test@example.com');
-    await page.getByRole('textbox', { name: '密码' }).fill('testtestpassword123');
+    await page.getByRole('textbox', { name: '密码' }).fill('testpassword123');
     await page.getByRole('button', { name: '登录' }).click();
-    await expect(page).toHaveURL('/architectures/value-streams');
+    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
   });
 
   test('Happy Path - Sidebar Navigation', async ({ page }) => {
@@ -18,14 +18,14 @@ test.describe('Navigation & Layout - Sidebar', () => {
     await expect(page.getByRole('link', { name: '业务流程' })).toBeVisible();
     
     // Start on value streams page (default after login)
-    await expect(page).toHaveURL('/architectures/value-streams');
+    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
     await expect(page.getByRole('link', { name: '价值流' })).toHaveClass(/bg-primary/);
     
     // Click "业务能力"
     await page.getByRole('link', { name: '业务能力' }).click();
     
     // Verify URL changes and menu item is highlighted
-    await expect(page).toHaveURL('/architectures/capabilities');
+    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/capabilities');
     await expect(page.getByRole('link', { name: '业务能力' })).toHaveClass(/bg-primary/);
     await expect(page.getByRole('heading', { name: /业务能力/ })).toBeVisible();
     
@@ -33,7 +33,7 @@ test.describe('Navigation & Layout - Sidebar', () => {
     await page.getByRole('link', { name: '业务流程' }).click();
     
     // Verify URL changes and menu item is highlighted
-    await expect(page).toHaveURL('/architectures/processes');
+    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/processes');
     await expect(page.getByRole('link', { name: '业务流程' })).toHaveClass(/bg-primary/);
     await expect(page.getByRole('heading', { name: /业务流程/ })).toBeVisible();
     
@@ -41,7 +41,7 @@ test.describe('Navigation & Layout - Sidebar', () => {
     await page.getByRole('link', { name: '价值流' }).click();
     
     // Verify URL changes and menu item is highlighted
-    await expect(page).toHaveURL('/architectures/value-streams');
+    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
     await expect(page.getByRole('link', { name: '价值流' })).toHaveClass(/bg-primary/);
     await expect(page.getByRole('heading', { name: /价值流/ })).toBeVisible();
   });
@@ -75,12 +75,12 @@ test.describe('Navigation & Layout - Sidebar', () => {
         await backButton.click();
         
         // Verify returned to value streams list
-        await expect(page).toHaveURL('/architectures/value-streams');
+        await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
         await expect(page.getByRole('heading', { name: '价值流' })).toBeVisible();
       } else {
         // If no back button, use browser back
         await page.goBack();
-        await expect(page).toHaveURL('/architectures/value-streams');
+        await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
       }
     } else {
       // No value streams - skip the detail navigation part
@@ -152,7 +152,7 @@ test.describe('Navigation & Layout - Sidebar', () => {
     await page.keyboard.press('Enter');
     
     // Should navigate to capabilities page
-    await expect(page).toHaveURL('/architectures/capabilities');
+    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/capabilities');
     await expect(page.getByRole('heading', { name: /业务能力/ })).toBeVisible();
   });
 });

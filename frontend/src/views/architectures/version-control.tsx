@@ -36,9 +36,9 @@ const CREATE_VERSION = gql`
 `
 
 const GET_VALUE_STREAMS = gql`
-  query GetValueStreamsForVersion {
-    valueStreams {
-      nodes { id name description businessVersion status importance logicalId }
+  query GetValueStreamsForVersion($spaceId: String) {
+    valueStreams(filters: { spaceId: { eq: $spaceId } }) {
+      nodes { id name description businessVersion status importance logicalId spaceId }
       paginationInfo { total }
     }
   }
@@ -109,10 +109,11 @@ export function VersionHistoryDialog({ open, onOpenChange, logicalId }: {
 // Create Version Dialog
 // ============================================================================
 
-export function CreateVersionDialog({ open, onOpenChange, currentItem }: {
+export function CreateVersionDialog({ open, onOpenChange, currentItem, spaceId }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   currentItem: { id: string; logicalId: string; name: string; description: string; businessVersion: string; importance: string } | null
+  spaceId?: string
 }) {
   const [newVersion, setNewVersion] = useState('')
   const [loading, setLoading] = useState(false)
@@ -144,7 +145,7 @@ export function CreateVersionDialog({ open, onOpenChange, currentItem }: {
           newName: currentItem.name,
           newDescription: currentItem.description,
         },
-        refetchQueries: [{ query: GET_VALUE_STREAMS }],
+        refetchQueries: [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
       })
 
       onOpenChange(false)
@@ -187,9 +188,9 @@ export function CreateVersionDialog({ open, onOpenChange, currentItem }: {
 // Archive Button (inline)
 // ============================================================================
 
-export function ArchiveButton({ id, onArchived }: { id: string; onArchived?: () => void }) {
+export function ArchiveButton({ id, onArchived, spaceId }: { id: string; onArchived?: () => void; spaceId?: string }) {
   const [archiveMut] = useMutation(ARCHIVE_VALUE_STREAM, {
-    refetchQueries: [{ query: GET_VALUE_STREAMS }],
+    refetchQueries: [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
   })
   const [loading, setLoading] = useState(false)
 

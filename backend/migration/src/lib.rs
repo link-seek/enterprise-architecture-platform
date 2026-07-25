@@ -26,6 +26,9 @@ mod m20250101_000023_add_pipeline_test_1784801567_to_organizations;
 mod m20250101_000024_add_pipeline_test_1784802862_to_organizations;
 mod m20250101_000025_add_pipeline_test_1784864177_to_organizations;
 mod m20250101_000026_add_pipeline_test_1784874460_to_organizations;
+mod m20250101_000027_create_space_members;
+mod m20250101_000028_create_space_invitations;
+pub mod m20250101_000029_add_space_id_to_business_entities;
 
 pub struct Migrator;
 
@@ -59,6 +62,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000024_add_pipeline_test_1784802862_to_organizations::Migration),
             Box::new(m20250101_000025_add_pipeline_test_1784864177_to_organizations::Migration),
             Box::new(m20250101_000026_add_pipeline_test_1784874460_to_organizations::Migration),
+            Box::new(m20250101_000027_create_space_members::Migration),
+            Box::new(m20250101_000028_create_space_invitations::Migration),
+            Box::new(m20250101_000029_add_space_id_to_business_entities::Migration),
         ]
     }
 }

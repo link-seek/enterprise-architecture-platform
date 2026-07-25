@@ -8,15 +8,15 @@ test.describe('Error Handling - Network Errors', () => {
     await page.getByRole('textbox', { name: '邮箱' }).fill('test@example.com');
     await page.getByRole('textbox', { name: '密码' }).fill('testpassword123');
     await page.getByRole('button', { name: '登录' }).click();
-    await expect(page).toHaveURL('/architectures/value-streams');
+    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
   });
 
   test('Data Loading States', async ({ page }) => {
     // Navigate to each main page and observe loading states
     const pages = [
-      { path: '/architectures/value-streams', name: '价值流' },
-      { path: '/architectures/capabilities', name: '业务能力' },
-      { path: '/architectures/processes', name: '业务流程' },
+      { path: '/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams', name: '价值流' },
+      { path: '/spaces/00000000-0000-0000-0000-000000000010/architectures/capabilities', name: '业务能力' },
+      { path: '/spaces/00000000-0000-0000-0000-000000000010/architectures/processes', name: '业务流程' },
     ];
 
     for (const pageInfo of pages) {
@@ -47,7 +47,7 @@ test.describe('Error Handling - Network Errors', () => {
 
   test('API Failure Handling - Value Streams Page', async ({ page }) => {
     // Navigate to value streams page
-    await page.goto('/architectures/value-streams');
+    await page.goto('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
     
     // Simulate network failure by blocking API calls
     await page.route('**/graphql', async route => {
@@ -83,7 +83,7 @@ test.describe('Error Handling - Network Errors', () => {
     // For now, we'll just verify the UI handles empty states gracefully
     
     // Navigate to value streams page
-    await page.goto('/architectures/value-streams');
+    await page.goto('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
     
     // Check for empty state messaging
     const emptyState = page.getByText(/暂无数据|No data|Empty/);
@@ -108,7 +108,7 @@ test.describe('Error Handling - Network Errors', () => {
 
   test('GraphQL Query Error Handling', async ({ page }) => {
     // Navigate to value streams page
-    await page.goto('/architectures/value-streams');
+    await page.goto('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
     
     // Simulate GraphQL query error by returning error response
     await page.route('**/graphql', async route => {
@@ -142,12 +142,12 @@ test.describe('Error Handling - Network Errors', () => {
     // Verify user can retry or navigate away
     // Check for retry button or navigation still works
     await page.getByRole('link', { name: '业务能力' }).click();
-    await expect(page).toHaveURL('/architectures/capabilities');
+    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/capabilities');
   });
 
   test('GraphQL Mutation Error Handling', async ({ page }) => {
     // Navigate to value streams page
-    await page.goto('/architectures/value-streams');
+    await page.goto('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
     
     // Simulate GraphQL mutation error
     await page.route('**/graphql', async route => {
@@ -305,7 +305,7 @@ test.describe('Error Handling - Network Errors', () => {
     // Test with browser forward navigation
     await page.goForward();
     // Should return to value streams page
-    await expect(page).toHaveURL('/architectures/value-streams');
+    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
     
     // Test refresh during operation
     await page.getByRole('button', { name: '新建价值流' }).click();
@@ -319,6 +319,6 @@ test.describe('Error Handling - Network Errors', () => {
     // After refresh, dialog should be closed
     await expect(page.getByRole('dialog')).not.toBeVisible();
     // Should be on value streams page
-    await expect(page).toHaveURL('/architectures/value-streams');
+    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
   });
 });

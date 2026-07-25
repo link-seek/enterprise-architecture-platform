@@ -1,39 +1,59 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import { Outlet } from 'react-router-dom'
+import { useQuery } from '@apollo/client/react'
 import { useAuthStore } from '@/stores/auth'
 import { logout } from '@/api/auth'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import {
   LayoutDashboard,
-  GitBranch,
   Boxes,
   Workflow,
   LogOut,
   Users,
+  ArrowLeft,
 } from 'lucide-react'
-
-const menuItems = [
-  { path: '/architectures/value-streams', label: '价值流', icon: LayoutDashboard },
-  { path: '/architectures/capabilities', label: '业务能力', icon: Boxes },
-  { path: '/architectures/processes', label: '业务流程', icon: Workflow },
-]
-
-const adminMenuItems = [
-  { path: '/architectures/users', label: '用户管理', icon: Users },
-]
+import { GET_SPACE } from '@/api/spaces'
+import type { Space } from '@/api/spaces'
+import { useSpaceMembership } from '@/hooks/use-space-membership'
 
 export default function ArchLayout() {
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
+  const { spaceId } = useParams<{ spaceId: string }>()
+  const { canEdit } = useSpaceMembership(spaceId)
+
+  const { data: spaceData } = useQuery<{ organizations: { nodes: Space[] } }>(GET_SPACE, {
+    variables: { id: spaceId },
+    skip: !spaceId,
+  })
+  const spaceName = spaceData?.organizations?.nodes?.[0]?.name ?? '空间'
+
+  const base = spaceId ? `/spaces/${spaceId}/architectures` : '/architectures'
+  const menuItems = [
+    { path: `${base}/value-streams`, label: '价值流', icon: LayoutDashboard },
+    { path: `${base}/capabilities`, label: '业务能力', icon: Boxes },
+    { path: `${base}/processes`, label: '业务流程', icon: Workflow },
+  ]
+
+  const adminMenuItems = [
+    { path: `${base}/users`, label: '用户管理', icon: Users },
+  ]
 
   return (
     <div className="flex h-screen">
       {/* Sidebar */}
       <aside className="w-60 border-r bg-card flex flex-col">
         <div className="p-4">
-          <h1 className="text-lg font-semibold">企业架构平台</h1>
+          <Link to="/spaces" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-1">
+            <ArrowLeft className="h-3.5 w-3.5" />
+            所有空间
+          </Link>
+          <h1 className="text-lg font-semibold truncate">{spaceName}</h1>
           <p className="text-sm text-muted-foreground">Enterprise Architecture</p>
+          {!canEdit && (
+            <p className="mt-1 text-xs text-amber-600">只读模式（非成员）</p>
+          )}
         </div>
         <Separator />
         <nav className="flex-1 p-2 space-y-1">

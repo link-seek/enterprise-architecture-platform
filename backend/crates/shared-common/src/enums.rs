@@ -196,3 +196,39 @@ impl UserStatus {
         matches!(self, UserStatus::Active)
     }
 }
+
+/// Role of a user within a Space (multi-tenant membership).
+///
+/// - `Owner`: created the space (or was transferred ownership). Can manage
+///   members and delete the space. Implies editor rights.
+/// - `Editor`: can create/update/delete architecture content within the space.
+///
+/// Anonymous users and non-members have read-only access (enforced at the
+/// GraphQL layer), so there is no explicit `Viewer` member role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum SpaceRole {
+    #[sea_orm(string_value = "owner")]
+    #[serde(rename = "owner")]
+    Owner,
+    #[sea_orm(string_value = "editor")]
+    #[serde(rename = "editor")]
+    Editor,
+}
+
+impl SpaceRole {
+    pub fn is_owner(&self) -> bool {
+        matches!(self, SpaceRole::Owner)
+    }
+    pub fn is_editor(&self) -> bool {
+        matches!(self, SpaceRole::Owner | SpaceRole::Editor)
+    }
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "owner" => Some(SpaceRole::Owner),
+            "editor" => Some(SpaceRole::Editor),
+            _ => None,
+        }
+    }
+}

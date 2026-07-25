@@ -8,7 +8,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await page.getByRole('textbox', { name: '邮箱' }).fill('test@example.com');
     await page.getByRole('textbox', { name: '密码' }).fill('testpassword123');
     await page.getByRole('button', { name: '登录' }).click();
-    await expect(page).toHaveURL('/architectures/value-streams');
+    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
   });
 
   test('Happy Path - Create Value Stream', async ({ page }) => {
@@ -247,11 +247,11 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     const backButton = page.getByRole('button', { name: '返回列表' });
     if (await backButton.isVisible()) {
       await backButton.click();
-      await expect(page).toHaveURL('/architectures/value-streams');
+      await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
     } else {
       // Use browser back if no back button
       await page.goBack();
-      await expect(page).toHaveURL('/architectures/value-streams');
+      await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
     }
   });
 });

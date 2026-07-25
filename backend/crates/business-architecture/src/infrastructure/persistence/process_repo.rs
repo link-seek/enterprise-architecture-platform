@@ -30,6 +30,7 @@ impl From<business_process::Model> for BusinessProcess {
             created_at: m.created_at,
             updated_at: m.updated_at,
             deleted_at: m.deleted_at,
+            space_id: m.space_id,
         }
     }
 }
@@ -151,6 +152,7 @@ impl ProcessRepository for SeaOrmProcessRepo {
                 created_at: Set(proc.created_at),
                 updated_at: Set(proc.updated_at),
                 deleted_at: Set(None),
+                space_id: Set(proc.space_id),
             };
             active.insert(&self.db).await?
         };
@@ -286,6 +288,7 @@ impl SeaOrmProcessRepo {
             created_at: Set(now),
             updated_at: Set(now),
             deleted_at: Set(None),
+            space_id: Set(old.space_id),
         };
         let new_model = new_active.insert(&txn).await?;
 

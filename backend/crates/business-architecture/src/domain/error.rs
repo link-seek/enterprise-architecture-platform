@@ -14,6 +14,24 @@ pub enum DomainError {
     CannotReferenceArchived,
     #[error("only owner or admin can modify")]
     NotOwner,
+    #[error("space not found")]
+    SpaceNotFound,
+    #[error("not a member of this space")]
+    NotSpaceMember,
+    #[error("only space editors can modify content")]
+    NotSpaceEditor,
+    #[error("only space owners can manage members")]
+    NotSpaceOwner,
+    #[error("space name cannot be empty")]
+    SpaceNameEmpty,
+    #[error("space quota exceeded: non-admin users may own at most one space")]
+    SpaceQuotaExceeded,
+    #[error("user is already a member of this space")]
+    AlreadyMember,
+    #[error("cannot remove the last owner of a space")]
+    CannotRemoveLastOwner,
+    #[error("invitation not found")]
+    InvitationNotFound,
     #[error("invalid lifecycle transition: {from} → {to} on {entity}")]
     InvalidTransition {
         from: String,

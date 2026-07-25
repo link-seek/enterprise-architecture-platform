@@ -31,6 +31,7 @@ impl From<value_stream::Model> for ValueStream {
             created_at: m.created_at,
             updated_at: m.updated_at,
             deleted_at: m.deleted_at,
+            space_id: m.space_id,
         }
     }
 }
@@ -150,6 +151,7 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
                 created_at: Set(vs.created_at),
                 updated_at: Set(vs.updated_at),
                 deleted_at: Set(None),
+                space_id: Set(vs.space_id),
             };
             active.insert(&self.db).await?
         };

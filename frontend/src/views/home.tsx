@@ -79,7 +79,7 @@ export default function Home() {
       <header className="border-b bg-background">
         <div className="container mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
           <span className="text-lg font-semibold">技术实验与学习成果展示</span>
-          <Link to={isAuthenticated ? '/architectures/value-streams' : '/login'}>
+          <Link to={isAuthenticated ? '/spaces' : '/login'}>
             <Button variant={isAuthenticated ? 'default' : 'outline'}>
               {isAuthenticated ? '进入平台' : '登录'}
             </Button>
@@ -100,11 +100,18 @@ export default function Home() {
             实现从战略到执行的端到端可视化与协同。
           </p>
           <div className="mt-8 flex items-center justify-center gap-4">
-            <Link to={isAuthenticated ? '/architectures/value-streams' : '/login'}>
+            <Link to="/spaces">
               <Button size="lg">
-                {isAuthenticated ? '进入平台' : '登录'}
+                浏览空间
               </Button>
             </Link>
+            {!isAuthenticated && (
+              <Link to="/login">
+                <Button size="lg" variant="outline">
+                  登录
+                </Button>
+              </Link>
+            )}
             <a
               href="#features"
               className="inline-flex h-11 items-center justify-center rounded-md border border-input bg-background px-8 text-sm font-medium hover:bg-accent hover:text-accent-foreground"

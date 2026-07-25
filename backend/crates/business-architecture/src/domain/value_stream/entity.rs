@@ -28,6 +28,7 @@ pub struct ValueStream {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    pub space_id: Uuid,
 }
 
 impl ValueStream {
@@ -35,6 +36,7 @@ impl ValueStream {
     /// The logical_id is set to the new id by default (first version).
     pub fn create(
         id: Uuid,
+        space_id: Uuid,
         name: String,
         description: Option<String>,
         business_version: String,
@@ -59,6 +61,7 @@ impl ValueStream {
             created_at: now,
             updated_at: now,
             deleted_at: None,
+            space_id,
         }
     }
 
@@ -119,6 +122,7 @@ impl ValueStream {
             created_at: now,
             updated_at: now,
             deleted_at: None,
+            space_id: self.space_id,
         };
 
         Ok(new_vs)
