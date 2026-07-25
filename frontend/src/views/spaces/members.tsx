@@ -77,7 +77,7 @@ export function SpaceMembersDialog({ spaceId, open, onOpenChange }: {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>用户 ID</TableHead>
+                <TableHead>用户</TableHead>
                 <TableHead>角色</TableHead>
                 <TableHead className="w-12"></TableHead>
               </TableRow>
@@ -90,8 +90,8 @@ export function SpaceMembersDialog({ spaceId, open, onOpenChange }: {
                 <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">暂无成员</TableCell></TableRow>
               )}
               {members.map((m) => (
-                <TableRow key={`${m.spaceId}-${m.userId}`}>
-                  <TableCell className="font-mono text-xs">{m.userId.slice(0, 8)}…</TableCell>
+                <TableRow key={m.userId}>
+                  <TableCell>{m.name}</TableCell>
                   <TableCell>
                     <Badge variant={m.role === 'owner' ? 'default' : 'secondary'}>
                       {m.role === 'owner' ? '拥有者' : '编辑者'}

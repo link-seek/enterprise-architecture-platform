@@ -1712,6 +1712,19 @@ struct MyMembership {
     role: String,
 }
 
+/// Result type for `spaceMembersBySpace`. Returns `{ userId, name, role }`
+/// instead of the raw `SpaceMembers` entity so the member-management UI can
+/// show a human-readable name rather than a truncated UUID. The `name` is
+/// resolved by joining with the `users` table; `email` is intentionally
+/// omitted (admin-only PII) to avoid cross-tenant enumeration through this
+/// membership-scoped query.
+#[derive(Clone, Debug)]
+struct SpaceMemberWithUser {
+    user_id: String,
+    name: String,
+    role: String,
+}
+
 fn register_space_scoped_queries(builder: &mut Builder) {
     use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, Object, TypeRef};
     use sea_orm::{EntityTrait, ColumnTrait, QueryFilter};
@@ -1741,6 +1754,28 @@ fn register_space_scoped_queries(builder: &mut Builder) {
             })
         }));
     builder.outputs.push(my_membership_type);
+
+    // ── SpaceMemberWithUser output type ───────────────────────────────
+    let member_with_user_type = Object::new("SpaceMemberWithUser")
+        .field(Field::new("userId", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<SpaceMemberWithUser>()?;
+                Ok(Some(FieldValue::value(v.user_id.clone())))
+            })
+        }))
+        .field(Field::new("name", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<SpaceMemberWithUser>()?;
+                Ok(Some(FieldValue::value(v.name.clone())))
+            })
+        }))
+        .field(Field::new("role", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<SpaceMemberWithUser>()?;
+                Ok(Some(FieldValue::value(v.role.clone())))
+            })
+        }));
+    builder.outputs.push(member_with_user_type);
 
     // ── myMembership ──────────────────────────────────────────────────
     // Returns the caller's own role in a space (or null for non-members).
@@ -1776,23 +1811,49 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     builder.queries.push(my_membership_query);
 
     // ── spaceMembersBySpace ──────────────────────────────────────────
+    // Returns `{ userId, name, role }` for each member of the space. The name
+    // is resolved by joining with the `users` table so the member-management
+    // UI can show a human-readable name instead of a truncated UUID. This is
+    // membership-scoped (ensure_space_read_access) and exposes no admin-only
+    // PII (email is omitted).
     let members_query = Field::new(
         "spaceMembersBySpace",
-        TypeRef::named_nn_list_nn("SpaceMembers"),
+        TypeRef::named_nn_list_nn("SpaceMemberWithUser"),
         |ctx| {
             FieldFuture::new(async move {
                 let db = ctx.data::<DatabaseConnection>()?;
                 let space_id = parse_uuid_arg(&ctx, "spaceId")?;
                 ensure_space_read_access(&ctx, db, space_id).await?;
 
-                let models = space_member::Entity::find()
+                let members = space_member::Entity::find()
                     .filter(space_member::Column::SpaceId.eq(space_id))
                     .all(db)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
-                let list: Vec<FieldValue> = models
+                let user_ids: Vec<Uuid> = members.iter().map(|m| m.user_id).collect();
+                let users = if user_ids.is_empty() {
+                    Vec::new()
+                } else {
+                    user::Entity::find()
+                        .filter(user::Column::Id.is_in(user_ids))
+                        .all(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                };
+                let name_by_id: std::collections::HashMap<Uuid, String> =
+                    users.into_iter().map(|u| (u.id, u.name)).collect();
+                let list: Vec<FieldValue> = members
                     .into_iter()
-                    .map(FieldValue::owned_any)
+                    .map(|m| {
+                        FieldValue::owned_any(SpaceMemberWithUser {
+                            user_id: m.user_id.to_string(),
+                            name: name_by_id
+                                .get(&m.user_id)
+                                .cloned()
+                                .unwrap_or_else(|| m.user_id.to_string()),
+                            role: m.role,
+                        })
+                    })
                     .collect();
                 Ok(Some(FieldValue::list(list)))
             })

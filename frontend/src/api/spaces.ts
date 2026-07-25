@@ -16,12 +16,10 @@ export const SPACE_FIELDS = gql`
 `
 
 export const SPACE_MEMBER_FIELDS = gql`
-  fragment SpaceMemberFields on SpaceMembers {
-    spaceId
+  fragment SpaceMemberFields on SpaceMemberWithUser {
     userId
+    name
     role
-    createdAt
-    updatedAt
   }
 `
 
@@ -92,10 +90,11 @@ export const ARCHIVE_SPACE = gql`
 `
 
 export const ADD_SPACE_MEMBER = gql`
-  ${SPACE_MEMBER_FIELDS}
   mutation SpaceAddMember($spaceId: String!, $userId: String!, $role: String!) {
     spaceAddMember(spaceId: $spaceId, userId: $userId, role: $role) {
-      ...SpaceMemberFields
+      spaceId
+      userId
+      role
     }
   }
 `
@@ -120,11 +119,9 @@ export interface Space {
 }
 
 export interface SpaceMember {
-  spaceId: string
   userId: string
+  name: string
   role: 'owner' | 'editor'
-  createdAt: string
-  updatedAt: string
 }
 
 // Fixed UUID of the seeded "测试空间" (test space) that owns pre-existing
