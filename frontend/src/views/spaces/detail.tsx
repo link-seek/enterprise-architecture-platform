@@ -92,16 +92,18 @@ export default function SpaceDetail() {
                     成员
                   </Button>
                 )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    if (confirm('确定归档此空间？')) archive({ variables: { id: space.id } })
-                  }}
-                >
-                  <Archive className="h-4 w-4 mr-2" />
-                  归档
-                </Button>
+                {role === 'owner' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (confirm('确定归档此空间？')) archive({ variables: { id: space.id } })
+                    }}
+                  >
+                    <Archive className="h-4 w-4 mr-2" />
+                    归档
+                  </Button>
+                )}
               </>
             )}
             {!isAuthenticated && (

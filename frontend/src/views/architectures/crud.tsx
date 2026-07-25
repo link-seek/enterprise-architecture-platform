@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react'
+import { GET_VALUE_STREAMS } from './version-control'
 
 // ============================================================================
 // Value Stream CRUD
@@ -32,15 +33,6 @@ const UPDATE_VALUE_STREAM = gql`
 const ARCHIVE_VALUE_STREAM = gql`
   mutation ValueStreamArchive($id: String!) {
     valueStreamArchive(id: $id)
-  }
-`
-
-const GET_VALUE_STREAMS = gql`
-  query GetValueStreamsForCrud {
-    valueStreams {
-      nodes { id name description businessVersion status importance logicalId }
-      paginationInfo { total }
-    }
   }
 `
 

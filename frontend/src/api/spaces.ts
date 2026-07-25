@@ -32,7 +32,7 @@ export const SPACE_MEMBER_FIELDS = gql`
 export const GET_SPACES = gql`
   ${SPACE_FIELDS}
   query GetSpaces {
-    organizations {
+    organizations(filters: { deletedAt: { is_null: true } }) {
       nodes {
         ...SpaceFields
       }

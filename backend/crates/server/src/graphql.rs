@@ -1148,6 +1148,519 @@ fn register_process_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
     builder.mutations.push(delete);
 }
+// ============================================================================
+// Custom Sub-Entity Domain Mutations (space-level ACL enforced)
+// ----------------------------------------------------------------------------
+// process_step, value_stream_stage, capability_process, and stage_capability are
+// children of the value-stream/capability/process parents. They have no
+// `space_id` column of their own, so the owning space is resolved from the
+// referenced parent before any write and `ensure_space_edit_access` is invoked.
+// This closes the tenant-isolation gap left by seaography's auto-CRUD, which
+// only checked the coarse global `UserRole`.
+// ============================================================================
+
+/// Resolve the `space_id` of a business process.
+async fn space_of_process(db: &DatabaseConnection, process_id: Uuid) -> async_graphql::Result<Uuid> {
+    use sea_orm::EntityTrait;
+    let p = business_process::Entity::find_by_id(process_id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Process not found."))?;
+    Ok(p.space_id)
+}
+
+/// Resolve the `space_id` of a value stream.
+async fn space_of_value_stream(db: &DatabaseConnection, vs_id: Uuid) -> async_graphql::Result<Uuid> {
+    use sea_orm::EntityTrait;
+    let vs = value_stream::Entity::find_by_id(vs_id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Value stream not found."))?;
+    Ok(vs.space_id)
+}
+
+/// Resolve the `space_id` of a capability.
+async fn space_of_capability(db: &DatabaseConnection, cap_id: Uuid) -> async_graphql::Result<Uuid> {
+    use sea_orm::EntityTrait;
+    let c = business_capability::Entity::find_by_id(cap_id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Capability not found."))?;
+    Ok(c.space_id)
+}
+
+/// Resolve the `space_id` of a value-stream stage (via its value stream).
+async fn space_of_stage(db: &DatabaseConnection, stage_id: Uuid) -> async_graphql::Result<Uuid> {
+    use sea_orm::EntityTrait;
+    let stage = value_stream_stage::Entity::find_by_id(stage_id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Value stream stage not found."))?;
+    space_of_value_stream(db, stage.value_stream_id).await
+}
+
+/// Parse an optional `[String]` GraphQL argument into a `StringVec`.
+fn parse_string_vec_arg(
+    ctx: &async_graphql::dynamic::ResolverContext<'_>,
+    name: &str,
+) -> async_graphql::Result<shared_common::value_objects::StringVec> {
+    match ctx.args.get(name) {
+        Some(v) if v.is_null() => Ok(Default::default()),
+        Some(v) => {
+            let list = v
+                .list()?
+                .iter()
+                .map(|item| item.string().map(|s| s.to_owned()))
+                .collect::<async_graphql::Result<Vec<String>>>()?;
+            Ok(shared_common::value_objects::StringVec(list))
+        }
+        None => Ok(Default::default()),
+    }
+}
+
+fn register_sub_entity_domain_mutations(builder: &mut Builder) {
+    use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, TypeRef};
+    use sea_orm::ActiveValue::{NotSet, Set};
+    use sea_orm::{EntityTrait, ActiveModelTrait};
+
+    // ── processStepCreate ────────────────────────────────────────────
+    let create = Field::new(
+        "processStepCreate",
+        TypeRef::named_nn("ProcessSteps"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Create)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+
+                let process_id = parse_uuid_arg(&ctx, "processId")?;
+                let space_id = space_of_process(db, process_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                let name = ctx.args.try_get("name")?.string()?.to_owned();
+                let description = ctx
+                    .args
+                    .get("description")
+                    .and_then(|v| v.string().ok())
+                    .map(|s| s.to_owned())
+                    .unwrap_or_default();
+                let sequence_order: i32 = ctx.args.try_get("sequenceOrder")?.i64()? as i32;
+                let business_rules = parse_string_vec_arg(&ctx, "businessRules")?;
+                let required_inputs = parse_string_vec_arg(&ctx, "requiredInputs")?;
+                let produced_outputs = parse_string_vec_arg(&ctx, "producedOutputs")?;
+                let role_id = ctx
+                    .args
+                    .get("roleId")
+                    .and_then(|v| v.string().ok())
+                    .and_then(|s| Uuid::parse_str(s).ok());
+
+                let now = chrono::Utc::now();
+                let am = process_step::ActiveModel {
+                    id: Set(Uuid::now_v7()),
+                    name: Set(name),
+                    description: Set(description),
+                    sequence_order: Set(sequence_order),
+                    business_rules: Set(business_rules),
+                    required_inputs: Set(required_inputs),
+                    produced_outputs: Set(produced_outputs),
+                    role_id: Set(role_id),
+                    process_id: Set(process_id),
+                    created_at: Set(now),
+                    updated_at: Set(now),
+                    deleted_at: NotSet,
+                };
+                let model = am
+                    .insert(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("processId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("sequenceOrder", TypeRef::named_nn(TypeRef::INT)))
+    .argument(InputValue::new("businessRules", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("requiredInputs", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("producedOutputs", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("roleId", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    // ── processStepUpdate ────────────────────────────────────────────
+    let update = Field::new(
+        "processStepUpdate",
+        TypeRef::named_nn("ProcessSteps"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Update)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let existing = process_step::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Process step not found."))?;
+                let space_id = space_of_process(db, existing.process_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                let mut am: process_step::ActiveModel = existing.into();
+                if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) {
+                    am.name = Set(v.to_owned());
+                }
+                if let Some(v) = ctx.args.get("description").and_then(|v| v.string().ok()) {
+                    am.description = Set(v.to_owned());
+                }
+                if let Some(v) = ctx.args.get("sequenceOrder").and_then(|v| v.i64().ok()).map(|v| v as i32) {
+                    am.sequence_order = Set(v);
+                }
+                if ctx.args.get("businessRules").is_some() {
+                    am.business_rules = Set(parse_string_vec_arg(&ctx, "businessRules")?);
+                }
+                if ctx.args.get("requiredInputs").is_some() {
+                    am.required_inputs = Set(parse_string_vec_arg(&ctx, "requiredInputs")?);
+                }
+                if ctx.args.get("producedOutputs").is_some() {
+                    am.produced_outputs = Set(parse_string_vec_arg(&ctx, "producedOutputs")?);
+                }
+                match ctx.args.get("roleId") {
+                    Some(v) if v.is_null() => am.role_id = Set(None),
+                    Some(v) => {
+                        if let Ok(s) = v.string() {
+                            am.role_id = Set(Uuid::parse_str(s).ok());
+                        }
+                    }
+                    None => {}
+                }
+                am.updated_at = Set(chrono::Utc::now());
+                let model = am
+                    .update(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("sequenceOrder", TypeRef::named(TypeRef::INT)))
+    .argument(InputValue::new("businessRules", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("requiredInputs", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("producedOutputs", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("roleId", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(update);
+
+    // ── processStepDelete ────────────────────────────────────────────
+    let delete = Field::new(
+        "processStepDelete",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Delete)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let existing = process_step::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Process step not found."))?;
+                let space_id = space_of_process(db, existing.process_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                process_step::Entity::delete_by_id(id)
+                    .exec(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+
+    // ── valueStreamStageCreate ───────────────────────────────────────
+    let create = Field::new(
+        "valueStreamStageCreate",
+        TypeRef::named_nn("ValueStreamStages"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Create)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+
+                let value_stream_id = parse_uuid_arg(&ctx, "valueStreamId")?;
+                let space_id = space_of_value_stream(db, value_stream_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                let name = ctx.args.try_get("name")?.string()?.to_owned();
+                let sequence_order: i32 = ctx.args.try_get("sequenceOrder")?.i64()? as i32;
+                let input = ctx
+                    .args
+                    .get("input")
+                    .and_then(|v| v.string().ok())
+                    .map(|s| s.to_owned());
+                let output = ctx
+                    .args
+                    .get("output")
+                    .and_then(|v| v.string().ok())
+                    .map(|s| s.to_owned());
+
+                let now = chrono::Utc::now();
+                let am = value_stream_stage::ActiveModel {
+                    id: Set(Uuid::now_v7()),
+                    name: Set(name),
+                    sequence_order: Set(sequence_order),
+                    input: Set(input),
+                    output: Set(output),
+                    value_stream_id: Set(value_stream_id),
+                    created_at: Set(now),
+                    updated_at: Set(now),
+                    deleted_at: NotSet,
+                };
+                let model = am
+                    .insert(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("valueStreamId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("sequenceOrder", TypeRef::named_nn(TypeRef::INT)))
+    .argument(InputValue::new("input", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("output", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    // ── valueStreamStageUpdate ───────────────────────────────────────
+    let update = Field::new(
+        "valueStreamStageUpdate",
+        TypeRef::named_nn("ValueStreamStages"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Update)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let existing = value_stream_stage::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Value stream stage not found."))?;
+                let space_id = space_of_value_stream(db, existing.value_stream_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                let mut am: value_stream_stage::ActiveModel = existing.into();
+                if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) {
+                    am.name = Set(v.to_owned());
+                }
+                if let Some(v) = ctx.args.get("sequenceOrder").and_then(|v| v.i64().ok()).map(|v| v as i32) {
+                    am.sequence_order = Set(v);
+                }
+                match ctx.args.get("input") {
+                    Some(v) if v.is_null() => am.input = Set(None),
+                    Some(v) => {
+                        if let Ok(s) = v.string() {
+                            am.input = Set(Some(s.to_owned()));
+                        }
+                    }
+                    None => {}
+                }
+                match ctx.args.get("output") {
+                    Some(v) if v.is_null() => am.output = Set(None),
+                    Some(v) => {
+                        if let Ok(s) = v.string() {
+                            am.output = Set(Some(s.to_owned()));
+                        }
+                    }
+                    None => {}
+                }
+                am.updated_at = Set(chrono::Utc::now());
+                let model = am
+                    .update(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("sequenceOrder", TypeRef::named(TypeRef::INT)))
+    .argument(InputValue::new("input", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("output", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(update);
+
+    // ── valueStreamStageDelete ───────────────────────────────────────
+    let delete = Field::new(
+        "valueStreamStageDelete",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Delete)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let existing = value_stream_stage::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Value stream stage not found."))?;
+                let space_id = space_of_value_stream(db, existing.value_stream_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                value_stream_stage::Entity::delete_by_id(id)
+                    .exec(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+
+    // ── capabilityProcessCreate ─────────────────────────────────────
+    // Join table: both parents must exist and live in the same space.
+    let create = Field::new(
+        "capabilityProcessCreate",
+        TypeRef::named_nn("BusinessCapabilityProcesses"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Create)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+
+                let capability_id = parse_uuid_arg(&ctx, "capabilityId")?;
+                let process_id = parse_uuid_arg(&ctx, "processId")?;
+                let cap_space = space_of_capability(db, capability_id).await?;
+                let proc_space = space_of_process(db, process_id).await?;
+                if cap_space != proc_space {
+                    return Err(async_graphql::Error::new(
+                        "Capability and process must belong to the same space.",
+                    ));
+                }
+                ensure_space_edit_access(&ctx, db, cap_space).await?;
+
+                let am = capability_process::ActiveModel {
+                    capability_id: Set(capability_id),
+                    process_id: Set(process_id),
+                };
+                let model = am
+                    .insert(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("processId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    // ── capabilityProcessDelete ─────────────────────────────────────
+    let delete = Field::new(
+        "capabilityProcessDelete",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Delete)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let capability_id = parse_uuid_arg(&ctx, "capabilityId")?;
+                let process_id = parse_uuid_arg(&ctx, "processId")?;
+
+                let existing = capability_process::Entity::find_by_id((capability_id, process_id))
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Capability-process link not found."))?;
+                let space_id = space_of_capability(db, existing.capability_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                capability_process::Entity::delete_by_id((capability_id, process_id))
+                    .exec(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("processId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+
+    // ── stageCapabilityCreate ───────────────────────────────────────
+    // Join table: stage (→ value stream) and capability must share a space.
+    let create = Field::new(
+        "stageCapabilityCreate",
+        TypeRef::named_nn("ValueStreamStageCapabilities"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Create)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+
+                let stage_id = parse_uuid_arg(&ctx, "stageId")?;
+                let capability_id = parse_uuid_arg(&ctx, "capabilityId")?;
+                let stage_space = space_of_stage(db, stage_id).await?;
+                let cap_space = space_of_capability(db, capability_id).await?;
+                if stage_space != cap_space {
+                    return Err(async_graphql::Error::new(
+                        "Stage and capability must belong to the same space.",
+                    ));
+                }
+                ensure_space_edit_access(&ctx, db, stage_space).await?;
+
+                let am = stage_capability::ActiveModel {
+                    stage_id: Set(stage_id),
+                    capability_id: Set(capability_id),
+                };
+                let model = am
+                    .insert(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("stageId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    // ── stageCapabilityDelete ───────────────────────────────────────
+    let delete = Field::new(
+        "stageCapabilityDelete",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Delete)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let stage_id = parse_uuid_arg(&ctx, "stageId")?;
+                let capability_id = parse_uuid_arg(&ctx, "capabilityId")?;
+
+                let existing = stage_capability::Entity::find_by_id((stage_id, capability_id))
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Stage-capability link not found."))?;
+                let space_id = space_of_stage(db, existing.stage_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                stage_capability::Entity::delete_by_id((stage_id, capability_id))
+                    .exec(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("stageId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+}
 
 // ============================================================================
 // Custom Space-Scoped Queries (membership-enforced)
@@ -1373,13 +1886,17 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     // ── Business architecture: queries only via seaography ────────────
     // Mutations for value_stream, business_capability, and business_process go
     // through custom domain mutations that enforce space-level ACL.
+    // Sub-entities (process_step, value_stream_stage, capability_process,
+    // stage_capability) likewise use queries-only registration here; their
+    // mutations are registered below and enforce space-level ACL by resolving
+    // the owning space from the parent entity before any write.
     register_entity::<business_capability::Entity>(&mut builder);  // queries only
     register_entity::<business_process::Entity>(&mut builder);     // queries only
-    register_entity_with_mutations::<process_step::Entity, process_step::ActiveModel>(&mut builder);
+    register_entity::<process_step::Entity>(&mut builder);         // queries only
     register_entity::<value_stream::Entity>(&mut builder);  // queries only
-    register_entity_with_mutations::<value_stream_stage::Entity, value_stream_stage::ActiveModel>(&mut builder);
-    register_entity_with_mutations::<capability_process::Entity, capability_process::ActiveModel>(&mut builder);
-    register_entity_with_mutations::<stage_capability::Entity, stage_capability::ActiveModel>(&mut builder);
+    register_entity::<value_stream_stage::Entity>(&mut builder);   // queries only
+    register_entity::<capability_process::Entity>(&mut builder);   // queries only
+    register_entity::<stage_capability::Entity>(&mut builder);     // queries only
 
     // ── Spaces (reuses `organizations` table) + membership/invitations ──
     // Queries are public (anonymous case-showcase); writes go through custom
@@ -1394,6 +1911,9 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     // ── Custom domain mutations for BusinessCapability/Process ───────
     register_capability_domain_mutations(&mut builder);
     register_process_domain_mutations(&mut builder);
+
+    // ── Custom domain mutations for sub-entities (space-level ACL) ────
+    register_sub_entity_domain_mutations(&mut builder);
 
     // ── Custom domain mutations for Space + membership ────────────────
     register_space_domain_mutations(&mut builder);
