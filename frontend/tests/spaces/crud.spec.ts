@@ -1,0 +1,81 @@
+// spec: specs/eap-test-plan.md
+import { test, expect } from '@playwright/test';
+
+test.describe('Spaces - CRUD Main Flow', () => {
+  test.beforeEach(async ({ page }) => {
+    // Login before each test
+    await page.goto('/login');
+    await page.getByRole('textbox', { name: '邮箱' }).fill('test@example.com');
+    await page.getByRole('textbox', { name: '密码' }).fill('testpassword123');
+    await page.getByRole('button', { name: '登录' }).click();
+    await expect(page).toHaveURL(
+      '/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams',
+    );
+
+    // Go to the spaces list page.
+    await page.goto('/spaces');
+    await expect(page.getByRole('heading', { name: '所有空间' })).toBeVisible();
+  });
+
+  test('Happy Path - Create, edit, and archive a space', async ({ page }) => {
+    const spaceName = `E2E空间_${Date.now()}`;
+    const editedName = `${spaceName}_已编辑`;
+
+    // ── Create ────────────────────────────────────────────────────────────
+    await page.getByRole('button', { name: '创建空间' }).click();
+
+    // Create dialog opens.
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '创建空间' })).toBeVisible();
+
+    // Fill name + description.
+    await page.getByLabel('名称').fill(spaceName);
+    await page.getByLabel('描述').fill('E2E 自动化测试空间');
+
+    // Submit.
+    await page.getByRole('button', { name: '创建', exact: true }).click();
+
+    // Dialog closes and the new space appears in the list.
+    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(spaceName)).toBeVisible({ timeout: 10000 });
+
+    // ── Edit ──────────────────────────────────────────────────────────────
+    // Enter the newly created space.
+    await page.getByRole('link', { name: new RegExp(spaceName) }).click();
+    await expect(page).toHaveURL(/\/spaces\/[0-9a-f-]{36}$/);
+
+    // Open the edit dialog.
+    await page.getByRole('button', { name: '编辑' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '编辑空间' })).toBeVisible();
+
+    // Change the name and save.
+    const nameInput = page.getByLabel('名称');
+    await nameInput.fill('');
+    await nameInput.fill(editedName);
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+
+    // Dialog closes.
+    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
+
+    // Return to the spaces list and verify the updated name.
+    await page.goto('/spaces');
+    await expect(page.getByText(editedName)).toBeVisible({ timeout: 10000 });
+
+    // ── Archive ───────────────────────────────────────────────────────────
+    // Enter the space again to archive it.
+    await page.getByRole('link', { name: new RegExp(editedName) }).click();
+    await expect(page).toHaveURL(/\/spaces\/[0-9a-f-]{36}$/);
+
+    // Accept the native confirm() dialog, then click 归档.
+    page.once('dialog', (d) => d.accept());
+    await page.getByRole('button', { name: '归档' }).click();
+
+    // Archiving navigates back to the spaces list.
+    await expect(page).toHaveURL('/spaces', { timeout: 10000 });
+
+    // The archived space no longer appears in the list (GET_SPACES filters
+    // deletedAt is_null: true).
+    await expect(page.getByText(editedName)).not.toBeVisible({ timeout: 10000 });
+  });
+});
