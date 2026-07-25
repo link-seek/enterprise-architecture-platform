@@ -924,9 +924,9 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
-    .argument(InputValue::new("level", TypeRef::named_nn("CapabilityLevel")))
-    .argument(InputValue::new("maturity", TypeRef::named_nn("MaturityLevel")))
-    .argument(InputValue::new("businessValue", TypeRef::named_nn("BusinessValueRating")));
+    .argument(InputValue::new("level", TypeRef::named_nn("CapabilityLevelEnum")))
+    .argument(InputValue::new("maturity", TypeRef::named_nn("MaturityLevelEnum")))
+    .argument(InputValue::new("businessValue", TypeRef::named_nn("BusinessValueRatingEnum")));
     builder.mutations.push(create);
 
     // ── capabilityUpdate ─────────────────────────────────────────────
@@ -974,9 +974,9 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
-    .argument(InputValue::new("level", TypeRef::named("CapabilityLevel")))
-    .argument(InputValue::new("maturity", TypeRef::named("MaturityLevel")))
-    .argument(InputValue::new("businessValue", TypeRef::named("BusinessValueRating")));
+    .argument(InputValue::new("level", TypeRef::named("CapabilityLevelEnum")))
+    .argument(InputValue::new("maturity", TypeRef::named("MaturityLevelEnum")))
+    .argument(InputValue::new("businessValue", TypeRef::named("BusinessValueRatingEnum")));
     builder.mutations.push(update);
 
     // ── capabilityDelete ─────────────────────────────────────────────
@@ -2010,6 +2010,16 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
         .register_entity_dataloader_one_to_many(space_member::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_one(space_invitation::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_many(space_invitation::Entity, tokio::spawn);
+
+    // ── Explicitly register enum types used in custom mutations ───────
+    // seaography auto-registers enums for entity query fields, but custom
+    // mutations reference them by string name and need them registered explicitly.
+    builder.register_enumeration::<CapabilityLevel>();
+    builder.register_enumeration::<MaturityLevel>();
+    builder.register_enumeration::<BusinessValueRating>();
+    builder.register_enumeration::<CostRating>();
+    builder.register_enumeration::<CapabilityStatus>();
+    builder.register_enumeration::<LifecycleStatus>();
 
     let schema = builder.schema_builder()
         .data(db.clone())
