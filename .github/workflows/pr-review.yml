@@ -167,8 +167,9 @@ jobs:
             if echo "$FIRST_LINE" | grep -qE '🔴|🟠'; then
               return 0
             fi
-            # 2. Check [RISK ASSESSMENT] line for 🔴 HIGH or 🟠
-            if echo "$REVIEW_BODY" | grep -iE 'RISK ASSESSMENT' | grep -qE '🔴|🟠'; then
+            # 2. Check [RISK ASSESSMENT] section header line for 🔴 or 🟠
+            #    Use exact **[RISK ASSESSMENT]** to avoid matching prose that mentions "Risk Assessment"
+            if echo "$REVIEW_BODY" | grep -A2 '^\*\*\[RISK ASSESSMENT\]\*\*' | grep -qE '🔴|🟠'; then
               return 0
             fi
             # 3. Check for explicit [CRITICAL ISSUES] section with content
