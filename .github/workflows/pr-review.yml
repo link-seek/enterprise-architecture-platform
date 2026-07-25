@@ -44,13 +44,13 @@ jobs:
           HEAD_SHA=$(echo "$PR_INFO" | python3 -c "import sys,json; print(json.load(sys.stdin)['head_sha'])")
 
           echo "Dispatching auto-fix for PR #$PR_NUMBER (branch: $HEAD_BRANCH)"
-          echo "max_iterations=6 (3 original + 3 continue)"
+          echo "max_iterations=20 (10 original + 10 continue)"
 
           GH_TOKEN="$DISPATCH_TOKEN" gh workflow run pr-auto-fix.yml \
             -f pr_number="$PR_NUMBER" \
             -f head_branch="$HEAD_BRANCH" \
             -f head_sha="$HEAD_SHA" \
-            -f max_iterations="6" || echo "Failed to dispatch auto-fix"
+            -f max_iterations="20" || echo "Failed to dispatch auto-fix"
 
       - name: React to comment
         env:
@@ -63,6 +63,7 @@ jobs:
   review-ai:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     concurrency:
       group: review-ai-${{ github.event.pull_request.number }}
       cancel-in-progress: true
@@ -77,6 +78,53 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Fetch linked issue content for requirement coverage check
+        id: issue-context
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Extract issue number from PR body (e.g. "Fix #201" or "(#201)")
+          PR_BODY=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER --jq '.body')
+          ISSUE_NUM=$(echo "$PR_BODY" | grep -oP '#(\d+)' | head -1 | tr -d '#')
+          
+          if [ -z "$ISSUE_NUM" ]; then
+            # Try branch name (e.g. agent/fix-issue-201)
+            BRANCH=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER --jq '.head.ref')
+            ISSUE_NUM=$(echo "$BRANCH" | grep -oP 'issue-(\d+)' | head -1 | sed 's/issue-//')
+          fi
+          
+          if [ -n "$ISSUE_NUM" ]; then
+            echo "Found linked issue #$ISSUE_NUM"
+            ISSUE_BODY=$(gh api repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUM --jq '.body' 2>/dev/null || echo "")
+            ISSUE_TITLE=$(gh api repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUM --jq '.title' 2>/dev/null || echo "")
+            
+            # Write issue content to a file that the review agent can read
+            cat > .pr-review-issue-context.md << EOF
+          ## Linked Issue Requirements (Issue #$ISSUE_NUM)
+          
+          **Title**: $ISSUE_TITLE
+          
+          **Requirements**:
+          $ISSUE_BODY
+          
+          ---
+          ## Requirement Coverage Check
+          
+          When reviewing this PR, also check:
+          1. **Completeness**: Are all requirements from the issue implemented?
+          2. **Correctness**: Does the implementation match what the issue describes?
+          3. **Gaps**: List any requirements that are NOT addressed in the code.
+          4. **Extra**: List any significant code changes NOT related to the issue requirements.
+          
+          Include a "Requirement Coverage" section in your review.
+          EOF
+            echo "has_issue=true" >> $GITHUB_OUTPUT
+          else
+            echo "No linked issue found"
+            echo "has_issue=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Run OpenHands Review
         uses: OpenHands/extensions/plugins/pr-review@main
