@@ -2,9 +2,12 @@ import { defineConfig } from "@playwright/test";
 
 /**
  * Playwright config for EAP Frontend E2E tests.
- * Tests against production build (dist/) via vite preview.
- * Uses system Chromium at /usr/bin/chromium (no download needed).
+ * - CI: tests against nginx in docker-compose.ci.yml (port 80)
+ * - Local: tests against vite dev server (port 3000)
  */
+const isCI = !!process.env.CI;
+const baseURL = isCI ? "http://localhost:80" : "http://localhost:3000";
+
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
@@ -13,17 +16,20 @@ export default defineConfig({
   timeout: 30_000,
 
   use: {
-    baseURL: "http://localhost:3000",
-    executablePath: "/usr/bin/chromium",
+    baseURL,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     viewport: { width: 1280, height: 720 },
   },
 
-  webServer: {
-    command: "echo 'use existing vite dev on 3000'",
-    url: "http://localhost:3000",
-    timeout: 5_000,
-    reuseExistingServer: true,
-  },
+  // In CI, the frontend is already running in docker on port 80.
+  // Locally, start vite dev server on port 3000.
+  webServer: isCI
+    ? undefined
+    : {
+        command: "npm run dev",
+        url: "http://localhost:3000",
+        timeout: 30_000,
+        reuseExistingServer: true,
+      },
 });
