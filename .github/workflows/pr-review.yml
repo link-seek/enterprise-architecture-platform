@@ -159,9 +159,24 @@ jobs:
 
           # Severity check: 🔴 Critical / 🟠 Important → block + auto-fix
           # 🟡 Medium / improvement → advisory, pass
-          # Also check text keywords for non-emoji reviews
+          # Only check the OVERALL verdict (first line + RISK ASSESSMENT line),
+          # NOT every emoji in the body (review text may reference 🔴/🟠 in passing)
           has_blocking_severity() {
-            echo "$REVIEW_BODY" | grep -qE '🔴|🟠|critical bug|Critical issue|Important issue|🟠'
+            # 1. Check first line — review-ai starts with overall severity emoji
+            FIRST_LINE=$(echo "$REVIEW_BODY" | head -1)
+            if echo "$FIRST_LINE" | grep -qE '🔴|🟠'; then
+              return 0
+            fi
+            # 2. Check [RISK ASSESSMENT] line for 🔴 HIGH or 🟠
+            if echo "$REVIEW_BODY" | grep -iE 'RISK ASSESSMENT' | grep -qE '🔴|🟠'; then
+              return 0
+            fi
+            # 3. Check for explicit [CRITICAL ISSUES] section with content
+            if echo "$REVIEW_BODY" | grep -qE '^\*\*\[CRITICAL ISSUES\]\*\*' && \
+               ! echo "$REVIEW_BODY" | grep -A1 '^\*\*\[CRITICAL ISSUES\]\*\*' | grep -qE '^(none|None|N/A|-)$'; then
+              return 0
+            fi
+            return 1
           }
 
           dispatch_autofix() {
