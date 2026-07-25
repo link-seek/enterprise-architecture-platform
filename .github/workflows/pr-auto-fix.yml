@@ -62,16 +62,24 @@ jobs:
 
           # Also get failed CI checks and their logs
           CI_FAILURES=""
-          for check in $(gh api repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs --jq '.check_runs[] | select(.conclusion == "failure") | .name' 2>/dev/null); do
-            echo "CI check failed: $check"
-            CI_FAILURES+="\n## CI Check Failed: $check\n"
-            # Get the check run logs
-            CHECK_ID=$(gh api repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs --jq ".check_runs[] | select(.name == \"$check\") | .id" 2>/dev/null)
-            if [ -n "$CHECK_ID" ]; then
-              LOGS=$(gh api repos/$GITHUB_REPOSITORY/check-runs/$CHECK_ID/logs 2>/dev/null | grep -i "error\|fail\|panic\|not found\|FAIL:" | tail -20 || echo "Could not fetch logs")
-              CI_FAILURES+="\n\`\`\`\n$LOGS\n\`\`\`\n"
+          # Fetch all failed check-runs with their IDs and names in one query
+          FAILED_CHECKS=$(gh api repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs \
+            --jq '.check_runs[] | select(.conclusion == "failure") | "\(.id)\t\(.name)"' 2>/dev/null)
+          while IFS=$'\t' read -r CHECK_ID CHECK_NAME; do
+            [ -z "$CHECK_ID" ] && continue
+            echo "CI check failed: $CHECK_NAME (ID: $CHECK_ID)"
+            CI_FAILURES+="\n## CI Check Failed: $CHECK_NAME\n"
+            # Download logs (zip archive), extract and grep for errors
+            TMP_LOGS_DIR=$(mktemp -d)
+            if gh api repos/$GITHUB_REPOSITORY/check-runs/$CHECK_ID/logs > "$TMP_LOGS_DIR/logs.zip" 2>/dev/null; then
+              (cd "$TMP_LOGS_DIR" && unzip -o -q logs.zip 2>/dev/null || true)
+              LOGS=$(grep -rhi "error\|fail\|panic\|not found\|FAIL:" "$TMP_LOGS_DIR" 2>/dev/null | tail -30 || echo "No error lines found in logs")
+            else
+              LOGS="Could not fetch logs"
             fi
-          done
+            rm -rf "$TMP_LOGS_DIR"
+            CI_FAILURES+="\n\`\`\`\n$LOGS\n\`\`\`\n"
+          done <<< "$FAILED_CHECKS"
 
           # Combine review + CI failures
           COMBINED="$REVIEW_BODY"
