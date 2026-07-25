@@ -157,27 +157,47 @@ jobs:
 
           echo "Latest AI review verdict: $VERDICT"
 
-          if [ "$VERDICT" = "APPROVED" ]; then
-            echo "AI approved the PR"
-          elif [ "$VERDICT" = "CHANGES_REQUESTED" ]; then
-            echo "::error::AI requested changes, blocking merge"
+          # Severity check: 🔴 Critical / 🟠 Important → block + auto-fix
+          # 🟡 Medium / improvement → advisory, pass
+          # Only check the OVERALL verdict (first line + RISK ASSESSMENT line),
+          # NOT every emoji in the body (review text may reference 🔴/🟠 in passing)
+          has_blocking_severity() {
+            # 1. Check first line — review-ai starts with overall severity emoji
+            #    Anchor with ^ to avoid matching 🔴/🟠 mentioned in prose
+            FIRST_LINE=$(echo "$REVIEW_BODY" | head -1)
+            if echo "$FIRST_LINE" | grep -qE '^(🔴|🟠)'; then
+              return 0
+            fi
+            # 2. Check [RISK ASSESSMENT] → [Overall PR] line for 🔴 or 🟠
+            #    Match only the "- [Overall PR]" bullet, not surrounding prose
+            if echo "$REVIEW_BODY" | grep -A5 '^\*\*\[RISK ASSESSMENT\]\*\*' | grep -E '^\s*- \[Overall PR\]' | grep -qE '🔴|🟠'; then
+              return 0
+            fi
+            # 3. Check for explicit [CRITICAL ISSUES] section with content
+            if echo "$REVIEW_BODY" | grep -qE '^\*\*\[CRITICAL ISSUES\]\*\*' && \
+               ! echo "$REVIEW_BODY" | grep -A1 '^\*\*\[CRITICAL ISSUES\]\*\*' | grep -qE '^(none|None|N/A|-)$'; then
+              return 0
+            fi
+            return 1
+          }
+
+          dispatch_autofix() {
             echo "Dispatching PR Auto-Fix..."
             GH_TOKEN="$DISPATCH_TOKEN" gh workflow run pr-auto-fix.yml \
               -f pr_number="$PR_NUMBER" \
               -f head_branch="${{ github.event.pull_request.head.ref }}" \
               -f head_sha="$HEAD_SHA" || echo "Failed to dispatch auto-fix"
-            exit 1
-          elif [ "$VERDICT" = "COMMENTED" ]; then
-            if echo "$REVIEW_BODY" | grep -qE '🔴|🟠'; then
+          }
+
+          if [ "$VERDICT" = "APPROVED" ]; then
+            echo "AI approved the PR"
+          elif [ "$VERDICT" = "CHANGES_REQUESTED" ] || [ "$VERDICT" = "COMMENTED" ]; then
+            if has_blocking_severity; then
               echo "::error::AI review has Critical/Important issues, blocking merge"
-              echo "Dispatching PR Auto-Fix..."
-              GH_TOKEN="$DISPATCH_TOKEN" gh workflow run pr-auto-fix.yml \
-                -f pr_number="$PR_NUMBER" \
-                -f head_branch="${{ github.event.pull_request.head.ref }}" \
-                -f head_sha="$HEAD_SHA" || echo "Failed to dispatch auto-fix"
+              dispatch_autofix
               exit 1
             else
-              echo "AI review has no Critical/Important issues, passing"
+              echo "AI review verdict: $VERDICT, but only advisory issues (🟡/no severity) — passing"
             fi
           else
             echo "::error::No AI review found (got: $VERDICT)"
