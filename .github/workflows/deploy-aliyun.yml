@@ -122,9 +122,30 @@ jobs:
 
       - name: Deploy with podman
         run: |
-          # Stop existing container if any
-          podman rm -f eap-backend 2>/dev/null || true
-          # Pull latest image and run
+          # === 1. Stop old container BEFORE backup (avoid SQLite WAL race) ===
+          if podman inspect eap-backend >/dev/null 2>&1; then
+            # Save current image digest for rollback (immutable, not :latest)
+            PREV_DIGEST=$(podman inspect eap-backend --format '{{.ImageDigest}}' 2>/dev/null || echo "")
+            if [ -n "$PREV_DIGEST" ] && [ "$PREV_DIGEST" != "" ]; then
+              # Save full registry ref with digest for podman pull
+              echo "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend@${PREV_DIGEST}" > /opt/eap/data/.previous-image
+              echo "Previous image saved: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend@${PREV_DIGEST}"
+            fi
+            # Stop container to release DB lock
+            podman rm -f eap-backend 2>/dev/null || true
+          fi
+
+          # === 2. Backup data (container stopped, DB is cold) ===
+          DB_FILE="/opt/eap/data/platform.db"
+          BAK_FILE="/opt/eap/data/.platform.db.pre-deploy"
+          if [ -f "$DB_FILE" ]; then
+            cp "$DB_FILE" "$BAK_FILE"
+            echo "Database backed up to $BAK_FILE"
+          else
+            echo "No existing database, fresh deploy"
+          fi
+
+          # === 3. Pull new image and start ===
           podman pull "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:latest"
           podman run -d --name eap-backend \
             --replace \
@@ -141,7 +162,7 @@ jobs:
         run: |
           sleep 5
           for i in $(seq 1 10); do
-            if curl -sf http://localhost:8080/graphql 2>/dev/null; then
+            if curl -sf http://localhost:8080/health 2>/dev/null; then
               echo "Health check passed"
               exit 0
             fi
@@ -149,4 +170,131 @@ jobs:
             sleep 3
           done
           echo "Health check failed"
+          exit 1
+
+  # ==================== Smoke Test: 部署后现网验证 ====================
+  smoke-test:
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: github.ref == 'refs/heads/main' && success()
+    environment: production
+    steps:
+      - name: Wait for CDN cache refresh
+        run: sleep 10
+
+      - name: Smoke test — Backend API
+        run: |
+          echo "=== Test 1: Backend health ==="
+          HEALTH=$(curl -sf -o /dev/null -w "%{http_code}" https://api.xieyucheng.top/health 2>/dev/null || echo "000")
+          echo "Backend health: $HEALTH"
+          if [ "$HEALTH" != "200" ]; then
+            echo "FAIL: Backend health returned $HEALTH"
+            exit 1
+          fi
+
+          echo "=== Test 2: GraphQL endpoint ==="
+          GRAPHQL=$(curl -sf -o /dev/null -w "%{http_code}" \
+            -X POST https://api.xieyucheng.top/graphql \
+            -H "Content-Type: application/json" \
+            -d '{"query":"{ __typename }"}' 2>/dev/null || echo "000")
+          echo "GraphQL endpoint: $GRAPHQL"
+          if [ "$GRAPHQL" != "200" ]; then
+            echo "FAIL: GraphQL endpoint returned $GRAPHQL"
+            exit 1
+          fi
+
+          echo "=== Test 3: Login API alive ==="
+          # Send a minimal valid-structure request; any 4xx means endpoint is alive
+          # 502/503 means backend is broken
+          LOGIN=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST https://api.xieyucheng.top/api/auth/login \
+            -H "Content-Type: application/json" \
+            -d '{"email":"nonexistent@smoke.test","password":"wrong"}' 2>/dev/null || echo "000")
+          echo "Login API response: $LOGIN"
+          # 400/401/403/422 = endpoint alive and rejecting bad creds
+          # 500/502/503/000 = server error or unreachable
+          if ! echo "$LOGIN" | grep -qE "^(4[0-9]{2}|200)$"; then
+            echo "FAIL: Login API returned $LOGIN (expected 4xx or 200, got server error)"
+            exit 1
+          fi
+
+          echo "All backend smoke tests passed"
+
+      - name: Smoke test — Frontend
+        run: |
+          echo "=== Test 4: Frontend serves HTML ==="
+          FRONTEND=$(curl -sf -o /dev/null -w "%{http_code}" https://www.xieyucheng.top/ 2>/dev/null || echo "000")
+          echo "Frontend: $FRONTEND"
+          if [ "$FRONTEND" != "200" ]; then
+            echo "FAIL: Frontend returned $FRONTEND"
+            exit 1
+          fi
+
+          echo "=== Test 5: Frontend has JS bundle ==="
+          curl -sf https://www.xieyucheng.top/ | grep -qo 'script' || {
+            echo "FAIL: No script tag found in frontend HTML"
+            exit 1
+          }
+
+          echo "All frontend smoke tests passed"
+
+  # ==================== Rollback: 只在 deploy/smoke-test 失败时触发 ====================
+  rollback:
+    runs-on: [self-hosted, eap-prod]
+    needs: [deploy, smoke-test]
+    # Only rollback if deploy or smoke-test specifically failed (not build failures)
+    if: always() && github.ref == 'refs/heads/main' && (needs.deploy.result == 'failure' || needs.smoke-test.result == 'failure')
+    environment: production
+    steps:
+      - name: Rollback to previous image + data
+        run: |
+          # === 1. Restore database backup ===
+          DB_FILE="/opt/eap/data/platform.db"
+          BAK_FILE="/opt/eap/data/.platform.db.pre-deploy"
+          if [ -f "$BAK_FILE" ]; then
+            echo "Restoring database from $BAK_FILE"
+            # Stop container first to release the DB file lock
+            podman rm -f eap-backend 2>/dev/null || true
+            cp "$BAK_FILE" "$DB_FILE"
+            echo "Database restored"
+          else
+            echo "WARNING: No database backup found — rollback image only, data stays as-is"
+            podman rm -f eap-backend 2>/dev/null || true
+          fi
+
+          # === 2. Restore previous image ===
+          PREV_FILE="/opt/eap/data/.previous-image"
+          if [ ! -f "$PREV_FILE" ]; then
+            echo "No previous image saved at $PREV_FILE, cannot rollback"
+            echo "Manual intervention required"
+            exit 1
+          fi
+
+          PREV_IMAGE=$(cat "$PREV_FILE")
+          echo "Rolling back to image: $PREV_IMAGE"
+
+          podman pull "$PREV_IMAGE"
+          podman run -d --name eap-backend \
+            --replace \
+            -p 8080:8080 \
+            -v /opt/eap/data:/app/data \
+            -e APP_ENV=production \
+            -e APP_LLM__BACKEND=llm \
+            -e APP_SEED_ADMIN_EMAIL="${{ secrets.ADMIN_EMAIL }}" \
+            -e APP_SEED_ADMIN_PASSWORD="${{ secrets.ADMIN_PASSWORD }}" \
+            -e APP_DATABASE__URL="sqlite:///app/data/platform.db?mode=rwc" \
+            "$PREV_IMAGE"
+
+          # === 3. Verify rollback ===
+          sleep 5
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:8080/health 2>/dev/null; then
+              echo "Rollback successful — image + data restored to pre-deploy state"
+              # Clean up backup
+              rm -f "$BAK_FILE"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Rollback failed — manual intervention required"
           exit 1
