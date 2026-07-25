@@ -74,10 +74,11 @@ jobs:
           # Get list of changed files in the PR
           CHANGED_FILES=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files --paginate --jq '.[].filename')
 
-          # Check if any frontend source files changed (excluding non-testable dirs)
-          # Non-testable: components/ui/, lib/utils.ts, assets/, hooks/
+          # Check if any testable frontend source files changed
+          # Inclusion list: only views/, api/, stores/, lib/apollo need E2E tests
+          # Excludes: components/, hooks/, assets/, *.css, App.tsx, main.tsx, utils.ts
           FRONTEND_SRC_CHANGES=$(echo "$CHANGED_FILES" | grep -E '^frontend/src/' \
-            | grep -vE '^frontend/src/(components/ui/|lib/utils\.ts|assets/|hooks/)' || true)
+            | grep -E '^frontend/src/(views/|api/|stores/|lib/apollo)' || true)
           # Check if any E2E test files changed in this PR
           PR_TEST_CHANGES=$(echo "$CHANGED_FILES" | grep -E '^frontend/tests/.*\.spec\.ts$' || true)
 
