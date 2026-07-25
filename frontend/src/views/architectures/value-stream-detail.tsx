@@ -77,7 +77,8 @@ export default function ValueStreamDetail() {
     objectives?: string[] | null
     metrics?: Record<string, string> | null
   }>
-  stages.sort((a, b) => a.sequenceOrder - b.sequenceOrder)
+  // Sort on a copy so we never mutate the Apollo cache array in place.
+  const orderedStages = [...stages].sort((a, b) => a.sequenceOrder - b.sequenceOrder)
 
   const backPath = spaceId
     ? `/spaces/${spaceId}/architectures/value-streams`
@@ -143,11 +144,11 @@ export default function ValueStreamDetail() {
             <CardTitle>价值流阶段</CardTitle>
           </CardHeader>
           <CardContent>
-            {stages.length === 0 ? (
+            {orderedStages.length === 0 ? (
               <p className="text-sm text-muted-foreground">暂无阶段。可在价值流中拆分设计、生产、销售、交付等阶段。</p>
             ) : (
               <ol className="relative border-l border-muted pl-6 space-y-6">
-                {stages.map((stage) => (
+                {orderedStages.map((stage) => (
                   <li key={stage.id} className="relative">
                     <span className="absolute -left-[31px] flex h-6 w-6 items-center justify-center rounded-full border bg-background text-xs font-medium">
                       {stage.sequenceOrder}

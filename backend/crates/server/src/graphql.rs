@@ -1289,6 +1289,54 @@ fn parse_string_vec_arg(
     }
 }
 
+/// Parse an optional `[String]` GraphQL argument into an `Option<StringVec>`,
+/// following the "outer Some ⇒ apply, outer None ⇒ leave unchanged" convention.
+/// A present-but-null argument clears the value; an absent argument leaves it.
+fn parse_optional_string_vec_arg(
+    ctx: &async_graphql::dynamic::ResolverContext<'_>,
+    name: &str,
+) -> async_graphql::Result<Option<shared_common::value_objects::StringVec>> {
+    match ctx.args.get(name) {
+        None => Ok(None),
+        Some(v) if v.is_null() => Ok(Some(Default::default())),
+        Some(v) => {
+            let list = v
+                .list()?
+                .iter()
+                .map(|item| item.string().map(|s| s.to_owned()))
+                .collect::<async_graphql::Result<Vec<String>>>()?;
+            Ok(Some(shared_common::value_objects::StringVec(list)))
+        }
+    }
+}
+
+/// Parse an optional JSON-encoded `String` GraphQL argument into a
+/// `StringStringMap`. The argument is expected to be a JSON object such as
+/// `{"lead_time": "2d", "throughput": "100"}`. An absent argument yields
+/// `None` (leave unchanged); a present-but-null argument yields an empty map.
+fn parse_string_string_map_arg(
+    ctx: &async_graphql::dynamic::ResolverContext<'_>,
+    name: &str,
+) -> async_graphql::Result<Option<shared_common::value_objects::StringStringMap>> {
+    match ctx.args.get(name) {
+        None => Ok(None),
+        Some(v) if v.is_null() => {
+            Ok(Some(Default::default()))
+        }
+        Some(v) => {
+            let json = v.string()?;
+            let map: std::collections::HashMap<String, String> =
+                serde_json::from_str(json).map_err(|e| {
+                    async_graphql::Error::new(format!(
+                        "Invalid JSON for '{}' argument: {}",
+                        name, e
+                    ))
+                })?;
+            Ok(Some(shared_common::value_objects::StringStringMap(map)))
+        }
+    }
+}
+
 fn register_sub_entity_domain_mutations(builder: &mut Builder) {
     use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, TypeRef};
     use sea_orm::ActiveValue::{NotSet, Set};
@@ -1492,6 +1540,8 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     .get("ownerId")
                     .and_then(|v| v.string().ok())
                     .and_then(|s| Uuid::parse_str(s).ok());
+                let objectives = parse_string_vec_arg(&ctx, "objectives")?;
+                let metrics = parse_string_string_map_arg(&ctx, "metrics")?;
 
                 let service = ValueStreamService::new(
                     SeaOrmValueStreamRepo::new(db.clone()),
@@ -1507,8 +1557,8 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                         input,
                         output,
                         owner_id,
-                        None,
-                        None,
+                        Some(objectives),
+                        metrics,
                     )
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -1524,7 +1574,9 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("output", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("stageType", TypeRef::named(TypeRef::STRING)))
-    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)));
+    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("objectives", TypeRef::named_nn_list_nn(TypeRef::STRING)))
+    .argument(InputValue::new("metrics", TypeRef::named(TypeRef::STRING)));
     builder.mutations.push(create);
 
     // ── valueStreamStageUpdate ───────────────────────────────────────
@@ -1584,6 +1636,8 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                         .map(Some),
                     None => None,
                 };
+                let objectives = parse_optional_string_vec_arg(&ctx, "objectives")?;
+                let metrics = parse_string_string_map_arg(&ctx, "metrics")?;
 
                 let service = ValueStreamService::new(
                     SeaOrmValueStreamRepo::new(db.clone()),
@@ -1599,8 +1653,8 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                         input,
                         output,
                         owner_id,
-                        None,
-                        None,
+                        objectives,
+                        metrics,
                     )
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -1616,7 +1670,9 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("output", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("stageType", TypeRef::named(TypeRef::STRING)))
-    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)));
+    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("objectives", TypeRef::named_nn_list_nn(TypeRef::STRING)))
+    .argument(InputValue::new("metrics", TypeRef::named(TypeRef::STRING)));
     builder.mutations.push(update);
 
     // ── valueStreamStageDelete ───────────────────────────────────────
@@ -1651,6 +1707,127 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
     )
     .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
     builder.mutations.push(delete);
+
+    // ── valueStreamStagePublish (Draft → Active) ─────────────────────
+    let publish = Field::new(
+        "valueStreamStagePublish",
+        TypeRef::named_nn("ValueStreamStages"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Update)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let existing = value_stream_stage::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Value stream stage not found."))?;
+                let space_id = space_of_value_stream(db, existing.value_stream_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                let service = ValueStreamService::new(
+                    SeaOrmValueStreamRepo::new(db.clone()),
+                    SeaOrmValueStreamRepo::new(db.clone()),
+                );
+                let stage = service
+                    .publish_stage(id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                let model = domain_stage_to_model(&stage);
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(publish);
+
+    // ── valueStreamStageArchive (Draft/Active → Archived) ────────────
+    let archive = Field::new(
+        "valueStreamStageArchive",
+        TypeRef::named_nn("ValueStreamStages"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Update)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let existing = value_stream_stage::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Value stream stage not found."))?;
+                let space_id = space_of_value_stream(db, existing.value_stream_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                let service = ValueStreamService::new(
+                    SeaOrmValueStreamRepo::new(db.clone()),
+                    SeaOrmValueStreamRepo::new(db.clone()),
+                );
+                let stage = service
+                    .archive_stage(id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                let model = domain_stage_to_model(&stage);
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(archive);
+
+    // ── valueStreamStageReorder ─────────────────────────────────────
+    // Renumber stages so their `sequence_order` becomes 1..=N following the
+    // provided `orderedIds`. Returns true on success.
+    let reorder = Field::new(
+        "valueStreamStageReorder",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Update)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let value_stream_id = parse_uuid_arg(&ctx, "valueStreamId")?;
+                let space_id = space_of_value_stream(db, value_stream_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                let ordered_ids = match ctx.args.get("orderedIds") {
+                    Some(v) if v.is_null() => Vec::new(),
+                    Some(v) => {
+                        let mut ids = Vec::new();
+                        for item in v.list()?.iter() {
+                            let s = item.string()?;
+                            ids.push(
+                                Uuid::parse_str(s).map_err(|e| {
+                                    async_graphql::Error::new(format!(
+                                        "Invalid UUID in orderedIds: {}",
+                                        e
+                                    ))
+                                })?,
+                            );
+                        }
+                        ids
+                    }
+                    None => Vec::new(),
+                };
+
+                let service = ValueStreamService::new(
+                    SeaOrmValueStreamRepo::new(db.clone()),
+                    SeaOrmValueStreamRepo::new(db.clone()),
+                );
+                service
+                    .reorder_stages(value_stream_id, ordered_ids)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("valueStreamId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new(
+        "orderedIds",
+        TypeRef::named_nn_list_nn(TypeRef::STRING),
+    ));
+    builder.mutations.push(reorder);
 
     // ── capabilityProcessCreate ─────────────────────────────────────
     // Join table: both parents must exist and live in the same space.
