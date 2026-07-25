@@ -138,6 +138,14 @@ jobs:
             fi
           fi
 
+          # Check for other architecture view changes (crud, layout, users, version-control)
+          # These all use GraphQL, so verify spaces tests exist
+          if echo "$FRONTEND_CHANGES" | grep -qE "frontend/src/views/architectures/(crud|layout|users|version-control)"; then
+            if ! find frontend/tests/spaces -name "*.spec.ts" 2>/dev/null | grep -q .; then
+              MISSING_COVERAGE+=("architecture view changes but no tests/spaces/*.spec.ts to verify GraphQL")
+            fi
+          fi
+
           if [ ${#MISSING_COVERAGE[@]} -gt 0 ]; then
             echo "::error::E2E test coverage missing:"
             for msg in "${MISSING_COVERAGE[@]}"; do
@@ -147,8 +155,6 @@ jobs:
           fi
 
           echo "E2E test coverage OK"
-          echo "has-e2e-tests=true" >> $GITHUB_OUTPUT
-          echo "coverage-msg=E2E coverage verified" >> $GITHUB_OUTPUT
 
   review-ai:
     if: ${{ github.event_name == 'pull_request' }}
