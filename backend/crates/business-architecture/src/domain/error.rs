@@ -32,6 +32,12 @@ pub enum DomainError {
     CannotRemoveLastOwner,
     #[error("invitation not found")]
     InvitationNotFound,
+    #[error("value stream stage not found")]
+    StageNotFound,
+    #[error("duplicate stage sequence order {order} within a value stream")]
+    DuplicateStageOrder { order: i32 },
+    #[error("invalid stage sequence order {order}: orders must be positive and contiguous")]
+    InvalidStageOrder { order: i32 },
     #[error("invalid lifecycle transition: {from} → {to} on {entity}")]
     InvalidTransition {
         from: String,

@@ -32,6 +32,7 @@ impl From<value_stream::Model> for ValueStream {
             updated_at: m.updated_at,
             deleted_at: m.deleted_at,
             space_id: m.space_id,
+            value_proposition: m.value_proposition,
         }
     }
 }
@@ -48,10 +49,17 @@ impl From<value_stream_stage::Model> for ValueStreamStage {
             created_at: m.created_at,
             updated_at: m.updated_at,
             deleted_at: m.deleted_at,
+            description: m.description,
+            stage_type: m.stage_type,
+            status: m.status,
+            owner_id: m.owner_id,
+            objectives: m.objectives,
+            metrics: m.metrics,
         }
     }
 }
 
+#[derive(Clone)]
 pub struct SeaOrmValueStreamRepo {
     db: DatabaseConnection,
 }
@@ -131,6 +139,7 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
             active.performance_metrics = Set(vs.performance_metrics.clone());
             active.updated_by = Set(vs.updated_by);
             active.updated_at = Set(vs.updated_at);
+            active.value_proposition = Set(vs.value_proposition.clone());
             active.update(&self.db).await?
         } else {
             let active = value_stream::ActiveModel {
@@ -152,6 +161,7 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
                 updated_at: Set(vs.updated_at),
                 deleted_at: Set(None),
                 space_id: Set(vs.space_id),
+                value_proposition: Set(vs.value_proposition.clone()),
             };
             active.insert(&self.db).await?
         };
@@ -204,6 +214,28 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
         Ok(models.into_iter().map(Into::into).collect())
     }
 
+    async fn find_by_value_stream_ordered(
+        &self,
+        vs_id: Uuid,
+    ) -> Result<Vec<ValueStreamStage>, DomainError> {
+        let models = value_stream_stage::Entity::find()
+            .filter(value_stream_stage::Column::ValueStreamId.eq(vs_id))
+            .filter(value_stream_stage::Column::DeletedAt.is_null())
+            .order_by_asc(value_stream_stage::Column::SequenceOrder)
+            .all(&self.db)
+            .await?;
+        Ok(models.into_iter().map(Into::into).collect())
+    }
+
+    async fn find_by_id(&self, id: Uuid) -> Result<Option<ValueStreamStage>, DomainError> {
+        let model = value_stream_stage::Entity::find()
+            .filter(value_stream_stage::Column::Id.eq(id))
+            .filter(value_stream_stage::Column::DeletedAt.is_null())
+            .one(&self.db)
+            .await?;
+        Ok(model.map(Into::into))
+    }
+
     async fn save(&self, stage: &ValueStreamStage) -> Result<ValueStreamStage, DomainError> {
         let existing = value_stream_stage::Entity::find_by_id(stage.id)
             .one(&self.db)
@@ -216,6 +248,12 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
             active.input = Set(stage.input.clone());
             active.output = Set(stage.output.clone());
             active.updated_at = Set(stage.updated_at);
+            active.description = Set(stage.description.clone());
+            active.stage_type = Set(stage.stage_type);
+            active.status = Set(stage.status);
+            active.owner_id = Set(stage.owner_id);
+            active.objectives = Set(stage.objectives.clone());
+            active.metrics = Set(stage.metrics.clone());
             active.update(&self.db).await?
         } else {
             let active = value_stream_stage::ActiveModel {
@@ -228,6 +266,12 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
                 created_at: Set(stage.created_at),
                 updated_at: Set(stage.updated_at),
                 deleted_at: Set(None),
+                description: Set(stage.description.clone()),
+                stage_type: Set(stage.stage_type),
+                status: Set(stage.status),
+                owner_id: Set(stage.owner_id),
+                objectives: Set(stage.objectives.clone()),
+                metrics: Set(stage.metrics.clone()),
             };
             active.insert(&self.db).await?
         };
@@ -235,11 +279,18 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
         Ok(result.into())
     }
 
+    async fn save_batch(&self, stages: &[ValueStreamStage]) -> Result<(), DomainError> {
+        for stage in stages {
+            ValueStreamStageRepository::save(self, stage).await?;
+        }
+        Ok(())
+    }
+
     async fn soft_delete(&self, id: Uuid) -> Result<(), DomainError> {
         let model = value_stream_stage::Entity::find_by_id(id)
             .one(&self.db)
             .await?
-            .ok_or(DomainError::ValueStreamNotFound)?;
+            .ok_or(DomainError::StageNotFound)?;
 
         let mut active: value_stream_stage::ActiveModel = model.into();
         active.deleted_at = Set(Some(chrono::Utc::now()));

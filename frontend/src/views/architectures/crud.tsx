@@ -5,8 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { GET_VALUE_STREAMS } from './version-control'
 
 // ============================================================================
@@ -15,17 +14,17 @@ import { GET_VALUE_STREAMS } from './version-control'
 
 // Domain-driven custom mutations (replace seaography auto-CRUD)
 const CREATE_VALUE_STREAM = gql`
-  mutation ValueStreamCreate($spaceId: String!, $name: String!, $description: String!, $businessVersion: String!, $importance: String!) {
-    valueStreamCreate(spaceId: $spaceId, name: $name, description: $description, businessVersion: $businessVersion, importance: $importance) {
-      id name description businessVersion status importance logicalId
+  mutation ValueStreamCreate($spaceId: String!, $name: String!, $description: String!, $businessVersion: String!, $importance: String!, $triggeringEvent: String, $endDeliverable: String, $valueProposition: String) {
+    valueStreamCreate(spaceId: $spaceId, name: $name, description: $description, businessVersion: $businessVersion, importance: $importance, triggeringEvent: $triggeringEvent, endDeliverable: $endDeliverable, valueProposition: $valueProposition) {
+      id name description businessVersion status importance logicalId triggeringEvent endDeliverable valueProposition
     }
   }
 `
 
 const UPDATE_VALUE_STREAM = gql`
-  mutation ValueStreamUpdate($id: String!, $name: String, $description: String, $importance: String) {
-    valueStreamUpdate(id: $id, name: $name, description: $description, importance: $importance) {
-      id name description businessVersion status importance logicalId
+  mutation ValueStreamUpdate($id: String!, $name: String, $description: String, $importance: String, $triggeringEvent: String, $endDeliverable: String, $valueProposition: String) {
+    valueStreamUpdate(id: $id, name: $name, description: $description, importance: $importance, triggeringEvent: $triggeringEvent, endDeliverable: $endDeliverable, valueProposition: $valueProposition) {
+      id name description businessVersion status importance logicalId triggeringEvent endDeliverable valueProposition
     }
   }
 `
@@ -44,6 +43,9 @@ interface ValueStream {
   status: string
   importance: string
   logicalId: string
+  triggeringEvent?: string | null
+  endDeliverable?: string | null
+  valueProposition?: string | null
 }
 
 export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: {
@@ -57,6 +59,9 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: 
   const [version, setVersion] = useState('v1.0')
   const [status, setStatus] = useState('active')
   const [importance, setImportance] = useState('High')
+  const [triggeringEvent, setTriggeringEvent] = useState('')
+  const [endDeliverable, setEndDeliverable] = useState('')
+  const [valueProposition, setValueProposition] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -72,12 +77,18 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: 
         setVersion(editing.businessVersion)
         setStatus(editing.status)
         setImportance(editing.importance.charAt(0).toUpperCase() + editing.importance.slice(1))
+        setTriggeringEvent(editing.triggeringEvent ?? '')
+        setEndDeliverable(editing.endDeliverable ?? '')
+        setValueProposition(editing.valueProposition ?? '')
       } else {
         setName('')
         setDescription('')
         setVersion('v1.0')
         setStatus('active')
         setImportance('High')
+        setTriggeringEvent('')
+        setEndDeliverable('')
+        setValueProposition('')
       }
     }
   }, [open, editing])
@@ -93,6 +104,9 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: 
             name,
             description,
             importance,
+            triggeringEvent: triggeringEvent || null,
+            endDeliverable: endDeliverable || null,
+            valueProposition: valueProposition || null,
           },
           refetchQueries: [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
         })
@@ -104,6 +118,9 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: 
             description,
             businessVersion: version,
             importance,
+            triggeringEvent: triggeringEvent || null,
+            endDeliverable: endDeliverable || null,
+            valueProposition: valueProposition || null,
           },
           refetchQueries: [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
         })
@@ -153,6 +170,18 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: 
               <option value="Medium">Medium</option>
               <option value="Low">Low</option>
             </select>
+          </div>
+          <div className="space-y-2">
+            <Label>价值主张</Label>
+            <Input value={valueProposition} onChange={e => setValueProposition(e.target.value)} placeholder="价值变现的核心主张（如：销售毛衣）" />
+          </div>
+          <div className="space-y-2">
+            <Label>触发事件</Label>
+            <Input value={triggeringEvent} onChange={e => setTriggeringEvent(e.target.value)} placeholder="价值流的起点（如：客户下单）" />
+          </div>
+          <div className="space-y-2">
+            <Label>最终交付物</Label>
+            <Input value={endDeliverable} onChange={e => setEndDeliverable(e.target.value)} placeholder="价值流的终点（如：客户收到毛衣）" />
           </div>
         </div>
         <DialogFooter>

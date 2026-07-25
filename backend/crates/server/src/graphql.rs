@@ -21,8 +21,9 @@ use shared_common::enums::ValueStreamImportance;
 use shared_common::enums::SpaceRole;
 use shared_common::enums::{
     BusinessValueRating, CapabilityLevel, CapabilityStatus, CostRating,
-    LifecycleStatus, MaturityLevel,
+    LifecycleStatus, MaturityLevel, StageType, StageStatus,
 };
+use shared_common::value_objects::{StringVec, StringStringMap};
 
 pub type GraphqlSchema = async_graphql::dynamic::Schema;
 
@@ -422,6 +423,7 @@ fn domain_vs_to_model(vs: &DomainValueStream) -> value_stream::Model {
         updated_at: vs.updated_at,
         deleted_at: vs.deleted_at,
         space_id: vs.space_id,
+        value_proposition: vs.value_proposition.clone(),
     }
 }
 
@@ -511,13 +513,27 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 let description = ctx.args.get("description").and_then(|v| v.string().ok()).map(|s| s.to_owned());
                 let business_version = ctx.args.try_get("businessVersion")?.string()?.to_owned();
                 let importance = parse_importance(ctx.args.try_get("importance")?.enum_name()?)?;
+                let triggering_event = ctx.args.get("triggeringEvent").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+                let end_deliverable = ctx.args.get("endDeliverable").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+                let value_proposition = ctx.args.get("valueProposition").and_then(|v| v.string().ok()).map(|s| s.to_owned());
 
                 ensure_space_edit_access(&ctx, db, space_id).await?;
 
-                let repo = SeaOrmValueStreamRepo::new(db.clone());
-                let service = ValueStreamService::new(repo);
+                let service = ValueStreamService::new(
+                    SeaOrmValueStreamRepo::new(db.clone()),
+                    SeaOrmValueStreamRepo::new(db.clone()),
+                );
                 let vs = service
-                    .create(space_id, name, description, business_version, importance)
+                    .create(
+                        space_id,
+                        name,
+                        description,
+                        business_version,
+                        importance,
+                        triggering_event,
+                        end_deliverable,
+                        value_proposition,
+                    )
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
 
@@ -530,7 +546,10 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("businessVersion", TypeRef::named_nn(TypeRef::STRING)))
-    .argument(InputValue::new("importance", TypeRef::named_nn(TypeRef::STRING)));
+    .argument(InputValue::new("importance", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("triggeringEvent", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("endDeliverable", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("valueProposition", TypeRef::named(TypeRef::STRING)));
 
     builder.mutations.push(create_field);
 
@@ -558,6 +577,21 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     Some(v) if !v.is_null() => Some(parse_importance(v.enum_name()?)?),
                     _ => None,
                 };
+                let triggering_event = match ctx.args.get("triggeringEvent") {
+                    Some(v) if v.is_null() => Some(None),
+                    Some(v) => v.string().ok().map(|s| Some(s.to_owned())),
+                    None => None,
+                };
+                let end_deliverable = match ctx.args.get("endDeliverable") {
+                    Some(v) if v.is_null() => Some(None),
+                    Some(v) => v.string().ok().map(|s| Some(s.to_owned())),
+                    None => None,
+                };
+                let value_proposition = match ctx.args.get("valueProposition") {
+                    Some(v) if v.is_null() => Some(None),
+                    Some(v) => v.string().ok().map(|s| Some(s.to_owned())),
+                    None => None,
+                };
 
                 let repo = SeaOrmValueStreamRepo::new(db.clone());
                 // Enforce space-level ACL: look up the target's space before mutating.
@@ -568,9 +602,17 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     .ok_or_else(|| async_graphql::Error::new("Value stream not found."))?;
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
 
-                let service = ValueStreamService::new(repo);
+                let service = ValueStreamService::new(repo.clone(), repo);
                 let vs = service
-                    .update(id, name, description, importance)
+                    .update_full(
+                        id,
+                        name,
+                        description,
+                        importance,
+                        triggering_event,
+                        end_deliverable,
+                        value_proposition,
+                    )
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
 
@@ -582,7 +624,10 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
-    .argument(InputValue::new("importance", TypeRef::named(TypeRef::STRING)));
+    .argument(InputValue::new("importance", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("triggeringEvent", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("endDeliverable", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("valueProposition", TypeRef::named(TypeRef::STRING)));
 
     builder.mutations.push(update_field);
 
@@ -609,7 +654,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     .ok_or_else(|| async_graphql::Error::new("Value stream not found."))?;
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
 
-                let service = ValueStreamService::new(repo);
+                let service = ValueStreamService::new(repo.clone(), repo);
                 service
                     .archive(id)
                     .await
@@ -650,7 +695,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     .ok_or_else(|| async_graphql::Error::new("Value stream not found."))?;
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
 
-                let service = ValueStreamService::new(repo);
+                let service = ValueStreamService::new(repo.clone(), repo);
                 let vs = service
                     .create_version(current_id, new_version, new_name, new_description)
                     .await
@@ -1409,6 +1454,22 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     .get("output")
                     .and_then(|v| v.string().ok())
                     .map(|s| s.to_owned());
+                let description = ctx
+                    .args
+                    .get("description")
+                    .and_then(|v| v.string().ok())
+                    .map(|s| s.to_owned());
+                let stage_type = ctx
+                    .args
+                    .get("stageType")
+                    .and_then(|v| v.enum_name().ok().map(|s| s.to_owned()))
+                    .and_then(|s| StageType::from_str(&s))
+                    .unwrap_or_default();
+                let owner_id = ctx
+                    .args
+                    .get("ownerId")
+                    .and_then(|v| v.string().ok())
+                    .and_then(|s| Uuid::parse_str(s).ok());
 
                 let now = chrono::Utc::now();
                 let am = value_stream_stage::ActiveModel {
@@ -1421,6 +1482,12 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     created_at: Set(now),
                     updated_at: Set(now),
                     deleted_at: NotSet,
+                    description: Set(description),
+                    stage_type: Set(stage_type),
+                    status: Set(StageStatus::Draft),
+                    owner_id: Set(owner_id),
+                    objectives: Set(StringVec::default()),
+                    metrics: Set(StringStringMap::default()),
                 };
                 let model = am
                     .insert(db)
@@ -1434,7 +1501,10 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("sequenceOrder", TypeRef::named_nn(TypeRef::INT)))
     .argument(InputValue::new("input", TypeRef::named(TypeRef::STRING)))
-    .argument(InputValue::new("output", TypeRef::named(TypeRef::STRING)));
+    .argument(InputValue::new("output", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("stageType", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)));
     builder.mutations.push(create);
 
     // ── valueStreamStageUpdate ───────────────────────────────────────
@@ -1480,6 +1550,34 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     }
                     None => {}
                 }
+                match ctx.args.get("description") {
+                    Some(v) if v.is_null() => am.description = Set(None),
+                    Some(v) => {
+                        if let Ok(s) = v.string() {
+                            am.description = Set(Some(s.to_owned()));
+                        }
+                    }
+                    None => {}
+                }
+                if let Some(t) = ctx
+                    .args
+                    .get("stageType")
+                    .and_then(|v| v.enum_name().ok().map(|s| s.to_owned()))
+                    .and_then(|s| StageType::from_str(&s))
+                {
+                    am.stage_type = Set(t);
+                }
+                match ctx.args.get("ownerId") {
+                    Some(v) if v.is_null() => am.owner_id = Set(None),
+                    Some(v) => {
+                        if let Ok(s) = v.string() {
+                            if let Ok(u) = Uuid::parse_str(s) {
+                                am.owner_id = Set(Some(u));
+                            }
+                        }
+                    }
+                    None => {}
+                }
                 am.updated_at = Set(chrono::Utc::now());
                 let model = am
                     .update(db)
@@ -1493,7 +1591,10 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("sequenceOrder", TypeRef::named(TypeRef::INT)))
     .argument(InputValue::new("input", TypeRef::named(TypeRef::STRING)))
-    .argument(InputValue::new("output", TypeRef::named(TypeRef::STRING)));
+    .argument(InputValue::new("output", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("stageType", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)));
     builder.mutations.push(update);
 
     // ── valueStreamStageDelete ───────────────────────────────────────

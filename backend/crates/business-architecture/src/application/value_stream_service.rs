@@ -1,34 +1,46 @@
 use chrono::Utc;
+use shared_common::enums::{StageType, ValueStreamImportance};
+use shared_common::value_objects::{StringStringMap, StringVec};
 use uuid::Uuid;
 
 use crate::domain::error::DomainError;
-use crate::domain::value_stream::entity::ValueStream;
-use crate::domain::value_stream::repository::ValueStreamRepository;
+use crate::domain::value_stream::entity::{validate_stage_flow, ValueStream, ValueStreamStage};
+use crate::domain::value_stream::repository::{
+    ValueStreamRepository, ValueStreamStageRepository,
+};
 
 /// Application Service for ValueStream.
 /// Thin orchestration layer: coordinates domain objects and transactions.
 /// No business logic here — all rules live in the domain model.
-pub struct ValueStreamService<R: ValueStreamRepository> {
+pub struct ValueStreamService<R: ValueStreamRepository, S: ValueStreamStageRepository> {
     repo: R,
+    stage_repo: S,
 }
 
-impl<R: ValueStreamRepository> ValueStreamService<R> {
-    pub fn new(repo: R) -> Self {
-        Self { repo }
+impl<R: ValueStreamRepository, S: ValueStreamStageRepository> ValueStreamService<R, S> {
+    pub fn new(repo: R, stage_repo: S) -> Self {
+        Self { repo, stage_repo }
     }
 
     /// Create a new value stream (first version).
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
         space_id: Uuid,
         name: String,
         description: Option<String>,
         business_version: String,
-        importance: shared_common::enums::ValueStreamImportance,
+        importance: ValueStreamImportance,
+        triggering_event: Option<String>,
+        end_deliverable: Option<String>,
+        value_proposition: Option<String>,
     ) -> Result<ValueStream, DomainError> {
         let id = Uuid::now_v7();
         let now = Utc::now();
-        let vs = ValueStream::create(id, space_id, name, description, business_version, importance, now);
+        let mut vs = ValueStream::create(id, space_id, name, description, business_version, importance, now);
+        vs.triggering_event = triggering_event;
+        vs.end_deliverable = end_deliverable;
+        vs.value_proposition = value_proposition;
         self.repo.save(&vs).await
     }
 
@@ -43,7 +55,8 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
 
     /// Create a new version of an existing value stream.
     /// The current active version is archived, and a new version is created
-    /// with the same logical_id.
+    /// with the same logical_id. The current stages are deep-copied
+    /// (snapshot) onto the new version so it is not an empty shell.
     pub async fn create_version(
         &self,
         current_id: Uuid,
@@ -63,9 +76,24 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         // Domain rule: archive current, create new version with same logical_id
         let new_vs = current.create_new_version(new_id, new_version, name, description, now)?;
 
-        // Persist: save archived current, then save new version
+        // Snapshot the current stages onto the new version.
+        let current_stages = self.stage_repo.find_by_value_stream_ordered(current_id).await?;
+        let snapshots: Vec<ValueStreamStage> = current_stages
+            .iter()
+            .map(|s| s.snapshot_to(Uuid::now_v7(), new_vs.id, now))
+            .collect();
+
+        // Persist: save archived current, save new version, then its stages.
+        // NOTE: Ideally wrapped in a single DB transaction; the repository
+        // trait does not currently expose a transaction handle, so we apply
+        // the writes sequentially. A future refactor should add a
+        // `save_with_stages` transactional method.
         self.repo.save(&current).await?;
-        self.repo.save(&new_vs).await
+        self.repo.save(&new_vs).await?;
+        if !snapshots.is_empty() {
+            self.stage_repo.save_batch(&snapshots).await?;
+        }
+        Ok(new_vs)
     }
 
     /// Update mutable fields of an active value stream.
@@ -74,11 +102,34 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         id: Uuid,
         name: Option<String>,
         description: Option<Option<String>>,
-        importance: Option<shared_common::enums::ValueStreamImportance>,
+        importance: Option<ValueStreamImportance>,
+    ) -> Result<ValueStream, DomainError> {
+        self.update_full(id, name, description, importance, None, None, None).await
+    }
+
+    /// Update mutable fields including value-stream metadata.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_full(
+        &self,
+        id: Uuid,
+        name: Option<String>,
+        description: Option<Option<String>>,
+        importance: Option<ValueStreamImportance>,
+        triggering_event: Option<Option<String>>,
+        end_deliverable: Option<Option<String>>,
+        value_proposition: Option<Option<String>>,
     ) -> Result<ValueStream, DomainError> {
         let mut vs = self.repo.find_by_id(id).await?.ok_or(DomainError::ValueStreamNotFound)?;
         let now = Utc::now();
-        vs.update(name, description, importance, now)?; // Domain rule: archived cannot be updated
+        vs.update_full(
+            name,
+            description,
+            importance,
+            triggering_event,
+            end_deliverable,
+            value_proposition,
+            now,
+        )?; // Domain rule: archived cannot be updated
         self.repo.save(&vs).await
     }
 
@@ -96,5 +147,155 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         logical_id: Uuid,
     ) -> Result<Option<ValueStream>, DomainError> {
         self.repo.find_active_by_logical_id(logical_id).await
+    }
+
+    // ---------------------------------------------------------------------
+    // Stage management (stages are entities within the ValueStream aggregate)
+    // ---------------------------------------------------------------------
+
+    /// List the stages of a value stream, ordered by `sequence_order`.
+    pub async fn list_stages(&self, vs_id: Uuid) -> Result<Vec<ValueStreamStage>, DomainError> {
+        self.stage_repo.find_by_value_stream_ordered(vs_id).await
+    }
+
+    /// Add a new stage to a value stream. The stage's `sequence_order` must
+    /// not collide with an existing stage; the resulting flow must be
+    /// contiguous starting at 1.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_stage(
+        &self,
+        vs_id: Uuid,
+        name: String,
+        sequence_order: i32,
+        stage_type: StageType,
+        description: Option<String>,
+        input: Option<String>,
+        output: Option<String>,
+        owner_id: Option<Uuid>,
+        objectives: Option<StringVec>,
+        metrics: Option<StringStringMap>,
+    ) -> Result<ValueStreamStage, DomainError> {
+        // The parent value stream must exist and be active.
+        let vs = self.repo.find_by_id(vs_id).await?.ok_or(DomainError::ValueStreamNotFound)?;
+        if !vs.is_active() {
+            return Err(DomainError::CannotModifyArchived {
+                entity: "ValueStream".to_string(),
+            });
+        }
+
+        let id = Uuid::now_v7();
+        let now = Utc::now();
+        let mut stage = ValueStreamStage::create(id, vs_id, name, sequence_order, stage_type, now)?;
+        stage.description = description;
+        stage.input = input;
+        stage.output = output;
+        stage.owner_id = owner_id;
+        if let Some(o) = objectives { stage.objectives = o; }
+        if let Some(m) = metrics { stage.metrics = m; }
+
+        // Validate the resulting flow (uniqueness + contiguity).
+        let mut stages = self.stage_repo.find_by_value_stream_ordered(vs_id).await?;
+        stages.push(stage.clone());
+        validate_stage_flow(&stages, vs_id)?;
+
+        self.stage_repo.save(&stage).await
+    }
+
+    /// Update a stage's mutable fields.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_stage(
+        &self,
+        stage_id: Uuid,
+        name: Option<String>,
+        description: Option<Option<String>>,
+        stage_type: Option<StageType>,
+        input: Option<Option<String>>,
+        output: Option<Option<String>>,
+        owner_id: Option<Option<Uuid>>,
+        objectives: Option<StringVec>,
+        metrics: Option<StringStringMap>,
+    ) -> Result<ValueStreamStage, DomainError> {
+        let mut stage = self
+            .stage_repo
+            .find_by_id(stage_id)
+            .await?
+            .ok_or(DomainError::StageNotFound)?;
+        let now = Utc::now();
+        stage.update(
+            name, description, stage_type, input, output, owner_id, objectives, metrics, now,
+        )?;
+        self.stage_repo.save(&stage).await
+    }
+
+    /// Publish a draft stage (Draft → Active).
+    pub async fn publish_stage(&self, stage_id: Uuid) -> Result<ValueStreamStage, DomainError> {
+        let mut stage = self
+            .stage_repo
+            .find_by_id(stage_id)
+            .await?
+            .ok_or(DomainError::StageNotFound)?;
+        let now = Utc::now();
+        stage.publish(now)?;
+        self.stage_repo.save(&stage).await
+    }
+
+    /// Archive a stage (Draft/Active → Archived).
+    pub async fn archive_stage(&self, stage_id: Uuid) -> Result<ValueStreamStage, DomainError> {
+        let mut stage = self
+            .stage_repo
+            .find_by_id(stage_id)
+            .await?
+            .ok_or(DomainError::StageNotFound)?;
+        let now = Utc::now();
+        stage.archive(now)?;
+        self.stage_repo.save(&stage).await
+    }
+
+    /// Remove a stage (soft delete).
+    pub async fn remove_stage(&self, stage_id: Uuid) -> Result<(), DomainError> {
+        // Ensure the stage exists.
+        let _ = self
+            .stage_repo
+            .find_by_id(stage_id)
+            .await?
+            .ok_or(DomainError::StageNotFound)?;
+        self.stage_repo.soft_delete(stage_id).await
+    }
+
+    /// Reorder stages within a value stream. `ordered_ids` is the desired
+    /// order of stage ids (first → last). The stages are renumbered so their
+    /// `sequence_order` becomes 1..=N.
+    pub async fn reorder_stages(
+        &self,
+        vs_id: Uuid,
+        ordered_ids: Vec<Uuid>,
+    ) -> Result<Vec<ValueStreamStage>, DomainError> {
+        let vs = self.repo.find_by_id(vs_id).await?.ok_or(DomainError::ValueStreamNotFound)?;
+        if !vs.is_active() {
+            return Err(DomainError::CannotModifyArchived {
+                entity: "ValueStream".to_string(),
+            });
+        }
+
+        let existing = self.stage_repo.find_by_value_stream_ordered(vs_id).await?;
+        if ordered_ids.len() != existing.len() {
+            return Err(DomainError::Validation(
+                "reorder_stages: must provide every stage id".to_string(),
+            ));
+        }
+
+        let now = Utc::now();
+        let mut updated: Vec<ValueStreamStage> = Vec::with_capacity(existing.len());
+        for (idx, id) in ordered_ids.iter().enumerate() {
+            let mut stage = existing
+                .iter()
+                .find(|s| &s.id == id)
+                .cloned()
+                .ok_or(DomainError::StageNotFound)?;
+            stage.reorder((idx + 1) as i32, now)?;
+            updated.push(stage);
+        }
+        self.stage_repo.save_batch(&updated).await?;
+        Ok(updated)
     }
 }

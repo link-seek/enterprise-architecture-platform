@@ -31,6 +31,15 @@ pub trait ValueStreamStageRepository: Send + Sync + 'static {
         &self,
         vs_id: Uuid,
     ) -> Result<Vec<ValueStreamStage>, DomainError>;
+    /// Return the stages of a value stream ordered by `sequence_order` asc.
+    async fn find_by_value_stream_ordered(
+        &self,
+        vs_id: Uuid,
+    ) -> Result<Vec<ValueStreamStage>, DomainError>;
+    async fn find_by_id(&self, id: Uuid) -> Result<Option<ValueStreamStage>, DomainError>;
     async fn save(&self, stage: &ValueStreamStage) -> Result<ValueStreamStage, DomainError>;
+    /// Persist a batch of stages (used when snapshotting a new version or
+    /// reordering). Implementations should apply the writes in order.
+    async fn save_batch(&self, stages: &[ValueStreamStage]) -> Result<(), DomainError>;
     async fn soft_delete(&self, id: Uuid) -> Result<(), DomainError>;
 }

@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
+use shared_common::enums::{StageStatus, StageType};
+use shared_common::value_objects::{StringStringMap, StringVec};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
@@ -16,6 +18,12 @@ pub struct Model {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    pub description: Option<String>,
+    pub stage_type: StageType,
+    pub status: StageStatus,
+    pub owner_id: Option<Uuid>,
+    pub objectives: StringVec,
+    pub metrics: StringStringMap,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

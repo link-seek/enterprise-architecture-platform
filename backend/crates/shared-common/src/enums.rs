@@ -232,3 +232,86 @@ impl SpaceRole {
         }
     }
 }
+
+/// Classifies a value-stream stage by the slice of value creation it owns.
+///
+/// Stored in the `stage_type` column of `value_stream_stages`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum StageType {
+    #[sea_orm(string_value = "design")]
+    #[serde(rename = "design")]
+    Design,
+    #[sea_orm(string_value = "production")]
+    #[serde(rename = "production")]
+    Production,
+    #[sea_orm(string_value = "sales")]
+    #[serde(rename = "sales")]
+    Sales,
+    #[sea_orm(string_value = "delivery")]
+    #[serde(rename = "delivery")]
+    Delivery,
+    #[sea_orm(string_value = "custom")]
+    #[serde(rename = "custom")]
+    Custom,
+}
+
+impl Default for StageType {
+    fn default() -> Self {
+        StageType::Custom
+    }
+}
+
+impl StageType {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "design" => Some(StageType::Design),
+            "production" => Some(StageType::Production),
+            "sales" => Some(StageType::Sales),
+            "delivery" => Some(StageType::Delivery),
+            "custom" => Some(StageType::Custom),
+            _ => None,
+        }
+    }
+}
+
+/// Lifecycle state of a value-stream stage.
+///
+/// Stored in the `status` column of `value_stream_stages`. Adds a `Draft`
+/// state on top of [`LifecycleStatus`] so a stage can be sketched before it
+/// goes live.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum StageStatus {
+    #[sea_orm(string_value = "draft")]
+    #[serde(rename = "draft")]
+    Draft,
+    #[sea_orm(string_value = "active")]
+    #[serde(rename = "active")]
+    Active,
+    #[sea_orm(string_value = "archived")]
+    #[serde(rename = "archived")]
+    Archived,
+}
+
+impl Default for StageStatus {
+    fn default() -> Self {
+        StageStatus::Active
+    }
+}
+
+impl StageStatus {
+    pub fn is_active(&self) -> bool {
+        matches!(self, StageStatus::Active)
+    }
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "draft" => Some(StageStatus::Draft),
+            "active" => Some(StageStatus::Active),
+            "archived" => Some(StageStatus::Archived),
+            _ => None,
+        }
+    }
+}

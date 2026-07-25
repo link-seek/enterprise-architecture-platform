@@ -38,7 +38,7 @@ const CREATE_VERSION = gql`
 const GET_VALUE_STREAMS = gql`
   query GetValueStreamsForVersion($spaceId: String) {
     valueStreams(filters: { spaceId: { eq: $spaceId } }) {
-      nodes { id name description businessVersion status importance logicalId spaceId }
+      nodes { id name description businessVersion status importance logicalId spaceId triggeringEvent endDeliverable valueProposition }
       paginationInfo { total }
     }
   }
@@ -166,7 +166,7 @@ export function CreateVersionDialog({ open, onOpenChange, currentItem, spaceId }
           {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
           <p className="text-sm text-muted-foreground">
             当前版本 <Badge variant="secondary">{currentItem?.businessVersion}</Badge> 将被归档，
-            新版本 <Badge>{newVersion}</Badge> 将成为 active。
+            新版本 <Badge>{newVersion}</Badge> 将成为 active。当前价值流的阶段将一并复制到新版本。
           </p>
           <div className="space-y-2">
             <Label>新版本号</Label>

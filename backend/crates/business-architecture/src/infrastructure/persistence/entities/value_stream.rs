@@ -27,6 +27,7 @@ pub struct Model {
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
     pub space_id: Uuid,
+    pub value_proposition: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
