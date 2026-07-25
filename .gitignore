@@ -21,3 +21,10 @@ Thumbs.db
 # Environment files
 .env
 .env.local
+
+# Test artifacts (Playwright screenshots, error context, traces)
+frontend/test-results/
+frontend/playwright-report/
+
+# Local SQLite database (runtime data, not source)
+backend/data/

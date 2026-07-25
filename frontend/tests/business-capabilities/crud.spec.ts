@@ -8,11 +8,11 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     await page.getByRole('textbox', { name: '邮箱' }).fill('test@example.com');
     await page.getByRole('textbox', { name: '密码' }).fill('testpassword123');
     await page.getByRole('button', { name: '登录' }).click();
-    await expect(page).toHaveURL('/architectures/value-streams');
+    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
     
     // Navigate to capabilities page
     await page.getByRole('link', { name: '业务能力' }).click();
-    await expect(page).toHaveURL('/architectures/capabilities');
+    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/capabilities');
   });
 
   test('Happy Path - Create Business Capability', async ({ page }) => {

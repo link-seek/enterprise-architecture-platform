@@ -23,16 +23,19 @@ const GET_VALUE_STREAM_DETAIL = gql`
 `
 
 export default function ValueStreamDetail() {
-  const { id } = useParams<{ id: string }>()
+  const { id, spaceId } = useParams<{ id: string; spaceId: string }>()
   const { data, loading, error } = useQuery(GET_VALUE_STREAM_DETAIL, {
     variables: { id },
   })
 
   const vs = data?.valueStreams?.nodes?.[0]
+  const backPath = spaceId
+    ? `/spaces/${spaceId}/architectures/value-streams`
+    : '/architectures/value-streams'
 
   return (
     <div className="p-6 space-y-4">
-      <Link to="/architectures/value-streams">
+      <Link to={backPath}>
         <Button variant="ghost" size="sm" className="gap-2">
           <ArrowLeft className="h-4 w-4" />
           返回列表

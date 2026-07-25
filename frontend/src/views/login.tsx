@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { login } from '@/api/auth'
+import { TEST_SPACE_ID } from '@/api/spaces'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -20,7 +21,7 @@ export default function Login() {
     setError(null)
     try {
       await login(loginEmail, loginPassword)
-      navigate('/architectures/value-streams')
+      navigate(`/spaces/${TEST_SPACE_ID}/architectures/value-streams`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed')
     } finally {

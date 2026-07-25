@@ -17,7 +17,7 @@ test.describe('Authentication - Login', () => {
     await page.fill('input[type="password"]', TEST_PASSWORD);
     await page.press('input[type="password"]', 'Enter');
     
-    await expect(page).toHaveURL('/architectures/value-streams', { timeout: 10000 });
+    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams', { timeout: 10000 });
     await expect(page.getByText('E2E Test 3')).toBeVisible({ timeout: 5000 });
   });
 
@@ -38,7 +38,7 @@ test.describe('Authentication - Login', () => {
   });
 
   test('Edge Case - Protected Route Access', async ({ page }) => {
-    await page.goto('/architectures/value-streams');
+    await page.goto('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
     await expect(page).toHaveURL('/login');
     await expect(page.getByText('企业架构平台')).toBeVisible();
   });

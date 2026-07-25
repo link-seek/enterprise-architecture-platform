@@ -5,3 +5,6 @@ pub mod value_stream;
 pub mod value_stream_stage;
 pub mod capability_process;
 pub mod stage_capability;
+pub mod space;
+pub mod space_member;
+pub mod space_invitation;

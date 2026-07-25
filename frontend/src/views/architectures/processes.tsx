@@ -9,10 +9,12 @@ import { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useParams } from 'react-router-dom'
+import { useSpaceMembership } from '@/hooks/use-space-membership'
 
 const GET_PROCESSES = gql`
-  query GetProcesses {
-    businessProcesses {
+  query GetProcesses($spaceId: String) {
+    businessProcesses(filters: { spaceId: { eq: $spaceId } }) {
       nodes { id name description sla cycleTime costPerTransaction status }
       paginationInfo { total }
     }
@@ -20,20 +22,20 @@ const GET_PROCESSES = gql`
 `
 
 const CREATE_PROCESS = gql`
-  mutation CreateProcess($data: BusinessProcessesInsertInput!) {
-    businessProcessesCreateOne(data: $data) { id name }
+  mutation CreateProcess($spaceId: String!, $name: String!, $description: String, $sla: String, $cycleTime: Int, $costPerTransaction: Float) {
+    processCreate(spaceId: $spaceId, name: $name, description: $description, sla: $sla, cycleTime: $cycleTime, costPerTransaction: $costPerTransaction) { id name }
   }
 `
 
 const UPDATE_PROCESS = gql`
-  mutation UpdateProcess($data: BusinessProcessesUpdateInput!, $filter: BusinessProcessesFilterInput!) {
-    businessProcessesUpdate(data: $data, filter: $filter) { id name }
+  mutation UpdateProcess($id: String!, $name: String, $description: String, $sla: String, $cycleTime: Int, $costPerTransaction: Float) {
+    processUpdate(id: $id, name: $name, description: $description, sla: $sla, cycleTime: $cycleTime, costPerTransaction: $costPerTransaction) { id name }
   }
 `
 
 const DELETE_PROCESS = gql`
-  mutation DeleteProcess($filter: BusinessProcessesFilterInput!) {
-    businessProcessesDelete(filter: $filter)
+  mutation DeleteProcess($id: String!) {
+    processDelete(id: $id)
   }
 `
 
@@ -42,22 +44,23 @@ interface Process {
   sla: string | null; cycleTime: number | null; costPerTransaction: number | null; status: string
 }
 
-function nowRFC3339() { return new Date().toISOString() }
-function newUUID() { return crypto.randomUUID() }
-
 export default function Processes() {
+  const { spaceId } = useParams<{ spaceId: string }>()
+  const { canEdit } = useSpaceMembership(spaceId)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Process | null>(null)
   const [deleting, setDeleting] = useState<Process | null>(null)
-  const { data, loading, error } = useQuery(GET_PROCESSES)
+  const { data, loading, error } = useQuery(GET_PROCESSES, { variables: { spaceId } })
 
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">业务流程</h1>
-        <Button onClick={() => { setEditing(null); setDialogOpen(true) }}>
-          <Plus className="h-4 w-4 mr-2" />新建流程
-        </Button>
+        {canEdit && (
+          <Button onClick={() => { setEditing(null); setDialogOpen(true) }}>
+            <Plus className="h-4 w-4 mr-2" />新建流程
+          </Button>
+        )}
       </div>
       <Card>
         <CardHeader><CardTitle>流程列表</CardTitle></CardHeader>
@@ -88,12 +91,16 @@ export default function Processes() {
                     <TableCell><Badge variant="outline">{p.status}</Badge></TableCell>
                     <TableCell>
                       <div className="flex gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => { setEditing(p); setDialogOpen(true) }}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => setDeleting(p)}>
-                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                        </Button>
+                        {canEdit && (
+                          <>
+                            <Button variant="ghost" size="sm" onClick={() => { setEditing(p); setDialogOpen(true) }}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setDeleting(p)}>
+                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -103,14 +110,14 @@ export default function Processes() {
           )}
         </CardContent>
       </Card>
-      <ProcessCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} />
-      <ProcessDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} />
+      <ProcessCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} />
+      <ProcessDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
     </div>
   )
 }
 
-function ProcessCrudDialog({ open, onOpenChange, editing }: {
-  open: boolean; onOpenChange: (v: boolean) => void; editing: Process | null
+function ProcessCrudDialog({ open, onOpenChange, editing, spaceId }: {
+  open: boolean; onOpenChange: (v: boolean) => void; editing: Process | null; spaceId?: string
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -142,16 +149,13 @@ function ProcessCrudDialog({ open, onOpenChange, editing }: {
       const cp = cost ? parseFloat(cost) : null
       if (editing) {
         await updateMut({
-          variables: { data: { name, description, sla, cycleTime: ct, costPerTransaction: cp }, filter: { id: { eq: editing.id } } },
-          refetchQueries: [{ query: GET_PROCESSES }],
+          variables: { id: editing.id, name, description, sla, cycleTime: ct, costPerTransaction: cp },
+          refetchQueries: [{ query: GET_PROCESSES, variables: { spaceId } }],
         })
       } else {
-        const now = nowRFC3339()
         await createMut({
-          variables: {
-            data: { id: newUUID(), logicalId: newUUID(), name, description, sla, cycleTime: ct, costPerTransaction: cp, status: 'active', businessVersion: 'v1.0', createdAt: now, updatedAt: now }
-          },
-          refetchQueries: [{ query: GET_PROCESSES }],
+          variables: { spaceId, name, description, sla, cycleTime: ct, costPerTransaction: cp },
+          refetchQueries: [{ query: GET_PROCESSES, variables: { spaceId } }],
         })
       }
       onOpenChange(false)
@@ -183,12 +187,12 @@ function ProcessCrudDialog({ open, onOpenChange, editing }: {
   )
 }
 
-function ProcessDeleteDialog({ item, onConfirm }: { item: Process | null; onConfirm: () => void }) {
+function ProcessDeleteDialog({ item, onConfirm, spaceId }: { item: Process | null; onConfirm: () => void; spaceId?: string }) {
   const [deleteMut] = useMutation(DELETE_PROCESS)
   const [loading, setLoading] = useState(false)
   async function handleDelete() {
     if (!item) return; setLoading(true)
-    try { await deleteMut({ variables: { filter: { id: { eq: item.id } } }, refetchQueries: [{ query: GET_PROCESSES }] }); onConfirm() }
+    try { await deleteMut({ variables: { id: item.id }, refetchQueries: [{ query: GET_PROCESSES, variables: { spaceId } }] }); onConfirm() }
     catch (err) { console.error(err) } finally { setLoading(false) }
   }
   return (
