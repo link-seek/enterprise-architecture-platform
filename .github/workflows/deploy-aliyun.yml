@@ -156,7 +156,12 @@ jobs:
             -e APP_SEED_ADMIN_EMAIL="${{ secrets.ADMIN_EMAIL }}" \
             -e APP_SEED_ADMIN_PASSWORD="${{ secrets.ADMIN_PASSWORD }}" \
             -e APP_DATABASE__URL="sqlite:///app/data/platform.db?mode=rwc" \
+            -e RUST_LOG=info,sqlx::pool=warn \
             "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:latest"
+
+          # Redirect container logs to file for Logtail collection
+          mkdir -p /var/log/eap
+          nohup podman logs -f eap-backend >> /var/log/eap/backend.log 2>&1 &
 
       - name: Health check
         run: |
@@ -304,7 +309,12 @@ jobs:
             -e APP_SEED_ADMIN_EMAIL="${{ secrets.ADMIN_EMAIL }}" \
             -e APP_SEED_ADMIN_PASSWORD="${{ secrets.ADMIN_PASSWORD }}" \
             -e APP_DATABASE__URL="sqlite:///app/data/platform.db?mode=rwc" \
+            -e RUST_LOG=info,sqlx::pool=warn \
             "$PREV_IMAGE"
+
+          # Redirect container logs to file for Logtail collection
+          mkdir -p /var/log/eap
+          nohup podman logs -f eap-backend >> /var/log/eap/backend.log 2>&1 &
 
           # === 3. Verify rollback ===
           sleep 5

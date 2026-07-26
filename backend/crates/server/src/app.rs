@@ -133,10 +133,13 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
     )
 )]
 async fn health_handler(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let db_status = if state.db.ping().await.is_ok() {
-        "up"
-    } else {
-        "down"
+    let (db_status, db_error) = match state.db.ping().await {
+        Ok(_) => ("up", None::<String>),
+        Err(e) => {
+            let error_str = format!("{e:#}");
+            tracing::error!(error = %error_str, "DB ping failed");
+            ("down", Some(error_str))
+        }
     };
 
     let llm_backend = LlmBackend::from_config(&state.config.llm);
@@ -151,6 +154,7 @@ async fn health_handler(State(state): State<AppState>) -> Json<serde_json::Value
     Json(json!({
         "status": overall,
         "db": db_status,
+        "db_error": db_error,
         "llm": llm_status,
     }))
 }
