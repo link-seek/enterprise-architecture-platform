@@ -1,0 +1,27 @@
+name: Restart and Check
+on: workflow_dispatch
+jobs:
+  restart:
+    runs-on: [self-hosted, eap-prod]
+    steps:
+      - run: |
+          set +e
+          echo "=== Before restart ==="
+          curl -s http://localhost:8080/health 2>&1
+          echo ""
+          echo "=== Restarting container ==="
+          podman restart eap-backend 2>&1
+          sleep 5
+          echo "=== After restart (5s) ==="
+          curl -s http://localhost:8080/health 2>&1
+          echo ""
+          sleep 5
+          echo "=== After restart (10s) ==="
+          curl -s http://localhost:8080/health 2>&1
+          echo ""
+          echo "=== Try login ==="
+          curl -s -X POST http://localhost:8080/api/auth/login -H "Content-Type: application/json" -d '{"email":"test@example.com","password":"testpassword123"}' 2>&1
+          echo ""
+          echo "=== Container logs after restart ==="
+          podman logs --tail 20 eap-backend 2>&1
+          exit 0
