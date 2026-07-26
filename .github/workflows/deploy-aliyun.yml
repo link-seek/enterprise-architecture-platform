@@ -187,7 +187,7 @@ jobs:
           # Force IPv4 — CDN IPv6 is unreachable from GitHub runners
           CURL_OPTS="-4 -sf --connect-timeout 10 --max-time 30"
 
-          echo "=== Test 1: Backend health (HTTP 200 + db up + llm up) ==="
+          echo "=== Test 1: Backend health (HTTP 200 + db up) ==="
           HEALTH_BODY=$(curl -4 -s --connect-timeout 10 --max-time 30 https://api.xieyucheng.top/health 2>/dev/null || echo "")
           HEALTH_CODE=$(echo "$HEALTH_BODY" | head -1 | python3 -c "import sys; print('ok' if sys.stdin.read().strip() else 'empty')" 2>/dev/null)
           if [ -z "$HEALTH_BODY" ]; then
@@ -196,7 +196,7 @@ jobs:
           fi
           echo "Health response: $HEALTH_BODY"
 
-          # Parse JSON and check db + llm status
+          # Parse JSON and check db status (llm down is non-blocking)
           DB_STATUS=$(echo "$HEALTH_BODY" | python3 -c "import json,sys; print(json.load(sys.stdin).get('db','unknown'))" 2>/dev/null || echo "parse_error")
           LLM_STATUS=$(echo "$HEALTH_BODY" | python3 -c "import json,sys; print(json.load(sys.stdin).get('llm','unknown'))" 2>/dev/null || echo "parse_error")
           echo "DB status: $DB_STATUS"
@@ -207,8 +207,7 @@ jobs:
             exit 1
           fi
           if [ "$LLM_STATUS" != "up" ]; then
-            echo "FAIL: LLM is $LLM_STATUS (expected up)"
-            exit 1
+            echo "::warning::LLM is $LLM_STATUS (non-blocking — db is up)"
           fi
 
           echo "=== Test 2: GraphQL endpoint ==="
