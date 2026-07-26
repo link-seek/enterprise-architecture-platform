@@ -135,6 +135,7 @@ jobs:
           owner: ${{ github.repository_owner }}
 
       - name: Run Structured PR Review
+        id: review
         uses: link-seek/pr-review-structured@main
         with:
           github-token: ${{ steps.app-token.outputs.token }}
