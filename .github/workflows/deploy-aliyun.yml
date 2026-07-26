@@ -184,8 +184,11 @@ jobs:
 
       - name: Smoke test — Backend API
         run: |
+          # Force IPv4 — CDN IPv6 is unreachable from GitHub runners
+          CURL_OPTS="-4 -sf --connect-timeout 10 --max-time 30"
+
           echo "=== Test 1: Backend health ==="
-          HEALTH=$(curl -sf -o /dev/null -w "%{http_code}" https://api.xieyucheng.top/health 2>/dev/null || echo "000")
+          HEALTH=$(curl $CURL_OPTS -o /dev/null -w "%{http_code}" https://api.xieyucheng.top/health 2>/dev/null || echo "000")
           echo "Backend health: $HEALTH"
           if [ "$HEALTH" != "200" ]; then
             echo "FAIL: Backend health returned $HEALTH"
@@ -193,7 +196,7 @@ jobs:
           fi
 
           echo "=== Test 2: GraphQL endpoint ==="
-          GRAPHQL=$(curl -sf -o /dev/null -w "%{http_code}" \
+          GRAPHQL=$(curl $CURL_OPTS -o /dev/null -w "%{http_code}" \
             -X POST https://api.xieyucheng.top/graphql \
             -H "Content-Type: application/json" \
             -d '{"query":"{ __typename }"}' 2>/dev/null || echo "000")
@@ -206,7 +209,7 @@ jobs:
           echo "=== Test 3: Login API alive ==="
           # Send a minimal valid-structure request; any 4xx means endpoint is alive
           # 502/503 means backend is broken
-          LOGIN=$(curl -s -o /dev/null -w "%{http_code}" \
+          LOGIN=$(curl -4 -s --connect-timeout 10 --max-time 30 -o /dev/null -w "%{http_code}" \
             -X POST https://api.xieyucheng.top/api/auth/login \
             -H "Content-Type: application/json" \
             -d '{"email":"nonexistent@smoke.test","password":"wrong"}' 2>/dev/null || echo "000")
@@ -222,8 +225,10 @@ jobs:
 
       - name: Smoke test — Frontend
         run: |
+          CURL_OPTS="-4 -sf --connect-timeout 10 --max-time 30"
+
           echo "=== Test 4: Frontend serves HTML ==="
-          FRONTEND=$(curl -sf -o /dev/null -w "%{http_code}" https://www.xieyucheng.top/ 2>/dev/null || echo "000")
+          FRONTEND=$(curl $CURL_OPTS -o /dev/null -w "%{http_code}" https://www.xieyucheng.top/ 2>/dev/null || echo "000")
           echo "Frontend: $FRONTEND"
           if [ "$FRONTEND" != "200" ]; then
             echo "FAIL: Frontend returned $FRONTEND"
@@ -231,7 +236,7 @@ jobs:
           fi
 
           echo "=== Test 5: Frontend has JS bundle ==="
-          curl -sf https://www.xieyucheng.top/ | grep -qo 'script' || {
+          curl $CURL_OPTS https://www.xieyucheng.top/ | grep -qo 'script' || {
             echo "FAIL: No script tag found in frontend HTML"
             exit 1
           }
