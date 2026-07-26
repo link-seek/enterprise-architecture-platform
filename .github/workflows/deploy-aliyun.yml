@@ -188,7 +188,7 @@ jobs:
           CURL_OPTS="-4 -sf --connect-timeout 10 --max-time 30"
 
           echo "=== Test 1: Backend health ==="
-          HEALTH=$(curl $CURL_OPTS -o /dev/null -w "%{http_code}" https://api.xieyucheng.top/health__deliberate_fail_test 2>/dev/null || echo "000")
+          HEALTH=$(curl $CURL_OPTS -o /dev/null -w "%{http_code}" https://api.xieyucheng.top/health 2>/dev/null || echo "000")
           echo "Backend health: $HEALTH"
           if [ "$HEALTH" != "200" ]; then
             echo "FAIL: Backend health returned $HEALTH"
