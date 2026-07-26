@@ -119,6 +119,28 @@ jobs:
 
           echo "E2E test coverage OK — PR includes corresponding test changes"
 
+          # Second layer: verify test specs are in the core list (CI will actually run them)
+          CORE_SPECS_FILE=".github/e2e-core-specs.txt"
+          if [ -f "$CORE_SPECS_FILE" ]; then
+            CORE_SPECS=$(grep -v '^#' "$CORE_SPECS_FILE" | tr '\n' ' ')
+            NOT_IN_CORE=()
+            for test_dir in spaces auth value-stream business-capabilities business-processes; do
+              if echo "$CHANGED_FILES" | grep -qE "^frontend/tests/${test_dir}/.*\.spec\.ts$"; then
+                # Check if any spec from this dir is in the core list
+                if ! echo "$CORE_SPECS" | grep -qF "tests/${test_dir}/"; then
+                  NOT_IN_CORE+=("tests/${test_dir}/*.spec.ts exists but not in e2e-core-specs.txt — CI won't run it")
+                fi
+              fi
+            done
+            if [ ${#NOT_IN_CORE[@]} -gt 0 ]; then
+              echo "::warning::E2E specs exist but not in core list (CI won't execute them):"
+              for msg in "${NOT_IN_CORE[@]}"; do
+                echo "  - $msg"
+              done
+              echo "Add stable specs to .github/e2e-core-specs.txt after 5 consecutive passes"
+            fi
+          fi
+
   review-ai:
     if: ${{ github.event_name == 'pull_request' }}
     needs: [e2e-coverage-check]
