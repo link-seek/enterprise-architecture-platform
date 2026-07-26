@@ -19,7 +19,6 @@ jobs:
             wget -q "http://logtail-release-cn-hangzhou.oss-cn-hangzhou.aliyuncs.com/linux64/logtail.sh" -O /tmp/logtail.sh
             chmod +x /tmp/logtail.sh
             /tmp/logtail.sh install cn-hangzhou 2>&1
-         %RAW%
           fi
           echo "=== Configure ==="
           printf '{"config_server_address":"http://logtail.cn-hangzhou.aliyuncs.com","data_server_list":[{"address":"logtail.cn-hangzhou.aliyuncs.com","port":80}],"access_key_id":"%s","access_key_secret":"%s"}\n' "$ALIYUN_AK" "$ALIYUN_SK" > /usr/local/ilogtail/ilogtail_config.json 2>&1
