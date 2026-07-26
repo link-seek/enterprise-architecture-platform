@@ -121,7 +121,6 @@ jobs:
 
   review-ai:
     if: ${{ github.event_name == 'pull_request' }}
-    needs: [e2e-coverage-check]
     runs-on: ubuntu-latest
     timeout-minutes: 360
     concurrency:
@@ -135,131 +134,24 @@ jobs:
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
-      - uses: actions/checkout@v4
+      - name: Run Structured PR Review
+        uses: link-seek/pr-review-structured@main
         with:
-          fetch-depth: 0
-
-      - name: Fetch linked issue content for requirement coverage check
-        id: issue-context
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          # Extract issue number from PR body (e.g. "Fix #201" or "(#201)")
-          PR_BODY=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER --jq '.body')
-          ISSUE_NUM=$(echo "$PR_BODY" | grep -oP '#(\d+)' | head -1 | tr -d '#')
-          
-          if [ -z "$ISSUE_NUM" ]; then
-            # Try branch name (e.g. agent/fix-issue-201)
-            BRANCH=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER --jq '.head.ref')
-            ISSUE_NUM=$(echo "$BRANCH" | grep -oP 'issue-(\d+)' | head -1 | sed 's/issue-//')
-          fi
-          
-          if [ -n "$ISSUE_NUM" ]; then
-            echo "Found linked issue #$ISSUE_NUM"
-            ISSUE_BODY=$(gh api repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUM --jq '.body' 2>/dev/null || echo "")
-            ISSUE_TITLE=$(gh api repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUM --jq '.title' 2>/dev/null || echo "")
-            
-            # Write issue content to a file that the review agent can read
-            cat > .pr-review-issue-context.md << EOF
-          ## Linked Issue Requirements (Issue #$ISSUE_NUM)
-          
-          **Title**: $ISSUE_TITLE
-          
-          **Requirements**:
-          $ISSUE_BODY
-          
-          ---
-          ## Requirement Coverage Check
-          
-          When reviewing this PR, also check:
-          1. **Completeness**: Are all requirements from the issue implemented?
-          2. **Correctness**: Does the implementation match what the issue describes?
-          3. **Gaps**: List any requirements that are NOT addressed in the code.
-          4. **Extra**: List any significant code changes NOT related to the issue requirements.
-          
-          Include a "Requirement Coverage" section in your review.
-          EOF
-            echo "has_issue=true" >> $GITHUB_OUTPUT
-          else
-            echo "No linked issue found"
-            echo "has_issue=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Run OpenHands Review
-        uses: OpenHands/extensions/plugins/pr-review@main
-        with:
+          github-token: ${{ steps.app-token.outputs.token }}
           llm-model: ${{ secrets.LLM_MODEL || 'openai/glm-5.2' }}
           llm-base-url: ${{ secrets.LLM_BASE_URL || 'https://api.modelarts-maas.com/v2' }}
           llm-api-key: ${{ secrets.LLM_API_KEY }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pr-number: ${{ github.event.pull_request.number }}
 
-      - name: Check AI Review Verdict
+      - name: Dispatch auto-fix on blocking findings
+        if: failure()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          DISPATCH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          VERDICT="UNKNOWN"
-          REVIEW_BODY=""
-          for i in 1 2 3 4 5 6; do
-            sleep 5
-            REVIEW_JSON=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
-              --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.commit_id // \"\") == \"$HEAD_SHA\")] | sort_by(.submitted_at) | last | {state: .state, body: .body}" 2>/dev/null || echo "{}")
-            VERDICT=$(echo "$REVIEW_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('state','UNKNOWN'))" 2>/dev/null || echo "UNKNOWN")
-            if [ "$VERDICT" != "null" ] && [ "$VERDICT" != "UNKNOWN" ] && [ -n "$VERDICT" ]; then
-              REVIEW_BODY=$(echo "$REVIEW_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body',''))" 2>/dev/null || echo "")
-              break
-            fi
-            echo "Retry $i: verdict not ready yet ($VERDICT)"
-          done
-
-          echo "Latest AI review verdict: $VERDICT"
-
-          # Severity check: 🔴 Critical / 🟠 Important → block + auto-fix
-          # 🟡 Medium / improvement → advisory, pass
-          # Only check the OVERALL verdict (first line + RISK ASSESSMENT line),
-          # NOT every emoji in the body (review text may reference 🔴/🟠 in passing)
-          has_blocking_severity() {
-            # 1. Check first line — review-ai starts with overall severity emoji
-            #    Anchor with ^ to avoid matching 🔴/🟠 mentioned in prose
-            FIRST_LINE=$(echo "$REVIEW_BODY" | head -1)
-            if echo "$FIRST_LINE" | grep -qE '^(🔴|🟠)'; then
-              return 0
-            fi
-            # 2. Check [RISK ASSESSMENT] → [Overall PR] line for 🔴 or 🟠
-            #    Match only the "- [Overall PR]" bullet, not surrounding prose
-            if echo "$REVIEW_BODY" | grep -A5 '^\*\*\[RISK ASSESSMENT\]\*\*' | grep -E '^\s*- \[Overall PR\]' | grep -qE '🔴|🟠'; then
-              return 0
-            fi
-            # 3. Check for explicit [CRITICAL ISSUES] section with content
-            if echo "$REVIEW_BODY" | grep -qE '^\*\*\[CRITICAL ISSUES\]\*\*' && \
-               ! echo "$REVIEW_BODY" | grep -A1 '^\*\*\[CRITICAL ISSUES\]\*\*' | grep -qE '^(none|None|N/A|-)$'; then
-              return 0
-            fi
-            return 1
-          }
-
-          dispatch_autofix() {
-            echo "Dispatching PR Auto-Fix..."
-            GH_TOKEN="$DISPATCH_TOKEN" gh workflow run pr-auto-fix.yml \
-              -f pr_number="$PR_NUMBER" \
-              -f head_branch="${{ github.event.pull_request.head.ref }}" \
-              -f head_sha="$HEAD_SHA" || echo "Failed to dispatch auto-fix"
-          }
-
-          if [ "$VERDICT" = "APPROVED" ]; then
-            echo "AI approved the PR"
-          elif [ "$VERDICT" = "CHANGES_REQUESTED" ] || [ "$VERDICT" = "COMMENTED" ]; then
-            if has_blocking_severity; then
-              echo "::error::AI review has Critical/Important issues, blocking merge"
-              dispatch_autofix
-              exit 1
-            else
-              echo "AI review verdict: $VERDICT, but only advisory issues (🟡/no severity) — passing"
-            fi
-          else
-            echo "::error::No AI review found (got: $VERDICT)"
-            exit 1
-          fi
+          echo "Review found blocking issues — dispatching auto-fix..."
+          gh workflow run pr-auto-fix.yml \
+            -f pr_number="$PR_NUMBER" \
+            -f head_branch="${{ github.event.pull_request.head.ref }}" \
+            -f head_sha="$HEAD_SHA" || echo "Failed to dispatch auto-fix"
