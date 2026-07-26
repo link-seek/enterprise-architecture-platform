@@ -32,9 +32,10 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
         run: |
           # Read issue labels for classification (structured, not grep on body)
-          LABELS=$(gh issue view $ISSUE_NUMBER --json labels --jq '.labels[].name')
+          LABELS=$(gh issue view $ISSUE_NUMBER -R "$REPO" --json labels --jq '.labels[].name')
 
           CATEGORY="unknown"
 
@@ -57,24 +58,27 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
         run: |
-          gh issue edit $ISSUE_NUMBER --add-label "fix-me"
-          gh issue comment $ISSUE_NUMBER --body "Classified as **code bug** (error-smoke) — auto-fix engaged."
+          gh issue edit $ISSUE_NUMBER -R "$REPO" --add-label "fix-me"
+          gh issue comment $ISSUE_NUMBER -R "$REPO" --body "Classified as **code bug** (error-smoke) — auto-fix engaged."
 
       - name: Route to human (infrastructure)
         if: steps.classify.outputs.category == 'infrastructure'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
         run: |
-          gh issue edit $ISSUE_NUMBER --add-label "needs-human"
-          gh issue comment $ISSUE_NUMBER --body "Classified as **infrastructure bug** (error-deploy) — needs human investigation."
+          gh issue edit $ISSUE_NUMBER -R "$REPO" --add-label "needs-human"
+          gh issue comment $ISSUE_NUMBER -R "$REPO" --body "Classified as **infrastructure bug** (error-deploy) — needs human investigation."
 
       - name: Route to human (unknown)
         if: steps.classify.outputs.category == 'unknown'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
         run: |
-          gh issue edit $ISSUE_NUMBER --add-label "needs-human"
-          gh issue comment $ISSUE_NUMBER --body "Could not classify this deploy-broken issue. Manual investigation needed."
+          gh issue edit $ISSUE_NUMBER -R "$REPO" --add-label "needs-human"
+          gh issue comment $ISSUE_NUMBER -R "$REPO" --body "Could not classify this deploy-broken issue. Manual investigation needed."
