@@ -1,0 +1,76 @@
+name: Health Watch
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+jobs:
+  health-check:
+    runs-on: [self-hosted, eap-prod]
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+      - name: Check health and create issue if down
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set +e
+          HEALTH=$(curl -s --connect-timeout 10 http://localhost:8080/health 2>/dev/null || echo "")
+          
+          if [ -z "$HEALTH" ]; then
+            echo "Server not responding (empty response)"
+            DB_STATUS="down"
+            DB_ERROR="server not responding (empty reply)"
+          else
+            DB_STATUS=$(echo "$HEALTH" | python3 -c "import json,sys; print(json.load(sys.stdin).get('db','unknown'))" 2>/dev/null || echo "parse_error")
+            DB_ERROR=$(echo "$HEALTH" | python3 -c "import json,sys; e=json.load(sys.stdin).get('db_error'); print(e if e else '')" 2>/dev/null || echo "")
+          fi
+          
+          echo "DB status: $DB_STATUS"
+          echo "DB error: $DB_ERROR"
+          
+          if [ "$DB_STATUS" = "up" ]; then
+            echo "DB is up, no action needed"
+            exit 0
+          fi
+          
+          echo "DB is down, checking for existing open issue..."
+          EXISTING=$(gh issue list -R "$REPO" --label deploy-broken --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING" ]; then
+            echo "Issue #$EXISTING already exists, skipping"
+            exit 0
+          fi
+          
+          echo "Creating issue..."
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          
+          BODY="## Health Watch Alert
+          
+          **Time**: $TIMESTAMP
+          **DB Status**: $DB_STATUS
+          **DB Error**: $DB_ERROR
+          
+          ### Health Response
+          \`\`\`
+          $HEALTH
+          \`\`\`
+          
+          ### SLS Log Query
+          https://sls.console.aliyun.com/lognext/project/eap-prod/logsearch/backend?query=level%3A%20error&from=$TIMESTAMP
+          
+          ### Action Needed
+          - Check SLS logs for error details
+          - Fix root cause
+          - This issue was auto-created by health-watch workflow"
+          
+          gh issue create -R "$REPO" \
+            --title "health-watch: DB down at $TIMESTAMP" \
+            --label "deploy-broken,error-smoke" \
+            --body "$BODY" 2>&1
+          
+          exit 0
