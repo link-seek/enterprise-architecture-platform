@@ -319,6 +319,7 @@ jobs:
           SMOKE_RESULT: ${{ needs.smoke-test.result }}
           COMMIT_SHA: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ github.repository }}
         run: |
           LABELS="deploy-broken"
           if [ "$DEPLOY_RESULT" == "failure" ]; then
@@ -329,7 +330,7 @@ jobs:
           fi
 
           # Check for existing open deploy-broken issue (dedup)
-          EXISTING=$(gh issue list --label "deploy-broken" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
+          EXISTING=$(gh issue list -R "$REPO" --label "deploy-broken" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
           if [ -n "$EXISTING" ]; then
             echo "Open deploy-broken issue #$EXISTING already exists, skipping"
             exit 0
@@ -347,7 +348,7 @@ jobs:
           ISSUE_EOF
           )
 
-          gh issue create \
+          gh issue create -R "$REPO" \
             --label "$LABELS" \
             --title "deploy broken: ${COMMIT_SHA:0:7}" \
             --body "$BODY"
