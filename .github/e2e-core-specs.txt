@@ -1,0 +1,5 @@
+# Core E2E specs — always run in CI integration job
+# New specs must pass 5 consecutive CI runs before adding here
+tests/auth/login.spec.ts
+# TODO: spaces/list.spec.ts + spaces/crud.spec.ts — tests exist but fail
+# (never ran in CI before). Tracked in follow-up issue. Add after fixing.
