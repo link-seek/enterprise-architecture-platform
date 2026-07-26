@@ -116,14 +116,15 @@ jobs:
         run: npx playwright install chromium
         working-directory: frontend
 
-      - name: Run Playwright E2E tests
+      - name: Run Playwright E2E tests (core specs)
         env:
           CI: "true"
         run: |
-          # Frontend is served by nginx in docker on port 80
-          # Run login E2E (fully passing with seeded data)
-          # Other tests (spaces, protected-routes) have UI assertion issues to fix separately
-          npx playwright test tests/auth/login.spec.ts --reporter=line
+          # Run core E2E specs defined in .github/e2e-core-specs.txt
+          # These are the specs that must always pass for merge
+          CORE_SPECS=$(cat ../.github/e2e-core-specs.txt | grep -v '^#' | tr '\n' ' ')
+          echo "Running core specs: $CORE_SPECS"
+          npx playwright test $CORE_SPECS --reporter=line
         working-directory: frontend
 
       - name: Upload test artifacts
