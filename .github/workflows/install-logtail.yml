@@ -5,21 +5,25 @@ jobs:
   install:
     runs-on: [self-hosted, eap-prod]
     steps:
-      - name: Install Logtail
+      - name: Install and Configure Logtail
         env:
           ALIYUN_AK: ${{ secrets.ALIYUN_AK }}
           ALIYUN_SK: ${{ secrets.ALIYUN_SK }}
         run: |
           set +e
-          if [ -d /etc/ilogtail ]; then
+          mkdir -p /var/log/eap
+          if [ -d /usr/local/ilogtail ]; then
             echo "Logtail already installed"
           else
             echo "Installing Logtail..."
             wget -q "http://logtail-release-cn-hangzhou.oss-cn-hangzhou.aliyuncs.com/linux64/logtail.sh" -O /tmp/logtail.sh
             chmod +x /tmp/logtail.sh
-            /tmp/logtail.sh cn-hangzhou "$ALIYUN_AK" "$ALIYUN_SK" 2>&1
+            /tmp/logtail.sh install cn-hangzhou 2>&1
           fi
-          mkdir -p /var/log/eap
-          /etc/ilogtail/ilogtail --version 2>&1 || echo "ilogtail not found"
+          echo "=== Configure ==="
+          printf '{"config_server_address":"http://logtail.cn-hangzhou.aliyuncs.com","data_server_list":[{"address":"logtail.cn-hangzhou.aliyuncs.com","port":80}],"access_key_id":"%s","access_key_secret":"%s"}\n' "$ALIYUN_AK" "$ALIYUN_SK" > /usr/local/ilogtail/ilogtail_config.json 2>&1
+          echo "=== Start ==="
+          /etc/init.d/ilogtaild restart 2>&1 || true
+          sleep 5
           ps aux | grep ilogtail | grep -v grep 2>&1 || echo "ilogtail not running"
           exit 0
