@@ -41,7 +41,8 @@ jobs:
           fi
           
           echo "DB is down, checking for existing open issue..."
-          EXISTING=$(gh issue list -R "$REPO" --label deploy-broken --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
+          EXISTING=$(curl -s "https://api.github.com/repos/$REPO/issues?labels=deploy-broken&state=open" \
+            -H "Authorization: token $GH_TOKEN" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['number'] if d else '')" 2>/dev/null || echo "")
           
           if [ -n "$EXISTING" ]; then
             echo "Issue #$EXISTING already exists, skipping"
@@ -49,7 +50,7 @@ jobs:
           fi
           
           echo "Querying SLS for recent error logs..."
-          SLS_LOGS=$(0)
+          SLS_LOGS=""
           if command -v aliyun &>/dev/null; then
             SLS_LOGS=$(aliyun sls GetLogs --project=eap-prod --logstore=backend --from=$(($(date +%s) - 300)) --to=$(date +%s) --query='level: error | select timestamp, level, message, target, error limit 10' --line=10 2>/dev/null || echo "")
           fi
@@ -81,9 +82,17 @@ jobs:
           - Fix root cause
           - This issue was auto-created by health-watch workflow"
           
-          gh issue create -R "$REPO" \
-            --title "health-watch: DB down at $TIMESTAMP" \
-            --label "deploy-broken,error-smoke" \
-            --body "$BODY" 2>&1
+          # Use GitHub API directly (gh not available on self-hosted runner)
+          curl -s -X POST "https://api.github.com/repos/$REPO/issues" \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(python3 -c "
+          import json
+          print(json.dumps({
+            'title': 'health-watch: DB down at $TIMESTAMP',
+            'labels': ['deploy-broken', 'error-smoke'],
+            'body': '''$BODY'''
+          }))
+          ")"
           
           exit 0
