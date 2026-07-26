@@ -1,0 +1,80 @@
+name: Deploy Broken Handler
+
+# 处理 deploy-broken label 的 Issue:
+# - error-smoke → code bug → auto-fix
+# - error-deploy → infrastructure → human
+# - unknown → human
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  classify-and-resolve:
+    if: github.event.label.name == 'deploy-broken'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Classify deploy-broken issue
+        id: classify
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          # Read issue labels for classification (structured, not grep on body)
+          LABELS=$(gh issue view $ISSUE_NUMBER --json labels --jq '.labels[].name')
+
+          CATEGORY="unknown"
+
+          # Classification by labels (machine-readable, not grep on free-form text)
+          if echo "$LABELS" | grep -q "error-deploy"; then
+            CATEGORY="infrastructure"
+            echo "Classified: infrastructure (error-deploy label → human)"
+          elif echo "$LABELS" | grep -q "error-smoke"; then
+            CATEGORY="code"
+            echo "Classified: code (error-smoke label → auto-fix)"
+          else
+            CATEGORY="unknown"
+            echo "Classified: unknown (no classification labels found)"
+          fi
+
+          echo "category=$CATEGORY" >> $GITHUB_OUTPUT
+
+      - name: Route to auto-fix (code bug)
+        if: steps.classify.outputs.category == 'code'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue edit $ISSUE_NUMBER --add-label "fix-me"
+          gh issue comment $ISSUE_NUMBER --body "Classified as **code bug** (error-smoke) — auto-fix engaged."
+
+      - name: Route to human (infrastructure)
+        if: steps.classify.outputs.category == 'infrastructure'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue edit $ISSUE_NUMBER --add-label "needs-human"
+          gh issue comment $ISSUE_NUMBER --body "Classified as **infrastructure bug** (error-deploy) — needs human investigation."
+
+      - name: Route to human (unknown)
+        if: steps.classify.outputs.category == 'unknown'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue edit $ISSUE_NUMBER --add-label "needs-human"
+          gh issue comment $ISSUE_NUMBER --body "Could not classify this deploy-broken issue. Manual investigation needed."
