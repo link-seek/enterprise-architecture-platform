@@ -144,7 +144,7 @@ jobs:
           pr-number: ${{ github.event.pull_request.number }}
 
       - name: Dispatch auto-fix on blocking findings
-        if: failure()
+        if: steps.review.outputs.has-blocking == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
