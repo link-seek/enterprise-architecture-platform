@@ -328,15 +328,22 @@ jobs:
             LABELS="$LABELS,error-smoke"
           fi
 
-          BODY=$(cat <<'ISSUE_EOF'
+          # Check for existing open deploy-broken issue (dedup)
+          EXISTING=$(gh issue list --label "deploy-broken" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ]; then
+            echo "Open deploy-broken issue #$EXISTING already exists, skipping"
+            exit 0
+          fi
+
+          BODY=$(cat <<ISSUE_EOF
           ## Deploy Broken
 
-          See workflow run for details. Rollback has been triggered.
+          Commit: ${COMMIT_SHA:0:7}
+          Deploy result: $DEPLOY_RESULT
+          Smoke test result: $SMOKE_RESULT
+          Workflow run: $RUN_URL
 
-          ### Next steps
-          1. Check the workflow run logs
-          2. Fix the issue
-          3. The fix will go through the normal PR > CI > merge > deploy flow
+          Rollback has been triggered. Fix the issue and the fix will go through the normal PR > CI > merge > deploy flow.
           ISSUE_EOF
           )
 
