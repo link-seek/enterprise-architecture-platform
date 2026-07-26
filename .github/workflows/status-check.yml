@@ -1,0 +1,26 @@
+name: Status Check
+on: workflow_dispatch
+jobs:
+  check:
+    runs-on: [self-hosted, eap-prod]
+    steps:
+      - run: |
+          set +e
+          echo "=== Container status ==="
+          podman ps -a --filter name=eap-backend 2>&1
+          echo "=== Health (localhost) ==="
+          curl -s http://localhost:8080/health 2>&1
+          echo ""
+          echo "=== Container logs (last 30) ==="
+          podman logs --tail 30 eap-backend 2>&1
+          echo "=== DB file ==="
+          ls -la /opt/eap/data/platform.db 2>&1
+          echo "=== DB query from host ==="
+          python3 -c "
+          import sqlite3
+          conn = sqlite3.connect('/opt/eap/data/platform.db')
+          print('integrity:', conn.execute('PRAGMA integrity_check').fetchone())
+          print('users:', conn.execute('SELECT count(*) FROM users').fetchone())
+          conn.close()
+          " 2>&1
+          exit 0
