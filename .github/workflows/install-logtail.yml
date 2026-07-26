@@ -1,0 +1,25 @@
+name: Install Logtail
+on:
+  workflow_dispatch:
+jobs:
+  install:
+    runs-on: [self-hosted, eap-prod]
+    steps:
+      - name: Install Logtail
+        env:
+          ALIYUN_AK: ${{ secrets.ALIYUN_AK }}
+          ALIYUN_SK: ${{ secrets.ALIYUN_SK }}
+        run: |
+          set +e
+          if [ -d /etc/ilogtail ]; then
+            echo "Logtail already installed"
+          else
+            echo "Installing Logtail..."
+            wget -q "http://logtail-release-cn-hangzhou.oss-cn-hangzhou.aliyuncs.com/linux64/logtail.sh" -O /tmp/logtail.sh
+            chmod +x /tmp/logtail.sh
+            /tmp/logtail.sh cn-hangzhou "$ALIYUN_AK" "$ALIYUN_SK" 2>&1
+          fi
+          mkdir -p /var/log/eap
+          /etc/ilogtail/ilogtail --version 2>&1 || echo "ilogtail not found"
+          ps aux | grep ilogtail | grep -v grep 2>&1 || echo "ilogtail not running"
+          exit 0
