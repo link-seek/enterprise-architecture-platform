@@ -1,0 +1,20 @@
+name: Diagnose Port
+on:
+  workflow_dispatch:
+jobs:
+  diagnose:
+    runs-on: [self-hosted, eap-prod]
+    steps:
+      - run: |
+          set +e
+          echo "=== Port 8080 listening? ==="
+          ss -tlnp | grep 8080 2>&1
+          echo "=== Process inside container ==="
+          podman top eap-backend 2>&1
+          echo "=== Container inspect (state) ==="
+          podman inspect eap-backend --format '{{.State.Status}} {{.State.Pid}} {{.State.ExitCode}}' 2>&1
+          echo "=== Curl verbose ==="
+          curl -v http://localhost:8080/health 2>&1
+          echo "=== Container logs (ALL) ==="
+          podman logs eap-backend 2>&1
+          exit 0
