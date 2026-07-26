@@ -1,0 +1,20 @@
+name: Diagnose Full Logs
+on:
+  workflow_dispatch:
+jobs:
+  diagnose:
+    runs-on: [self-hosted, eap-prod]
+    steps:
+      - run: |
+          set +e
+          echo "=== Container status ==="
+          podman ps -a --filter name=eap-backend 2>&1
+          echo "=== Health ==="
+          curl -s http://localhost:8080/health 2>&1
+          echo ""
+          echo "=== Container logs (full) ==="
+          podman logs eap-backend 2>&1 | tail -30
+          echo "=== Log file ==="
+          ls -la /var/log/eap/backend.log 2>&1
+          tail -10 /var/log/eap/backend.log 2>&1
+          exit 0
