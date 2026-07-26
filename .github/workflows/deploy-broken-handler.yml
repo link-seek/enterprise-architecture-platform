@@ -1,9 +1,9 @@
 name: Deploy Broken Handler
 
 # 处理 deploy-broken label 的 Issue:
-# - error-smoke → code bug → auto-fix
-# - error-deploy → infrastructure → human
-# - unknown → human
+# - error-smoke → code bug → auto-fix → 修不了加 process-improvement
+# - error-deploy → infrastructure → human → 修不了加 process-improvement
+# - unknown → human → 加 process-improvement
 
 on:
   issues:
@@ -80,5 +80,7 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
         run: |
-          gh issue edit $ISSUE_NUMBER -R "$REPO" --add-label "needs-human"
-          gh issue comment $ISSUE_NUMBER -R "$REPO" --body "Could not classify this deploy-broken issue. Manual investigation needed."
+          gh issue edit $ISSUE_NUMBER -R "$REPO" --add-label "needs-human,process-improvement"
+          gh issue comment $ISSUE_NUMBER -R "$REPO" --body "Could not classify this deploy-broken issue. Manual investigation needed.
+
+          **L3 Process Improvement**: This issue has the \`process-improvement\` label. After resolving, please improve the process so this class of problem can be auto-classified next time."
