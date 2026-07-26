@@ -17,6 +17,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           REPO: ${{ github.repository }}
+          ALIYUN_AK: ${{ secrets.ALIYUN_AK }}
+          ALIYUN_SK: ${{ secrets.ALIYUN_SK }}
         run: |
           set +e
           HEALTH=$(curl -s --connect-timeout 10 http://localhost:8080/health 2>/dev/null || echo "")
@@ -46,6 +48,12 @@ jobs:
             exit 0
           fi
           
+          echo "Querying SLS for recent error logs..."
+          SLS_LOGS=$(0)
+          if command -v aliyun &>/dev/null; then
+            SLS_LOGS=$(aliyun sls GetLogs --project=eap-prod --logstore=backend --from=$(($(date +%s) - 300)) --to=$(date +%s) --query='level: error | select timestamp, level, message, target, error limit 10' --line=10 2>/dev/null || echo "")
+          fi
+          
           echo "Creating issue..."
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           
@@ -60,11 +68,16 @@ jobs:
           $HEALTH
           \`\`\`
           
-          ### SLS Log Query
-          https://sls.console.aliyun.com/lognext/project/eap-prod/logsearch/backend?query=level%3A%20error&from=$TIMESTAMP
+          ### SLS Error Logs (last 5 min)
+          \`\`\`
+          $SLS_LOGS
+          \`\`\`
+          
+          ### SLS Console
+          https://sls.console.aliyun.com/lognext/project/eap-prod/logsearch/backend?query=level%3A%20error
           
           ### Action Needed
-          - Check SLS logs for error details
+          - Check SLS logs above for error details
           - Fix root cause
           - This issue was auto-created by health-watch workflow"
           
