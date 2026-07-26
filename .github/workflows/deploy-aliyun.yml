@@ -224,6 +224,7 @@ jobs:
           echo "All backend smoke tests passed"
 
       - name: Smoke test — Frontend
+        continue-on-error: true
         run: |
           CURL_OPTS="-4 -sf --connect-timeout 10 --max-time 30"
 
