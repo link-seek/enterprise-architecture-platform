@@ -33,10 +33,18 @@ jobs:
             echo "tag=${{ inputs.image-tag }}" >> $GITHUB_OUTPUT
             exit 0
           fi
-          # registry_package: 从 payload metadata.container.tags 取
-          TAGS='${{ toJson(github.event.package_version.metadata.container.tags) }}'
-          echo "All tags: $TAGS"
-          TAG=$(echo "$TAGS" | jq -r '.[] | select(. != "latest")' | head -1)
+          # registry_package: dump event for debugging, then extract tag
+          echo "=== Full event payload ==="
+          echo '${{ toJson(github.event) }}' | jq .
+          echo "=== package_version ==="
+          echo '${{ toJson(github.event.package_version) }}' | jq .
+          TAGS='${{ toJson(github.event.package_version.metadata) }}'
+          echo "metadata: $TAGS"
+          # Try multiple possible paths
+          TAG=$(echo "$TAGS" | jq -r '.container.tags[]? | select(. != "latest")' 2>/dev/null | head -1)
+          if [ -z "$TAG" ]; then
+            TAG=$(echo "$TAGS" | jq -r '.[]? | select(. != "latest")' 2>/dev/null | head -1)
+          fi
           if [ -z "$TAG" ]; then
             echo "No non-latest tag found, skipping"
             exit 1
