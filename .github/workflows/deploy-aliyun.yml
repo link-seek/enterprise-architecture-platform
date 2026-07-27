@@ -1,14 +1,14 @@
 name: Sync and Deploy
 
-# 触发: ci-cd-acr.yml push GHCR 后发 repository_dispatch
-# 流程: 拉 GHCR → 推 ACR → 触发云效 Flow (SSH ECS pull+restart)
+# 触发: GHCR 镜像新版本发布 (ci-cd-acr 用 PAT push 触发 registry_package)
+# 流程: GitHub runner pull GHCR → push ACR → 触发云效 Flow (ECS pull ACR + restart)
 #
-# 解耦: ci-cd-acr.yml 只管 build+push GHCR, 本 workflow 只管 sync+deploy
-# GHCR 是唯一耦合点 (image artifact)
+# 真解耦: ci-cd-acr 只管 build+push GHCR, 本 workflow 只管 sync+deploy
+# 手动 docker push GHCR 也触发部署
 
 on:
-  repository_dispatch:
-    types: [image-pushed]
+  registry_package:
+    types: [published]
 
 permissions:
   packages: read
@@ -21,15 +21,16 @@ env:
 jobs:
   sync-to-acr:
     runs-on: ubuntu-latest
+    if: github.event.registry_package.name == 'eap-backend'
     outputs:
-      image-tag: ${{ github.event.client_payload.image_tag }}
+      image-tag: ${{ github.event.registry_package.package_version.container_metadata.tag.name }}
     steps:
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT }}
 
       - name: Login to ACR
         uses: docker/login-action@v3
@@ -40,8 +41,12 @@ jobs:
 
       - name: Pull from GHCR and push to ACR
         env:
-          TAG: ${{ github.event.client_payload.image_tag }}
+          TAG: ${{ github.event.registry_package.package_version.container_metadata.tag.name }}
         run: |
+          if [ "$TAG" = "latest" ] || [ -z "$TAG" ]; then
+            echo "Skipping latest/empty tag"
+            exit 0
+          fi
           GHCR_IMG="${{ env.GHCR_IMAGE }}:${TAG}"
           ACR_IMG="${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend"
 
@@ -55,6 +60,7 @@ jobs:
           docker push "${ACR_IMG}:latest"
 
       - name: Clean old ACR tags (keep latest 10)
+        if: env.TAG != '' && env.TAG != 'latest'
         run: |
           REGISTRY="${{ env.ACR_REGISTRY }}"
           REPO="${{ env.ACR_NAMESPACE }}/backend"
@@ -78,6 +84,7 @@ jobs:
   deploy:
     needs: sync-to-acr
     runs-on: ubuntu-latest
+    if: needs.sync-to-acr.outputs.image-tag != '' && needs.sync-to-acr.outputs.image-tag != 'latest'
     steps:
       - name: Trigger Aliyun Flow pipeline
         env:
