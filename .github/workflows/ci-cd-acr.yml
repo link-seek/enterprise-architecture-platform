@@ -7,10 +7,13 @@ on:
 permissions:
   contents: read
   packages: write
+  actions: write
 
 jobs:
   build-backend:
     runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.build.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -18,8 +21,9 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push backend
+        id: build
         env:
           IMAGE: ghcr.io/link-seek/eap-backend
         run: |
@@ -27,6 +31,7 @@ jobs:
           docker build -t "${IMAGE}:latest" -t "${IMAGE}:${TAG}" ./backend
           docker push "${IMAGE}:latest"
           docker push "${IMAGE}:${TAG}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
 
       - name: Cleanup old GHCR versions (keep latest 5)
         env:
@@ -37,6 +42,19 @@ jobs:
             echo "Deleting old GHCR version: $id"
             gh api -X DELETE /users/link-seek/packages/container/eap-backend/versions/$id || true
           done
+
+      - name: Trigger deploy via repository_dispatch
+        env:
+          PAT: ${{ secrets.GHCR_PAT }}
+          TAG: ${{ steps.build.outputs.tag }}
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: Bearer $PAT" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            -d "{\"event_type\":\"image-pushed\",\"client_payload\":{\"image_tag\":\"$TAG\"}}" \
+            https://api.github.com/repos/${{ github.repository }}/dispatches
+          echo "Dispatch sent for tag: $TAG"
 
   build-frontend:
     runs-on: ubuntu-latest
