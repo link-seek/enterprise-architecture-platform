@@ -10,14 +10,14 @@ trigger:
 risk_detection:
   file_patterns:
     - "migration"
-    - "\.sql$"
+    - "\\.sql$"
     - "/schema"
     - "/database"
-    - "\.prisma$"
+    - "\\.prisma$"
     - "alembic"
     - "diesel"
     - "/entit"
-    - "\.github/workflows/"
+    - "\\.github/workflows/"
 
 # 测试 — 如何运行消费仓的测试
 test:
