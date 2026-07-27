@@ -18,21 +18,55 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT }}
       - name: Build and push backend
         env:
           IMAGE: ghcr.io/link-seek/eap-backend
         run: |
-          docker build -t "${IMAGE}:latest" -t "${IMAGE}:${{ github.sha }}" ./backend
+          TAG="$(date -u +%Y%m%d%H%M%S)-${{ github.sha }}"
+          docker build -t "${IMAGE}:latest" -t "${IMAGE}:${TAG}" ./backend
           docker push "${IMAGE}:latest"
-          docker push "${IMAGE}:${{ github.sha }}"
+          docker push "${IMAGE}:${TAG}"
 
       - name: Cleanup old GHCR versions (keep latest 5)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GHCR_PAT }}
         run: |
           IDS=$(gh api /users/link-seek/packages/container/eap-backend/versions --paginate -q '. | sort_by(.created_at) | reverse | .[5:] | .[].id' 2>/dev/null)
           for id in $IDS; do
             echo "Deleting old GHCR version: $id"
             gh api -X DELETE /users/link-seek/packages/container/eap-backend/versions/$id || true
           done
+
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_API_URL: https://api.xieyucheng.top/api
+        run: npm run build
+
+      - name: Install ossutil
+        run: |
+          curl -L -o ossutil https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64
+          chmod +x ossutil && sudo mv ossutil /usr/local/bin/ossutil
+
+      - name: Upload to OSS and set public-read
+        run: |
+          ossutil config \
+            -e "oss-cn-shenzhen.aliyuncs.com" \
+            -i "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" \
+            -k "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
+          ossutil cp -rf frontend/dist/ "oss://eap-frontend-xyc/" --acl public-read
