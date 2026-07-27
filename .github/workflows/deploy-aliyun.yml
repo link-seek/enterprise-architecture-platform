@@ -1,89 +1,31 @@
 name: Sync and Deploy
 
-# 触发: ci-cd-acr.yml push GHCR 后发 repository_dispatch
-# 流程: 拉 GHCR → 推 ACR → 触发云效 Flow (SSH ECS pull+restart)
-#
-# 解耦: ci-cd-acr.yml 只管 build+push GHCR, 本 workflow 只管 sync+deploy
-# GHCR 是唯一耦合点 (image artifact)
+# 触发: GHCR 镜像发布 (registry_package)
+# 薄壳: 调用流程仓的 deploy-pipeline.yml reusable workflow
+# 流程仓定义流程，消费仓定义流程活动（参数）
 
 on:
-  repository_dispatch:
-    types: [image-pushed]
+  registry_package:
+    types: [published]
 
 permissions:
   packages: read
-
-env:
-  ACR_REGISTRY: crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com
-  ACR_NAMESPACE: eap-app
-  GHCR_IMAGE: ghcr.io/link-seek/eap-backend
+  contents: read
+  issues: write
 
 jobs:
-  sync-to-acr:
-    runs-on: ubuntu-latest
-    outputs:
-      image-tag: ${{ github.event.client_payload.image_tag }}
-    steps:
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Login to ACR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.ACR_REGISTRY }}
-          username: ${{ secrets.ACR_USERNAME }}
-          password: ${{ secrets.ACR_PASSWORD }}
-
-      - name: Pull from GHCR and push to ACR
-        env:
-          TAG: ${{ github.event.client_payload.image_tag }}
-        run: |
-          GHCR_IMG="${{ env.GHCR_IMAGE }}:${TAG}"
-          ACR_IMG="${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend"
-
-          echo "Pulling $GHCR_IMG ..."
-          docker pull "$GHCR_IMG"
-
-          docker tag "$GHCR_IMG" "${ACR_IMG}:${TAG}"
-          docker tag "$GHCR_IMG" "${ACR_IMG}:latest"
-          echo "Pushing to ACR ..."
-          docker push "${ACR_IMG}:${TAG}"
-          docker push "${ACR_IMG}:latest"
-
-      - name: Clean old ACR tags (keep latest 10)
-        run: |
-          REGISTRY="${{ env.ACR_REGISTRY }}"
-          REPO="${{ env.ACR_NAMESPACE }}/backend"
-          AUTH="${{ secrets.ACR_USERNAME }}:${{ secrets.ACR_PASSWORD }}"
-
-          TAGS=$(curl -s -u "$AUTH" "https://$REGISTRY/v2/$REPO/tags/list" | jq -r '.tags[]' | grep -v latest | sort -r)
-          COUNT=$(echo "$TAGS" | grep -c . || true)
-          echo "Current tags (excl latest): $COUNT"
-          if [ "$COUNT" -gt 10 ]; then
-            OLD=$(echo "$TAGS" | tail -n $((COUNT - 10)))
-            for TAG in $OLD; do
-              DIGEST=$(curl -s -I -u "$AUTH" -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-                "https://$REGISTRY/v2/$REPO/manifests/$TAG" | grep -i "Docker-Content-Digest" | awk '{print $2}' | tr -d '\r')
-              if [ -n "$DIGEST" ]; then
-                echo "Deleting old ACR tag: $TAG (digest: $DIGEST)"
-                curl -s -X DELETE -u "$AUTH" "https://$REGISTRY/v2/$REPO/manifests/$DIGEST" || true
-              fi
-            done
-          fi
-
   deploy:
-    needs: sync-to-acr
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Aliyun Flow pipeline
-        env:
-          TAG: ${{ needs.sync-to-acr.outputs.image-tag }}
-        run: |
-          echo "Deploying tag: $TAG"
-          curl -s --fail -H "Content-Type: application/json" -X POST -d '{}' \
-            "${{ secrets.FLOW_WEBHOOK_URL }}"
-          echo "Flow triggered successfully"
+    if: github.event.package_version.name != 'latest'
+    uses: link-seek/issue-resolver/.github/workflows/deploy-pipeline.yml@main
+    with:
+      image-tag: ${{ github.event.package_version.name }}
+      runner-label: eap-prod
+      ghcr-image: ghcr.io/link-seek/eap-backend
+      acr-registry: crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com
+      acr-namespace: eap-app
+      acr-repo: backend
+      frontend-url: https://www.xieyucheng.top
+      api-url: https://api.xieyucheng.top
+      issue-repo: link-seek/enterprise-architecture-platform
+      deploy-script: /opt/eap/eap-autodeploy.sh
+    secrets: inherit
