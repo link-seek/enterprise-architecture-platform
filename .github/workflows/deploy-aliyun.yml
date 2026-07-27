@@ -1,14 +1,17 @@
 name: Sync and Deploy
 
-# 触发: GHCR 镜像新版本发布 (ci-cd-acr.yml push GHCR 时触发)
+# 触发: ci-cd-acr.yml push GHCR 后发 repository_dispatch
 # 流程: 拉 GHCR → 推 ACR → 触发云效 Flow (SSH ECS pull+restart)
 #
 # 解耦: ci-cd-acr.yml 只管 build+push GHCR, 本 workflow 只管 sync+deploy
-# 手动 docker push GHCR 也会触发部署
+# GHCR 是唯一耦合点 (image artifact)
 
 on:
-  registry_package:
-    types: [published]
+  repository_dispatch:
+    types: [image-pushed]
+
+permissions:
+  packages: read
 
 env:
   ACR_REGISTRY: crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com
@@ -18,31 +21,17 @@ env:
 jobs:
   sync-to-acr:
     runs-on: ubuntu-latest
-    if: github.event.registry_package.name == 'eap-backend'
     outputs:
-      image-tag: ${{ steps.extract-tag.outputs.tag }}
+      image-tag: ${{ github.event.client_payload.image_tag }}
     steps:
-      - name: Extract tag from event
-        id: extract-tag
-        run: |
-          TAG="${{ github.event.registry_package.package_version.container_metadata.tag.name }}"
-          if [ "$TAG" = "latest" ] || [ -z "$TAG" ]; then
-            echo "Skipping latest/empty tag"
-            exit 0
-          fi
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "Deploying image tag: $TAG"
-
       - name: Login to GHCR
-        if: steps.extract-tag.outputs.tag != ''
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login to ACR
-        if: steps.extract-tag.outputs.tag != ''
         uses: docker/login-action@v3
         with:
           registry: ${{ env.ACR_REGISTRY }}
@@ -50,9 +39,9 @@ jobs:
           password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Pull from GHCR and push to ACR
-        if: steps.extract-tag.outputs.tag != ''
+        env:
+          TAG: ${{ github.event.client_payload.image_tag }}
         run: |
-          TAG=${{ steps.extract-tag.outputs.tag }}
           GHCR_IMG="${{ env.GHCR_IMAGE }}:${TAG}"
           ACR_IMG="${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend"
 
@@ -66,7 +55,6 @@ jobs:
           docker push "${ACR_IMG}:latest"
 
       - name: Clean old ACR tags (keep latest 10)
-        if: steps.extract-tag.outputs.tag != ''
         run: |
           REGISTRY="${{ env.ACR_REGISTRY }}"
           REPO="${{ env.ACR_NAMESPACE }}/backend"
@@ -90,11 +78,12 @@ jobs:
   deploy:
     needs: sync-to-acr
     runs-on: ubuntu-latest
-    if: needs.sync-to-acr.outputs.image-tag != ''
     steps:
       - name: Trigger Aliyun Flow pipeline
+        env:
+          TAG: ${{ needs.sync-to-acr.outputs.image-tag }}
         run: |
-          echo "Deploying tag: ${{ needs.sync-to-acr.outputs.image-tag }}"
+          echo "Deploying tag: $TAG"
           curl -s --fail -H "Content-Type: application/json" -X POST -d '{}' \
             "${{ secrets.FLOW_WEBHOOK_URL }}"
           echo "Flow triggered successfully"
