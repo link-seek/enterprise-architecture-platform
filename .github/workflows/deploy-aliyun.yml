@@ -1,8 +1,8 @@
 name: Sync and Deploy
 
 # 触发: GHCR 镜像发布 (registry_package)
+# 官方 payload: github.event.package_version.metadata.container.tags 包含 tag 数组
 # 薄壳: 调用流程仓的 deploy-pipeline.yml reusable workflow
-# 流程仓定义流程，消费仓定义流程活动（参数）
 
 on:
   registry_package:
@@ -14,11 +14,31 @@ permissions:
   issues: write
 
 jobs:
+  resolve-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.extract.outputs.tag }}
+    steps:
+      - name: Extract image tag from registry_package payload
+        id: extract
+        run: |
+          # github.event.package_version.metadata.container.tags 是 tag 数组
+          # 过滤掉 latest，取具体版本 tag
+          TAGS='${{ toJson(github.event.package_version.metadata.container.tags) }}'
+          echo "All tags: $TAGS"
+          TAG=$(echo "$TAGS" | jq -r '.[] | select(. != "latest")' | head -1)
+          if [ -z "$TAG" ]; then
+            echo "No non-latest tag found, skipping"
+            exit 1
+          fi
+          echo "Resolved tag: $TAG"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
   deploy:
-    if: github.event.package_version.name != 'latest'
+    needs: resolve-tag
     uses: link-seek/issue-resolver/.github/workflows/deploy-pipeline.yml@main
     with:
-      image-tag: ${{ github.event.package_version.name }}
+      image-tag: ${{ needs.resolve-tag.outputs.tag }}
       runner-label: eap-prod
       ghcr-image: ghcr.io/link-seek/eap-backend
       acr-registry: crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com
