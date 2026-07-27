@@ -46,15 +46,13 @@ jobs:
 
       - name: Trigger deploy via repository_dispatch
         env:
-          PAT: ${{ secrets.GHCR_PAT }}
+          GH_TOKEN: ${{ secrets.GHCR_PAT }}
           TAG: ${{ steps.build.outputs.tag }}
         run: |
-          curl -sf -X POST \
-            -H "Authorization: Bearer $PAT" \
-            -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-            -d "{\"event_type\":\"image-pushed\",\"client_payload\":{\"image_tag\":\"$TAG\"}}" \
-            https://api.github.com/repos/${{ github.repository }}/dispatches
+          gh api repos/${{ github.repository }}/dispatches \
+            --method POST \
+            -f event_type=image-pushed \
+            -f "client_payload[image_tag]=$TAG"
           echo "Dispatch sent for tag: $TAG"
 
   build-frontend:
