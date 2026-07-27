@@ -1,64 +1,78 @@
-name: Build and Deploy
+name: Sync and Deploy
 
-# 纯 GitHub Actions 流水线:
-#   后端 build → push ACR (GitHub-hosted runner)
-#   前端 build → upload OSS (GitHub-hosted runner)
-#   deploy → podman play kube (self-hosted runner on ECS, production environment)
+# 触发: GHCR 镜像新版本发布 (ci-cd-acr.yml push GHCR 时触发)
+# 流程: 拉 GHCR → 推 ACR → 触发云效 Flow (SSH ECS pull+restart)
 #
-# 安全:
-#   - deploy job 只在 push to main 时触发 (fork PR 不会跑)
-#   - production environment 保护 secrets (fork PR 无法访问)
-#   - Repo Settings 禁止 fork PR 使用 self-hosted runner
-#
-# 访问:
-#   www.xieyucheng.top → CDN → OSS (object 公共读 + 静态网站托管) → 前端
-#   api.xieyucheng.top → CDN → ECS:8080 → 后端
+# 解耦: ci-cd-acr.yml 只管 build+push GHCR, 本 workflow 只管 sync+deploy
+# 手动 docker push GHCR 也会触发部署
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-concurrency:
-  group: deploy-production
-  cancel-in-progress: false
+  registry_package:
+    types: [published]
 
 env:
   ACR_REGISTRY: crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com
   ACR_NAMESPACE: eap-app
-  OSS_REGION: cn-shenzhen
-  OSS_BUCKET: eap-frontend-xyc
+  GHCR_IMAGE: ghcr.io/link-seek/eap-backend
 
 jobs:
-  # ==================== 后端: Build → Push ACR ====================
-  build-backend:
+  sync-to-acr:
     runs-on: ubuntu-latest
+    if: github.event.registry_package.name == 'eap-backend'
+    outputs:
+      image-tag: ${{ steps.extract-tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Extract tag from event
+        id: extract-tag
+        run: |
+          TAG="${{ github.event.registry_package.package_version.container_metadata.tag.name }}"
+          if [ "$TAG" = "latest" ] || [ -z "$TAG" ]; then
+            echo "Skipping latest/empty tag"
+            exit 0
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Deploying image tag: $TAG"
+
+      - name: Login to GHCR
+        if: steps.extract-tag.outputs.tag != ''
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
 
       - name: Login to ACR
+        if: steps.extract-tag.outputs.tag != ''
         uses: docker/login-action@v3
         with:
           registry: ${{ env.ACR_REGISTRY }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Build and push backend image
+      - name: Pull from GHCR and push to ACR
+        if: steps.extract-tag.outputs.tag != ''
         run: |
-          IMAGE="${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend"
-          TAG="$(date -u +%Y%m%d%H%M%S)-${{ github.sha }}"
-          docker build -t "${IMAGE}:latest" -t "${IMAGE}:${TAG}" ./backend
-          docker push "${IMAGE}:latest"
-          docker push "${IMAGE}:${TAG}"
+          TAG=${{ steps.extract-tag.outputs.tag }}
+          GHCR_IMG="${{ env.GHCR_IMAGE }}:${TAG}"
+          ACR_IMG="${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend"
+
+          echo "Pulling $GHCR_IMG ..."
+          docker pull "$GHCR_IMG"
+
+          docker tag "$GHCR_IMG" "${ACR_IMG}:${TAG}"
+          docker tag "$GHCR_IMG" "${ACR_IMG}:latest"
+          echo "Pushing to ACR ..."
+          docker push "${ACR_IMG}:${TAG}"
+          docker push "${ACR_IMG}:latest"
 
       - name: Clean old ACR tags (keep latest 10)
+        if: steps.extract-tag.outputs.tag != ''
         run: |
           REGISTRY="${{ env.ACR_REGISTRY }}"
           REPO="${{ env.ACR_NAMESPACE }}/backend"
           AUTH="${{ secrets.ACR_USERNAME }}:${{ secrets.ACR_PASSWORD }}"
 
           TAGS=$(curl -s -u "$AUTH" "https://$REGISTRY/v2/$REPO/tags/list" | jq -r '.tags[]' | grep -v latest | sort -r)
-
           COUNT=$(echo "$TAGS" | grep -c . || true)
           echo "Current tags (excl latest): $COUNT"
           if [ "$COUNT" -gt 10 ]; then
@@ -73,313 +87,14 @@ jobs:
             done
           fi
 
-  # ==================== 前端: Build → Upload OSS → Object 公共读 ====================
-  build-frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm install
-
-      - name: Build frontend
-        working-directory: frontend
-        env:
-          VITE_API_URL: https://api.xieyucheng.top/api
-        run: npm run build
-
-      - name: Install ossutil
-        run: |
-          curl -L -o ossutil https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64
-          chmod +x ossutil && sudo mv ossutil /usr/local/bin/ossutil
-
-      - name: Upload to OSS and set public-read
-        run: |
-          ossutil config \
-            -e "oss-${{ env.OSS_REGION }}.aliyuncs.com" \
-            -i "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" \
-            -k "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
-          ossutil cp -rf frontend/dist/ "oss://${{ env.OSS_BUCKET }}/" --acl public-read
-
-  # ==================== 部署: self-hosted runner on ECS ====================
   deploy:
-    runs-on: [self-hosted, eap-prod]
-    needs: [build-backend, build-frontend]
-    if: github.ref == 'refs/heads/main'
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Login to ACR
-        run: |
-          podman login -u "${{ secrets.ACR_USERNAME }}" -p "${{ secrets.ACR_PASSWORD }}" "${{ env.ACR_REGISTRY }}"
-
-      - name: Deploy with podman
-        run: |
-          # === 1. Stop old container BEFORE backup (avoid SQLite WAL race) ===
-          if podman inspect eap-backend >/dev/null 2>&1; then
-            # Save current image digest for rollback (immutable, not :latest)
-            PREV_DIGEST=$(podman inspect eap-backend --format '{{.ImageDigest}}' 2>/dev/null || echo "")
-            if [ -n "$PREV_DIGEST" ] && [ "$PREV_DIGEST" != "" ]; then
-              # Save full registry ref with digest for podman pull
-              echo "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend@${PREV_DIGEST}" > /opt/eap/data/.previous-image
-              echo "Previous image saved: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend@${PREV_DIGEST}"
-            fi
-            # Stop container to release DB lock
-            podman rm -f eap-backend 2>/dev/null || true
-          fi
-
-          # === 2. Backup data (container stopped, DB is cold) ===
-          DB_FILE="/opt/eap/data/platform.db"
-          BAK_FILE="/opt/eap/data/.platform.db.pre-deploy"
-          if [ -f "$DB_FILE" ]; then
-            cp "$DB_FILE" "$BAK_FILE"
-            echo "Database backed up to $BAK_FILE"
-          else
-            echo "No existing database, fresh deploy"
-          fi
-
-          # === 3. Pull new image and start ===
-          podman pull "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:latest"
-          podman run -d --name eap-backend \
-            --replace \
-            -p 8080:8080 \
-            -v /opt/eap/data:/app/data \
-            -e APP_ENV=production \
-            -e APP_LLM__BACKEND=llm \
-            -e APP_SEED_ADMIN_EMAIL="${{ secrets.ADMIN_EMAIL }}" \
-            -e APP_SEED_ADMIN_PASSWORD="${{ secrets.ADMIN_PASSWORD }}" \
-            -e APP_DATABASE__URL="sqlite:///app/data/platform.db?mode=rwc" \
-            -e RUST_LOG=info,sqlx::pool=warn \
-            "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend:latest"
-
-          # Redirect container logs to file for Logtail collection
-          mkdir -p /var/log/eap
-          nohup podman logs -f eap-backend >> /var/log/eap/backend.log 2>&1 &
-
-      - name: Health check
-        run: |
-          sleep 5
-          for i in $(seq 1 10); do
-            if curl -sf http://localhost:8080/health 2>/dev/null; then
-              echo "Health check passed"
-              exit 0
-            fi
-            echo "Waiting for service... ($i/10)"
-            sleep 3
-          done
-          echo "Health check failed"
-          exit 1
-
-  # ==================== Smoke Test: 部署后现网验证 ====================
-  smoke-test:
+    needs: sync-to-acr
     runs-on: ubuntu-latest
-    needs: [deploy]
-    if: github.ref == 'refs/heads/main' && success()
-    environment: production
+    if: needs.sync-to-acr.outputs.image-tag != ''
     steps:
-      - name: Wait for CDN cache refresh
-        run: sleep 10
-
-      - name: Smoke test — Backend API
+      - name: Trigger Aliyun Flow pipeline
         run: |
-          # Force IPv4 — CDN IPv6 is unreachable from GitHub runners
-          CURL_OPTS="-4 -sf --connect-timeout 10 --max-time 30"
-
-          echo "=== Test 1: Backend health (HTTP 200 + db up) ==="
-          HEALTH_BODY=$(curl -4 -s --connect-timeout 10 --max-time 30 https://api.xieyucheng.top/health 2>/dev/null || echo "")
-          HEALTH_CODE=$(echo "$HEALTH_BODY" | head -1 | python3 -c "import sys; print('ok' if sys.stdin.read().strip() else 'empty')" 2>/dev/null)
-          if [ -z "$HEALTH_BODY" ]; then
-            echo "FAIL: Backend health returned empty response"
-            exit 1
-          fi
-          echo "Health response: $HEALTH_BODY"
-
-          # Parse JSON and check db status (llm down is non-blocking)
-          DB_STATUS=$(echo "$HEALTH_BODY" | python3 -c "import json,sys; print(json.load(sys.stdin).get('db','unknown'))" 2>/dev/null || echo "parse_error")
-          LLM_STATUS=$(echo "$HEALTH_BODY" | python3 -c "import json,sys; print(json.load(sys.stdin).get('llm','unknown'))" 2>/dev/null || echo "parse_error")
-          echo "DB status: $DB_STATUS"
-          echo "LLM status: $LLM_STATUS"
-
-          if [ "$DB_STATUS" != "up" ]; then
-            echo "FAIL: Database is $DB_STATUS (expected up)"
-            exit 1
-          fi
-          if [ "$LLM_STATUS" != "up" ]; then
-            echo "::warning::LLM is $LLM_STATUS (non-blocking — db is up)"
-          fi
-
-          echo "=== Test 2: GraphQL endpoint ==="
-          GRAPHQL=$(curl $CURL_OPTS -o /dev/null -w "%{http_code}" \
-            -X POST https://api.xieyucheng.top/graphql \
-            -H "Content-Type: application/json" \
-            -d '{"query":"{ __typename }"}' 2>/dev/null || echo "000")
-          echo "GraphQL endpoint: $GRAPHQL"
-          if [ "$GRAPHQL" != "200" ]; then
-            echo "FAIL: GraphQL endpoint returned $GRAPHQL"
-            exit 1
-          fi
-
-          echo "=== Test 3: Login API alive ==="
-          # Send a minimal valid-structure request; any 4xx means endpoint is alive
-          # 502/503 means backend is broken
-          LOGIN=$(curl -4 -s --connect-timeout 10 --max-time 30 -o /dev/null -w "%{http_code}" \
-            -X POST https://api.xieyucheng.top/api/auth/login \
-            -H "Content-Type: application/json" \
-            -d '{"email":"nonexistent@smoke.test","password":"wrong"}' 2>/dev/null || echo "000")
-          echo "Login API response: $LOGIN"
-          # 400/401/403/422 = endpoint alive and rejecting bad creds
-          # 500/502/503/000 = server error or unreachable
-          if ! echo "$LOGIN" | grep -qE "^(4[0-9]{2}|200)$"; then
-            echo "FAIL: Login API returned $LOGIN (expected 4xx or 200, got server error)"
-            exit 1
-          fi
-
-          echo "All backend smoke tests passed"
-
-      - name: Smoke test — Frontend
-        continue-on-error: true
-        run: |
-          CURL_OPTS="-4 -sf --connect-timeout 10 --max-time 30"
-
-          echo "=== Test 4: Frontend serves HTML ==="
-          FRONTEND=$(curl $CURL_OPTS -o /dev/null -w "%{http_code}" https://www.xieyucheng.top/ 2>/dev/null || echo "000")
-          echo "Frontend: $FRONTEND"
-          if [ "$FRONTEND" != "200" ]; then
-            echo "FAIL: Frontend returned $FRONTEND"
-            exit 1
-          fi
-
-          echo "=== Test 5: Frontend has JS bundle ==="
-          curl $CURL_OPTS https://www.xieyucheng.top/ | grep -qo 'script' || {
-            echo "FAIL: No script tag found in frontend HTML"
-            exit 1
-          }
-
-          echo "All frontend smoke tests passed"
-
-  # ==================== Rollback: 只在 deploy/smoke-test 失败时触发 ====================
-  rollback:
-    runs-on: [self-hosted, eap-prod]
-    needs: [deploy, smoke-test]
-    # Only rollback if deploy or smoke-test specifically failed (not build failures)
-    if: always() && github.ref == 'refs/heads/main' && (needs.deploy.result == 'failure' || needs.smoke-test.result == 'failure')
-    environment: production
-    steps:
-      - name: Rollback to previous image + data
-        run: |
-          # === 1. Restore database backup ===
-          DB_FILE="/opt/eap/data/platform.db"
-          BAK_FILE="/opt/eap/data/.platform.db.pre-deploy"
-          if [ -f "$BAK_FILE" ]; then
-            echo "Restoring database from $BAK_FILE"
-            # Stop container first to release the DB file lock
-            podman rm -f eap-backend 2>/dev/null || true
-            cp "$BAK_FILE" "$DB_FILE"
-            echo "Database restored"
-          else
-            echo "WARNING: No database backup found — rollback image only, data stays as-is"
-            podman rm -f eap-backend 2>/dev/null || true
-          fi
-
-          # === 2. Restore previous image ===
-          PREV_FILE="/opt/eap/data/.previous-image"
-          if [ ! -f "$PREV_FILE" ]; then
-            echo "No previous image saved at $PREV_FILE, cannot rollback"
-            echo "Manual intervention required"
-            exit 1
-          fi
-
-          PREV_IMAGE=$(cat "$PREV_FILE")
-          echo "Rolling back to image: $PREV_IMAGE"
-
-          podman pull "$PREV_IMAGE"
-          podman run -d --name eap-backend \
-            --replace \
-            -p 8080:8080 \
-            -v /opt/eap/data:/app/data \
-            -e APP_ENV=production \
-            -e APP_LLM__BACKEND=llm \
-            -e APP_SEED_ADMIN_EMAIL="${{ secrets.ADMIN_EMAIL }}" \
-            -e APP_SEED_ADMIN_PASSWORD="${{ secrets.ADMIN_PASSWORD }}" \
-            -e APP_DATABASE__URL="sqlite:///app/data/platform.db?mode=rwc" \
-            -e RUST_LOG=info,sqlx::pool=warn \
-            "$PREV_IMAGE"
-
-          # Redirect container logs to file for Logtail collection
-          mkdir -p /var/log/eap
-          nohup podman logs -f eap-backend >> /var/log/eap/backend.log 2>&1 &
-
-          # === 3. Verify rollback ===
-          sleep 5
-          for i in $(seq 1 10); do
-            if curl -sf http://localhost:8080/health 2>/dev/null; then
-              echo "Rollback successful — image + data restored to pre-deploy state"
-              # Clean up backup
-              rm -f "$BAK_FILE"
-              exit 0
-            fi
-            sleep 3
-          done
-          echo "Rollback failed — manual intervention required"
-          exit 1
-
-  # ==================== Deploy-broken Issue: 失败时自动提 Issue + 分类 label ====================
-  deploy-broken-issue:
-    runs-on: ubuntu-latest
-    needs: [deploy, smoke-test]
-    if: always() && github.ref == 'refs/heads/main' && (needs.deploy.result == 'failure' || needs.smoke-test.result == 'failure')
-    steps:
-      - uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-
-      - name: Create deploy-broken issue with classification labels
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          DEPLOY_RESULT: ${{ needs.deploy.result }}
-          SMOKE_RESULT: ${{ needs.smoke-test.result }}
-          COMMIT_SHA: ${{ github.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          REPO: ${{ github.repository }}
-        run: |
-          LABELS="deploy-broken"
-          if [ "$DEPLOY_RESULT" == "failure" ]; then
-            LABELS="$LABELS,error-deploy"
-          fi
-          if [ "$SMOKE_RESULT" == "failure" ]; then
-            LABELS="$LABELS,error-smoke"
-          fi
-
-          # Check for existing open deploy-broken issue (dedup)
-          EXISTING=$(gh issue list -R "$REPO" --label "deploy-broken" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
-          if [ -n "$EXISTING" ]; then
-            echo "Open deploy-broken issue #$EXISTING already exists, skipping"
-            exit 0
-          fi
-
-          BODY=$(cat <<ISSUE_EOF
-          ## Deploy Broken
-
-          Commit: ${COMMIT_SHA:0:7}
-          Deploy result: $DEPLOY_RESULT
-          Smoke test result: $SMOKE_RESULT
-          Workflow run: $RUN_URL
-
-          Rollback has been triggered. Fix the issue and the fix will go through the normal PR > CI > merge > deploy flow.
-          ISSUE_EOF
-          )
-
-          gh issue create -R "$REPO" \
-            --label "$LABELS" \
-            --title "deploy broken: ${COMMIT_SHA:0:7}" \
-            --body "$BODY"
+          echo "Deploying tag: ${{ needs.sync-to-acr.outputs.image-tag }}"
+          curl -s --fail -H "Content-Type: application/json" -X POST -d '{}' \
+            "${{ secrets.FLOW_WEBHOOK_URL }}"
+          echo "Flow triggered successfully"
