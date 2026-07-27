@@ -34,13 +34,14 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
       - name: Cleanup old GHCR versions (keep latest 5)
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GHCR_PAT }}
         run: |
-          IDS=$(gh api /users/link-seek/packages/container/eap-backend/versions --paginate -q '. | sort_by(.created_at) | reverse | .[5:] | .[].id' 2>/dev/null)
+          IDS=$(gh api /orgs/link-seek/packages/container/eap-backend/versions --paginate -q '. | sort_by(.created_at) | reverse | .[5:] | .[].id' 2>/dev/null || true)
           for id in $IDS; do
             echo "Deleting old GHCR version: $id"
-            gh api -X DELETE /users/link-seek/packages/container/eap-backend/versions/$id || true
+            gh api -X DELETE /orgs/link-seek/packages/container/eap-backend/versions/$id || true
           done
 
       - name: Trigger deploy via repository_dispatch
