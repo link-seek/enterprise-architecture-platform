@@ -57,5 +57,20 @@ jobs:
       frontend-url: https://www.xieyucheng.top
       api-url: https://api.xieyucheng.top
       issue-repo: link-seek/enterprise-architecture-platform
-      deploy-script: /opt/eap/eap-autodeploy.sh
+      deploy-script: |
+        IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPO}:${IMAGE_TAG}"
+        podman pull "$IMAGE"
+        podman stop eap-backend 2>/dev/null || true
+        podman rm eap-backend 2>/dev/null || true
+        podman run -d --name eap-backend --replace \
+          -p 8080:8080 \
+          -v /opt/eap/data:/app/data \
+          -e APP_ENV=production \
+          -e APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc \
+          -e APP_LLM__BACKEND=llm \
+          -e APP_SEED_ADMIN_EMAIL=xieyucheng@outlook.com \
+          -e APP_SEED_ADMIN_PASSWORD=***REDACTED*** \
+          -e RUST_LOG=info,sqlx::pool=warn \
+          "$IMAGE"
+        nohup podman logs -f eap-backend >> /var/log/eap/backend.log 2>&1 &
     secrets: inherit
