@@ -17,6 +17,7 @@ risk_detection:
     - "alembic"
     - "diesel"
     - "/entit"
+    - "\\.github/workflows/"
 
 # 测试 — 如何运行消费仓的测试
 test:
