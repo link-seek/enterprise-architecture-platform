@@ -34,7 +34,7 @@ test.describe('Authentication - Protected Routes', () => {
     for (const r of routes) {
       await page.goto(r.url);
       await expect(page).toHaveURL(r.url);
-      await expect(page.getByText(r.text)).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText(r.text).first()).toBeVisible({ timeout: 5000 });
     }
   });
 
