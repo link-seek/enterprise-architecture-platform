@@ -13,9 +13,10 @@ echo "=== Deploying ${IMAGE} ==="
 
 podman pull "$IMAGE"
 
+podman rm -f "$CONTAINER_NAME" 2>/dev/null || true
+
 podman run -d \
   --name "$CONTAINER_NAME" \
-  --replace \
   --restart=unless-stopped \
   -p 8080:8080 \
   -v /opt/eap/data:/app/data \
