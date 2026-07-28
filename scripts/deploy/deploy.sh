@@ -13,10 +13,21 @@ echo "=== Deploying ${IMAGE} ==="
 
 podman pull "$IMAGE"
 
+# Remove old container — handle stuck conmon scenarios
 podman rm -f "$CONTAINER_NAME" 2>/dev/null || true
+if podman container exists "$CONTAINER_NAME" 2>/dev/null; then
+  echo "Container stuck, cleaning up storage..."
+  CID=$(podman inspect "$CONTAINER_NAME" --format '{{.Id}}' 2>/dev/null || true)
+  podman system prune -f --external 2>/dev/null || true
+  if [ -n "$CID" ] && [ -d "/var/lib/containers/storage/overlay-containers/${CID}" ]; then
+    rm -rf "/var/lib/containers/storage/overlay-containers/${CID}" 2>/dev/null || true
+  fi
+  podman rm -f "$CONTAINER_NAME" 2>/dev/null || true
+fi
 
 podman run -d \
   --name "$CONTAINER_NAME" \
+  --replace \
   --restart=unless-stopped \
   -p 8080:8080 \
   -v /opt/eap/data:/app/data \
