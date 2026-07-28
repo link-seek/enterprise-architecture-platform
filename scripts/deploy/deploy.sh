@@ -33,7 +33,6 @@ podman run -d \
   -v /opt/eap/data:/app/data \
   -e APP_ENV=production \
   -e APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc \
-  -e APP_LLM__BACKEND=llm \
   -e APP_SEED_ADMIN_EMAIL="${APP_SEED_ADMIN_EMAIL}" \
   -e APP_SEED_ADMIN_PASSWORD="${APP_SEED_ADMIN_PASSWORD}" \
   -e RUST_LOG=info,sqlx::pool=warn \
