@@ -29,7 +29,7 @@ podman run -d \
   --name "$CONTAINER_NAME" \
   --replace \
   --restart=unless-stopped \
-  -p 8080:8080 \
+  --network=host \
   -v /opt/eap/data:/app/data \
   -e APP_ENV=production \
   -e APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc \
