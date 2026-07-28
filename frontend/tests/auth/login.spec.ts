@@ -7,7 +7,7 @@ test.describe('Authentication - Login', () => {
     await ensureLoggedOut(page);
   });
 
-  test('Happy Path - User Login', async ({ page }) => {
+  test('Happy Path - User Login', { tag: '@smoke' }, async ({ page }) => {
     await page.goto('/login');
     
     await expect(page.getByText('企业架构平台')).toBeVisible();
@@ -24,7 +24,7 @@ test.describe('Authentication - Login', () => {
     await expect(page.getByRole('button', { name: '退出登录' })).toBeVisible();
   });
 
-  test('Edge Case - Invalid Login Credentials', async ({ page }) => {
+  test('Edge Case - Invalid Login Credentials', { tag: '@smoke' }, async ({ page }) => {
     await page.goto('/login');
     
     await page.fill('input[type="email"]', 'wrong@example.com');
@@ -35,12 +35,12 @@ test.describe('Authentication - Login', () => {
     await expect(page).toHaveURL('/login');
   });
 
-  test('Happy Path - User Logout', async ({ page }) => {
+  test('Happy Path - User Logout', { tag: '@smoke' }, async ({ page }) => {
     await login(page);
     await logout(page);
   });
 
-  test('Edge Case - Protected Route Access', async ({ page }) => {
+  test('Edge Case - Protected Route Access', { tag: '@smoke' }, async ({ page }) => {
     await page.goto('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
     await expect(page).toHaveURL('/login');
     await expect(page.getByText('企业架构平台')).toBeVisible();
