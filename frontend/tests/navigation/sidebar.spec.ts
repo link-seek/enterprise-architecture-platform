@@ -7,7 +7,7 @@ test.describe('Navigation & Layout - Sidebar', () => {
     await login(page);
   });
 
-  test('Happy Path - Sidebar Navigation', async ({ page }) => {
+  test('Happy Path - Sidebar Navigation', { tag: '@smoke' }, async ({ page }) => {
     // Verify sidebar contains 3 main items
     await expect(page.getByRole('link', { name: '价值流' })).toBeVisible();
     await expect(page.getByRole('link', { name: '业务能力' })).toBeVisible();
@@ -42,7 +42,7 @@ test.describe('Navigation & Layout - Sidebar', () => {
     await expect(page.getByRole('heading', { name: /价值流/ }).first()).toBeVisible();
   });
 
-  test('Happy Path - Breadcrumb/Back Navigation', async ({ page }) => {
+  test('Happy Path - Breadcrumb/Back Navigation', { tag: '@smoke' }, async ({ page }) => {
     // First, ensure we have at least one value stream
     // This test assumes there's at least one value stream in the system
     // We'll check for the "查看" button on the first row
@@ -84,7 +84,7 @@ test.describe('Navigation & Layout - Sidebar', () => {
     }
   });
 
-  test('Sidebar User Profile Display', async ({ page }) => {
+  test('Sidebar User Profile Display', { tag: '@smoke' }, async ({ page }) => {
     // Verify sidebar shows user info after login
     await expect(page.getByText(TEST_EMAIL)).toBeVisible();
     
@@ -92,7 +92,7 @@ test.describe('Navigation & Layout - Sidebar', () => {
     await expect(page.getByRole('button', { name: '退出登录' })).toBeVisible();
   });
 
-  test('Responsive Sidebar Behavior', async ({ page }) => {
+  test('Responsive Sidebar Behavior', { tag: '@smoke' }, async ({ page }) => {
     // Test on different viewport sizes
     const viewports = [
       { width: 1280, height: 720 }, // Desktop
@@ -120,7 +120,7 @@ test.describe('Navigation & Layout - Sidebar', () => {
     }
   });
 
-  test('Keyboard Navigation in Sidebar', async ({ page }) => {
+  test('Keyboard Navigation in Sidebar', { tag: '@smoke' }, async ({ page }) => {
     // Test keyboard accessibility - verify Tab cycles through focusable elements
     const sidebarLinks = ['价值流', '业务能力', '业务流程'];
     
