@@ -1,4 +1,4 @@
-name: Diagnose ECS
+name: Diagnose ECS2
 on: workflow_dispatch
 jobs:
   diag:
@@ -7,7 +7,9 @@ jobs:
       - run: |
           echo "=== podman ps ==="
           podman ps -a --filter name=eap-backend
-          echo "=== podman logs (last 50) ==="
-          podman logs eap-backend --tail 50 2>&1 || true
+          echo "=== podman logs ==="
+          podman logs --tail 50 eap-backend 2>&1 || true
           echo "=== curl localhost ==="
-          curl -sf http://localhost:8080/health 2>&1 || echo "FAILED"
+          curl -sv http://localhost:8080/health 2>&1 || echo "FAILED"
+          echo "=== podman inspect ==="
+          podman inspect eap-backend --format '{{.State.Status}} {{.State.ExitCode}} {{.State.Error}}' 2>&1 || true
