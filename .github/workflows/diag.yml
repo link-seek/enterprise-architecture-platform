@@ -1,15 +1,17 @@
-name: Diagnose ECS2
+name: Restart ECS
 on: workflow_dispatch
 jobs:
-  diag:
+  restart:
     runs-on: eap-prod
     steps:
       - run: |
-          echo "=== podman ps ==="
-          podman ps -a --filter name=eap-backend
-          echo "=== podman logs ==="
-          podman logs --tail 50 eap-backend 2>&1 || true
-          echo "=== curl localhost ==="
-          curl -sv http://localhost:8080/health 2>&1 || echo "FAILED"
-          echo "=== podman inspect ==="
-          podman inspect eap-backend --format '{{.State.Status}} {{.State.ExitCode}} {{.State.Error}}' 2>&1 || true
+          echo "=== podman top ==="
+          podman top eap-backend aux 2>&1 || true
+          echo "=== restart ==="
+          podman restart eap-backend
+          sleep 5
+          echo "=== logs after restart ==="
+          podman logs --tail 20 eap-backend 2>&1
+          echo "=== curl test ==="
+          sleep 3
+          curl -sf http://localhost:8080/health 2>&1 || echo "FAILED"
