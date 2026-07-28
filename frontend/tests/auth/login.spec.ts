@@ -17,8 +17,11 @@ test.describe('Authentication - Login', () => {
     await page.fill('input[type="password"]', TEST_PASSWORD);
     await page.press('input[type="password"]', 'Enter');
     
-    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams', { timeout: 10000 });
-    await expect(page.getByText('E2E Test 3')).toBeVisible({ timeout: 5000 });
+    // Login success: sidebar nav items + logout button visible
+    await expect(page.getByRole('link', { name: '价值流' })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('link', { name: '业务能力' })).toBeVisible();
+    await expect(page.getByRole('link', { name: '业务流程' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '退出登录' })).toBeVisible();
   });
 
   test('Edge Case - Invalid Login Credentials', async ({ page }) => {

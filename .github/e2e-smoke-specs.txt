@@ -1,0 +1,5 @@
+# Smoke test specs — run after production deploy (non-destructive only)
+# Only read-only / auth tests, no CRUD that could pollute production data
+tests/auth/login.spec.ts
+tests/auth/protected-routes.spec.ts
+tests/navigation/sidebar.spec.ts

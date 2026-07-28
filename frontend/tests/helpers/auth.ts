@@ -1,13 +1,14 @@
 // Shared test helpers for E2E tests
 import { Page, expect } from '@playwright/test';
 
-// Test credentials - register a fresh user if needed before test suite
-export const TEST_EMAIL = 'e2e3@test.com';
-export const TEST_PASSWORD = 'e2e123456';
-export const TEST_NAME = 'E2E Test 3';
+// Test credentials — env-driven for multi-environment reuse
+// Defaults work for local dev; CI/prod pass E2E_TEST_EMAIL etc.
+export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || 'e2e3@test.com';
+export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || 'e2e123456';
+export const TEST_NAME = process.env.E2E_TEST_NAME || 'E2E Test 3';
 
-// Test space id mirrors backend migration TEST_SPACE_ID.
-export const TEST_SPACE_ID = '00000000-0000-0000-0000-000000000010';
+// Test space id — env-driven, mirrors backend migration TEST_SPACE_ID.
+export const TEST_SPACE_ID = process.env.E2E_TEST_SPACE_ID || '00000000-0000-0000-0000-000000000010';
 export const SPACE_BASE = `/spaces/${TEST_SPACE_ID}/architectures`;
 
 /**
@@ -19,7 +20,8 @@ export async function login(page: Page) {
   await page.fill('input[type="email"]', TEST_EMAIL);
   await page.fill('input[type="password"]', TEST_PASSWORD);
   await page.press('input[type="password"]', 'Enter');
-  await expect(page).toHaveURL(`${SPACE_BASE}/value-streams`, { timeout: 10000 });
+  // Login success: sidebar visible (environment-agnostic)
+  await expect(page.getByRole('link', { name: '价值流' })).toBeVisible({ timeout: 10000 });
 }
 
 /**
