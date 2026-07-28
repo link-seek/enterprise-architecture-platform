@@ -8,32 +8,51 @@ set -euo pipefail
 
 CONTAINER_NAME="eap-backend"
 IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPO}:${IMAGE_TAG}"
+SERVICE_FILE="/etc/systemd/system/eap-backend.service"
 
 echo "=== Deploying ${IMAGE} ==="
 
 podman pull "$IMAGE"
 
-# Remove old container — handle stuck conmon scenarios
+# Stop existing service
+systemctl stop eap-backend 2>/dev/null || true
 podman rm -f "$CONTAINER_NAME" 2>/dev/null || true
-if podman container exists "$CONTAINER_NAME" 2>/dev/null; then
-  echo "Container stuck, cleaning up storage..."
-  CID=$(podman inspect "$CONTAINER_NAME" --format '{{.Id}}' 2>/dev/null || true)
-  podman system prune -f --external 2>/dev/null || true
-  if [ -n "$CID" ] && [ -d "/var/lib/containers/storage/overlay-containers/${CID}" ]; then
-    rm -rf "/var/lib/containers/storage/overlay-containers/${CID}" 2>/dev/null || true
-  fi
-  podman rm -f "$CONTAINER_NAME" 2>/dev/null || true
-fi
 
-podman run -d \
-  --name "$CONTAINER_NAME" \
-  --replace \
-  --restart=unless-stopped \
-  --network=host \
-  -v /opt/eap/data:/app/data \
-  -e APP_ENV=production \
-  -e APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc \
-  -e APP_SEED_ADMIN_EMAIL="${APP_SEED_ADMIN_EMAIL}" \
-  -e APP_SEED_ADMIN_PASSWORD="${APP_SEED_ADMIN_PASSWORD}" \
-  -e RUST_LOG=info,sqlx::pool=warn \
-  "$IMAGE"
+# Create systemd service that runs podman in foreground
+# This avoids conmon dying and leaving the container unresponsive
+cat > "$SERVICE_FILE" << EOF
+[Unit]
+Description=EAP Backend (Podman)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/podman rm -f ${CONTAINER_NAME}
+ExecStart=/usr/bin/podman run --name ${CONTAINER_NAME} --network=host -v /opt/eap/data:/app/data -e APP_ENV=production -e APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc -e APP_SEED_ADMIN_EMAIL=${APP_SEED_ADMIN_EMAIL} -e APP_SEED_ADMIN_PASSWORD=${APP_SEED_ADMIN_PASSWORD} -e RUST_LOG=info,sqlx::pool=warn ${IMAGE}
+ExecStop=/usr/bin/podman stop ${CONTAINER_NAME}
+Restart=always
+RestartSec=5
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable eap-backend
+systemctl restart eap-backend
+
+# Wait for health check
+echo "=== Waiting for backend to start ==="
+for i in $(seq 1 15); do
+  if curl -sf http://localhost:8080/health 2>/dev/null; then
+    echo ""
+    echo "Backend healthy!"
+    exit 0
+  fi
+  echo "Waiting... ($i/15)"
+  sleep 2
+done
+echo "ERROR: Health check failed after 30s"
+exit 1
