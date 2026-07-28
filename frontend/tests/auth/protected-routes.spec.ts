@@ -7,7 +7,7 @@ test.describe('Authentication - Protected Routes', () => {
     await ensureLoggedOut(page);
   });
 
-  test('Unauthenticated user redirected from protected routes', async ({ page }) => {
+  test('Unauthenticated user redirected from protected routes', { tag: '@smoke' }, async ({ page }) => {
     const protectedRoutes = [
       `${SPACE_BASE}/value-streams`,
       `${SPACE_BASE}/capabilities`,
@@ -22,7 +22,7 @@ test.describe('Authentication - Protected Routes', () => {
     }
   });
 
-  test('Authenticated user can access protected routes', async ({ page }) => {
+  test('Authenticated user can access protected routes', { tag: '@smoke' }, async ({ page }) => {
     await login(page);
 
     const routes = [
@@ -38,7 +38,7 @@ test.describe('Authentication - Protected Routes', () => {
     }
   });
 
-  test('Session persistence across navigation', async ({ page }) => {
+  test('Session persistence across navigation', { tag: '@smoke' }, async ({ page }) => {
     await login(page);
 
     await page.goto(`${SPACE_BASE}/capabilities`);
@@ -51,7 +51,7 @@ test.describe('Authentication - Protected Routes', () => {
     await expect(page).toHaveURL(`${SPACE_BASE}/value-streams`);
   });
 
-  test('Manual token removal triggers logout', async ({ page }) => {
+  test('Manual token removal triggers logout', { tag: '@smoke' }, async ({ page }) => {
     await login(page);
 
     await page.evaluate(() => localStorage.removeItem('access_token'));
