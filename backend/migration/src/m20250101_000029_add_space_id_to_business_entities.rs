@@ -18,7 +18,12 @@ use sea_orm_migration::prelude::*;
 
 /// Fixed UUID of the seeded "测试空间" (test space). Existing data is
 /// backfilled into this space, and the runtime seed makes the admin its owner.
+///
+/// Stored as a binary literal for SQLite (`X'…'`, 16 bytes) to match the
+/// `Uuid` column type expected by SeaORM.  Using a string literal here would
+/// store a 36-byte `text` value that SeaORM cannot decode as a binary UUID.
 pub const TEST_SPACE_ID: &str = "00000000-0000-0000-0000-000000000010";
+const TEST_SPACE_ID_BIN: &str = "X'00000000000000000000000000000010'";
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -30,11 +35,12 @@ impl MigrationTrait for Migration {
         let now = "2020-01-01 00:00:00";
 
         // Step 1: ensure the test space exists (idempotent).
+        // Use binary literal (X'...') to match SeaORM's Uuid column type.
         let insert_space = format!(
             r#"INSERT INTO "organizations" ("id","name","created_at","updated_at")
-               VALUES ('{id}','测试空间','{now}','{now}')
+               VALUES ({bin},'测试空间','{now}','{now}')
                ON CONFLICT ("id") DO NOTHING"#,
-            id = TEST_SPACE_ID,
+            bin = TEST_SPACE_ID_BIN,
             now = now
         );
         db.execute_unprepared(&insert_space).await?;
@@ -48,8 +54,9 @@ impl MigrationTrait for Migration {
         // Step 3: backfill existing rows to the test space.
         for table in &["value_streams", "business_capabilities", "business_processes"] {
             let sql = format!(
-                r#"UPDATE "{table}" SET "space_id" = '{id}' WHERE "space_id" IS NULL"#,
-                id = TEST_SPACE_ID
+                r#"UPDATE "{table}" SET "space_id" = {bin} WHERE "space_id" IS NULL"#,
+                table = table,
+                bin = TEST_SPACE_ID_BIN,
             );
             db.execute_unprepared(&sql).await?;
         }
