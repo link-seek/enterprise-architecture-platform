@@ -17,8 +17,13 @@ permissions:
   discussions: write
 
 jobs:
-  auto-resolve:
-    uses: link-seek/issue-resolver/.github/workflows/auto-resolve.yml@main
+  resolve:
+    if: github.event.label.name == 'fix-me'
+    uses: link-seek/issue-resolver/.github/workflows/resolve.yml@main
     with:
-      trigger-label: "fix-me"
+      issue-number: ${{ github.event.issue.number }}
+    secrets: inherit
+
+  discuss:
+    uses: link-seek/issue-resolver/.github/workflows/auto-resolve.yml@main
     secrets: inherit
