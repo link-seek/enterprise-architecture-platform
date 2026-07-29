@@ -1,7 +1,11 @@
 import { Link } from 'react-router-dom'
+import { useQuery } from '@apollo/client/react'
+import { LayoutGrid, ArrowRight } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { GET_SPACES, GET_SPACE_STATS, TEST_SPACE_ID } from '@/api/spaces'
+import type { Space, SpaceStats } from '@/api/spaces'
 
 const features = [
   {
@@ -74,11 +78,26 @@ const features = [
 export default function Home() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
 
+  const { data: spacesData, loading: spacesLoading, error: spacesError } = useQuery<{
+    organizations: { nodes: Space[] }
+  }>(GET_SPACES)
+  const { data: statsData } = useQuery<SpaceStats>(GET_SPACE_STATS, {
+    variables: { spaceId: TEST_SPACE_ID },
+  })
+
+  const spaces = spacesData?.organizations?.nodes ?? []
+  const stats = [
+    { label: '空间', value: spaces.length },
+    { label: '价值流', value: statsData?.valueStreams?.paginationInfo?.total ?? 0 },
+    { label: '业务能力', value: statsData?.businessCapabilities?.paginationInfo?.total ?? 0 },
+    { label: '业务流程', value: statsData?.businessProcesses?.paginationInfo?.total ?? 0 },
+  ]
+
   return (
     <div className="min-h-screen bg-secondary flex flex-col">
       <header className="border-b bg-background">
         <div className="container mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-          <span className="text-lg font-semibold">技术实验与学习成果展示</span>
+          <span className="text-lg font-semibold">企业架构平台</span>
           <Link to={isAuthenticated ? '/spaces' : '/login'}>
             <Button variant={isAuthenticated ? 'default' : 'outline'}>
               {isAuthenticated ? '进入平台' : '登录'}
@@ -90,19 +109,19 @@ export default function Home() {
       <main className="flex-1">
         <section className="container mx-auto max-w-6xl px-4 py-16 md:py-24 text-center">
           <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
-            技术实验与学习成果展示
+            企业架构平台
           </h1>
           <p className="mt-2 text-base md:text-lg text-muted-foreground">
-            个人技术项目展示 · Rust + React 全栈应用
+            从战略到执行的企业架构建模与协同平台
           </p>
           <p className="mx-auto mt-6 max-w-2xl text-base md:text-lg text-muted-foreground">
-            一体化的企业架构建模与管理平台，帮助您梳理价值流、规划业务能力、编排业务流程，
-            实现从战略到执行的端到端可视化与协同。
+            一体化的企业架构建模与协同平台，帮助您梳理价值流、规划业务能力、编排业务流程，
+            实现战略对齐、端到端可视化与决策支撑。
           </p>
           <div className="mt-8 flex items-center justify-center gap-4">
             <Link to="/spaces">
               <Button size="lg">
-                浏览空间
+                浏览架构空间
               </Button>
             </Link>
             {!isAuthenticated && (
@@ -126,7 +145,7 @@ export default function Home() {
           className="container mx-auto max-w-6xl px-4 pb-20 md:pb-28"
         >
           <h2 className="text-center text-2xl md:text-3xl font-semibold tracking-tight">
-            核心模块
+            平台能力
           </h2>
           <p className="mt-3 text-center text-muted-foreground">
             三大模块协同工作，覆盖企业架构的核心场景
@@ -150,11 +169,77 @@ export default function Home() {
             ))}
           </div>
         </section>
+
+        <section className="container mx-auto max-w-6xl px-4 pb-20 md:pb-28">
+          <h2 className="text-center text-2xl md:text-3xl font-semibold tracking-tight">
+            架构概览
+          </h2>
+          <p className="mt-3 text-center text-muted-foreground">
+            来自真实企业架构案例的数据
+          </p>
+
+          <div className="mt-10 grid grid-cols-2 gap-4 md:grid-cols-4">
+            {stats.map((item) => (
+              <Card key={item.label}>
+                <CardContent className="p-6 text-center">
+                  <p className="text-3xl font-bold">{item.value}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{item.label}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {spacesLoading && (
+            <div className="mt-10 text-center text-muted-foreground">加载中...</div>
+          )}
+          {spacesError && (
+            <div className="mt-10 text-center text-destructive">加载失败: {spacesError.message}</div>
+          )}
+
+          <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {spaces.map((space) => (
+              <Link key={space.id} to={`/spaces/${space.id}`}>
+                <Card className="h-full hover:shadow-md transition-shadow">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <LayoutGrid className="h-4 w-4 text-muted-foreground" />
+                      {space.name}
+                    </CardTitle>
+                    <CardDescription>
+                      {space.description || '暂无描述'}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-xs text-muted-foreground">
+                      创建于 {new Date(space.createdAt).toLocaleDateString()}
+                    </p>
+                  </CardContent>
+                </Card>
+              </Link>
+            ))}
+            {!spacesLoading && !spacesError && spaces.length === 0 && (
+              <div className="col-span-full text-center py-16 text-muted-foreground">
+                暂无空间
+              </div>
+            )}
+          </div>
+
+          {!spacesLoading && !spacesError && spaces.length > 0 && (
+            <div className="mt-10 text-center">
+              <Link to="/spaces">
+                <Button variant="outline">
+                  查看全部空间
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </Button>
+              </Link>
+            </div>
+          )}
+        </section>
       </main>
 
       <footer className="border-t bg-background">
         <div className="container mx-auto max-w-6xl px-4 py-6 text-center text-sm text-muted-foreground">
-          © {new Date().getFullYear()} 技术实验与学习成果展示 · 个人技术项目
+          © {new Date().getFullYear()} 企业架构平台 · 个人技术项目
           <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer" className="hover:text-foreground ml-2">
             粤ICP备2025471124号
           </a>
