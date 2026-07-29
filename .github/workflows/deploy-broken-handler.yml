@@ -4,6 +4,11 @@ on:
   issues:
     types: [labeled]
 
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
 jobs:
   handle:
     uses: link-seek/issue-resolver/.github/workflows/deploy-broken-handler.yml@main
