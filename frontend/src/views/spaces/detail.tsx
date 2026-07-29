@@ -1,37 +1,16 @@
 import { useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client/react'
-import { gql } from '@apollo/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Pencil, Archive, LogIn, ArrowLeft, Users } from 'lucide-react'
-import { GET_SPACE, ARCHIVE_SPACE, GET_SPACES } from '@/api/spaces'
-import type { Space } from '@/api/spaces'
+import { GET_SPACE, ARCHIVE_SPACE, GET_SPACES, GET_SPACE_STATS } from '@/api/spaces'
+import type { Space, SpaceStats } from '@/api/spaces'
 import { useAuthStore } from '@/stores/auth'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { SpaceEditDialog } from './crud'
 import { SpaceMembersDialog } from './members'
-
-const GET_SPACE_STATS = gql`
-  query GetSpaceStats($spaceId: String!) {
-    valueStreams(filters: { spaceId: { eq: $spaceId } }) {
-      paginationInfo { total }
-    }
-    businessCapabilities(filters: { spaceId: { eq: $spaceId } }) {
-      paginationInfo { total }
-    }
-    businessProcesses(filters: { spaceId: { eq: $spaceId } }) {
-      paginationInfo { total }
-    }
-  }
-`
-
-interface Stats {
-  valueStreams: { paginationInfo: { total: number } }
-  businessCapabilities: { paginationInfo: { total: number } }
-  businessProcesses: { paginationInfo: { total: number } }
-}
 
 export default function SpaceDetail() {
   const { spaceId } = useParams<{ spaceId: string }>()
@@ -45,7 +24,7 @@ export default function SpaceDetail() {
     variables: { id: spaceId },
     skip: !spaceId,
   })
-  const { data: stats } = useQuery<Stats>(GET_SPACE_STATS, {
+  const { data: stats } = useQuery<SpaceStats>(GET_SPACE_STATS, {
     variables: { spaceId },
     skip: !spaceId,
   })

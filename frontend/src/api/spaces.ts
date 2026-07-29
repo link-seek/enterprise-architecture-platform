@@ -61,6 +61,20 @@ export const GET_SPACE_MEMBERS = gql`
   }
 `
 
+export const GET_SPACE_STATS = gql`
+  query GetSpaceStats($spaceId: String!) {
+    valueStreams(filters: { spaceId: { eq: $spaceId } }) {
+      paginationInfo { total }
+    }
+    businessCapabilities(filters: { spaceId: { eq: $spaceId } }) {
+      paginationInfo { total }
+    }
+    businessProcesses(filters: { spaceId: { eq: $spaceId } }) {
+      paginationInfo { total }
+    }
+  }
+`
+
 // ============================================================================
 // Mutations
 // ============================================================================
@@ -122,6 +136,12 @@ export interface SpaceMember {
   userId: string
   name: string
   role: 'owner' | 'editor'
+}
+
+export interface SpaceStats {
+  valueStreams: { paginationInfo: { total: number } }
+  businessCapabilities: { paginationInfo: { total: number } }
+  businessProcesses: { paginationInfo: { total: number } }
 }
 
 // Fixed UUID of the seeded "测试空间" (test space) that owns pre-existing
