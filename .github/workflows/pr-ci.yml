@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   pr-ci:
     uses: link-seek/issue-resolver/.github/workflows/pr-ci.yml@main
