@@ -36,6 +36,15 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
         visibility: SpaceVisibility,
     ) -> Result<Space, DomainError> {
         if !creator_role.is_admin() {
+            // NOTE: This is a best-effort soft quota. `count_owned_by` and the
+            // subsequent `save` + `members.add` are independent async operations
+            // with no shared transaction or lock, so concurrent create requests
+            // by the same user can all pass this check before any of them
+            // inserts. Enforcing a hard limit would require transactional
+            // check-and-insert, which the repository traits do not expose; the
+            // accepted race is bounded (a user could exceed the limit by at
+            // most the number of concurrent requests) and admins remain
+            // unlimited.
             let owned = self.spaces.count_owned_by(creator_id).await?;
             if owned >= SPACE_QUOTA_LIMIT {
                 return Err(DomainError::SpaceQuotaExceeded);
@@ -94,27 +103,31 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
         self.ensure_can_manage(space_id, actor_id, actor_role).await?;
         let mut space = self.spaces.find_by_id(space_id).await?.ok_or(DomainError::SpaceNotFound)?;
         let from = space.visibility;
+        // No-op when the visibility is unchanged: skip the write (and the
+        // audit log) to avoid a meaningless database update and an unnecessary
+        // bump of `updated_at`.
+        if from == visibility {
+            return Ok(space);
+        }
         let now = Utc::now();
         space.set_visibility(visibility, now);
         let saved = self.spaces.save(&space).await?;
 
-        if from != visibility {
-            let log = SpaceAuditLog::visibility_changed(
-                Uuid::now_v7(),
-                saved.id,
-                actor_id,
-                from.as_str(),
-                visibility.as_str(),
-                now,
+        let log = SpaceAuditLog::visibility_changed(
+            Uuid::now_v7(),
+            saved.id,
+            actor_id,
+            from.as_str(),
+            visibility.as_str(),
+            now,
+        );
+        if let Err(e) = self.audit.record(&log).await {
+            tracing::warn!(
+                error = %e,
+                space_id = %saved.id,
+                actor_id = %actor_id,
+                "failed to record space visibility audit log (best-effort)"
             );
-            if let Err(e) = self.audit.record(&log).await {
-                tracing::warn!(
-                    error = %e,
-                    space_id = %saved.id,
-                    actor_id = %actor_id,
-                    "failed to record space visibility audit log (best-effort)"
-                );
-            }
         }
         Ok(saved)
     }
@@ -157,6 +170,12 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
     /// Visibility-aware read guard. Admins always pass. Public spaces pass for
     /// anyone (including anonymous — callers pass a sentinel id/role for anon).
     /// Private spaces require membership.
+    ///
+    /// To avoid leaking the existence of private spaces to unauthorized
+    /// callers, both "space not found" and "private space the caller cannot
+    /// access" collapse to the same `SpaceNotFound` error for non-admins. An
+    /// attacker cannot distinguish a non-existent id from a private id they
+    /// are not a member of.
     pub async fn ensure_can_read(
         &self,
         space_id: Uuid,
@@ -174,13 +193,15 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
         if space.visibility.is_public() {
             return Ok(());
         }
-        // Private: require membership.
-        let actor_id = actor_id.ok_or(DomainError::SpacePrivate)?;
-        let m = self.members.find_membership(space_id, actor_id).await?;
-        if m.is_none() {
-            return Err(DomainError::SpacePrivate);
+        // Private: require membership. Any failure (anonymous caller or
+        // non-member) maps to SpaceNotFound so the existence of a private
+        // space is not revealed.
+        if let Some(actor_id) = actor_id {
+            if self.members.find_membership(space_id, actor_id).await?.is_some() {
+                return Ok(());
+            }
         }
-        Ok(())
+        Err(DomainError::SpaceNotFound)
     }
 
     /// Add a member to a space. Requires owner or admin. Prevents duplicates.
@@ -560,12 +581,12 @@ mod tests {
             .create_space(owner, UserRole::Architect, "S".into(), None, SpaceVisibility::Private)
             .await
             .unwrap();
-        // Anonymous denied.
+        // Anonymous denied (existence of private space is not revealed).
         let err = s.ensure_can_read(space.id, None, UserRole::Architect).await.unwrap_err();
-        assert!(matches!(err, DomainError::SpacePrivate));
+        assert!(matches!(err, DomainError::SpaceNotFound));
         // Logged-in non-member denied.
         let err = s.ensure_can_read(space.id, Some(stranger), UserRole::Architect).await.unwrap_err();
-        assert!(matches!(err, DomainError::SpacePrivate));
+        assert!(matches!(err, DomainError::SpaceNotFound));
     }
 
     #[tokio::test]
@@ -626,5 +647,21 @@ mod tests {
         // Admin can.
         let admin = Uuid::now_v7();
         s.set_visibility(space.id, admin, UserRole::Admin, SpaceVisibility::Public).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_visibility_noop_when_unchanged() {
+        let s = svc();
+        let owner = Uuid::now_v7();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
+        let original_updated_at = space.updated_at;
+        // Setting to the same visibility is a no-op: the returned space keeps
+        // its original updated_at (no save occurred).
+        let result = s
+            .set_visibility(space.id, owner, UserRole::Architect, SpaceVisibility::Public)
+            .await
+            .unwrap();
+        assert_eq!(result.updated_at, original_updated_at);
+        assert!(result.visibility.is_public());
     }
 }

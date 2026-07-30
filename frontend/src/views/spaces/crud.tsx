@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Loader2 } from 'lucide-react'
 import { CREATE_SPACE, UPDATE_SPACE, GET_SPACES } from '@/api/spaces'
-import type { Space } from '@/api/spaces'
+import type { Space, SpaceVisibility } from '@/api/spaces'
 
 export function SpaceCreateDialog({ open, onOpenChange }: {
   open: boolean
@@ -14,6 +14,7 @@ export function SpaceCreateDialog({ open, onOpenChange }: {
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [visibility, setVisibility] = useState<SpaceVisibility>('public')
   const [error, setError] = useState<string | null>(null)
 
   const [create, { loading }] = useMutation(CREATE_SPACE, {
@@ -21,6 +22,7 @@ export function SpaceCreateDialog({ open, onOpenChange }: {
     onCompleted: () => {
       setName('')
       setDescription('')
+      setVisibility('public')
       setError(null)
       onOpenChange(false)
     },
@@ -52,6 +54,18 @@ export function SpaceCreateDialog({ open, onOpenChange }: {
               placeholder="可选"
             />
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="space-visibility">可见性</Label>
+            <select
+              id="space-visibility"
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              value={visibility}
+              onChange={(e) => setVisibility(e.target.value as SpaceVisibility)}
+            >
+              <option value="public">公开</option>
+              <option value="private">私有</option>
+            </select>
+          </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
         <DialogFooter>
@@ -59,7 +73,7 @@ export function SpaceCreateDialog({ open, onOpenChange }: {
             取消
           </Button>
           <Button
-            onClick={() => create({ variables: { name, description: description || null } })}
+            onClick={() => create({ variables: { name, description: description || null, visibility } })}
             disabled={loading || !name.trim()}
           >
             {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}

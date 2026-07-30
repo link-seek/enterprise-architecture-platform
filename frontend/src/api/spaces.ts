@@ -80,7 +80,7 @@ export const GET_SPACE_STATS = gql`
 
 export const CREATE_SPACE = gql`
   ${SPACE_FIELDS}
-  mutation SpaceCreate($name: String!, $description: String, $visibility: String) {
+  mutation SpaceCreate($name: String!, $description: String, $visibility: String!) {
     spaceCreate(name: $name, description: $description, visibility: $visibility) {
       ...SpaceFields
     }

@@ -46,9 +46,10 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_space_audit_logs_space")
+                    .name("idx_space_audit_logs_space_created_at")
                     .table(SpaceAuditLogs::Table)
                     .col(SpaceAuditLogs::SpaceId)
+                    .col(SpaceAuditLogs::CreatedAt)
                     .to_owned(),
             )
             .await

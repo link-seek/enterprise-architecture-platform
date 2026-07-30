@@ -6,9 +6,11 @@ use sea_orm_migration::prelude::*;
 /// 'public'` so existing rows are backfilled to public with zero behavior
 /// change — anonymous browsing of previously-open spaces is preserved.
 ///
-/// Raw SQL is used so the migration works for both SQLite and Postgres:
-/// SQLite cannot add a `NOT NULL` column without a default in a single
-/// `ALTER TABLE`, and a `DEFAULT` clause on `ADD COLUMN` is the portable form.
+/// The column type is `VARCHAR(20)` to match the `SpaceVisibility` ActiveEnum
+/// definition (`db_type = "String(StringLen::N(20))"`). Raw SQL is used so the
+/// migration works for both SQLite and Postgres: SQLite cannot add a `NOT NULL`
+/// column without a default in a single `ALTER TABLE`, and a `DEFAULT` clause
+/// on `ADD COLUMN` is the portable form.
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -18,7 +20,7 @@ impl MigrationTrait for Migration {
         let db = manager.get_connection();
 
         db.execute_unprepared(
-            r#"ALTER TABLE "organizations" ADD COLUMN "visibility" TEXT NOT NULL DEFAULT 'public'"#,
+            r#"ALTER TABLE "organizations" ADD COLUMN "visibility" VARCHAR(20) NOT NULL DEFAULT 'public'"#,
         )
         .await?;
 

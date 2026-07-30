@@ -82,13 +82,19 @@ impl SpaceRepository for SeaOrmSpaceRepo {
         // Public non-deleted spaces ∪ private non-deleted spaces the user is a
         // member of. Built as: all non-deleted spaces where visibility=public OR
         // the user has a membership row. We load public spaces and member space
-        // ids separately and merge to keep the query portable across backends.
+        // ids separately and merge, rather than emitting a single OR query, to
+        // keep the logic simple and avoid backend-specific OR-condition quirks.
         let public = space::Entity::find()
             .filter(space::Column::DeletedAt.is_null())
             .filter(space::Column::Visibility.eq(SpaceVisibility::Public))
             .all(&self.db)
             .await?;
 
+        // Membership rows for archived spaces are included here, but the
+        // private_member query below filters by DeletedAt.is_null(), so stale
+        // ids never produce visible results. A join to exclude archived spaces
+        // at this stage would reduce the IN-clause size but is not required for
+        // correctness.
         let member_space_ids: Vec<Uuid> = space_member::Entity::find()
             .filter(space_member::Column::UserId.eq(user_id))
             .all(&self.db)

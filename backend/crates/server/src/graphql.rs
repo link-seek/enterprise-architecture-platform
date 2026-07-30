@@ -738,11 +738,21 @@ fn parse_uuid_arg<'a>(ctx: &'a async_graphql::dynamic::ResolverContext<'a>, name
     Uuid::parse_str(s).map_err(|e| async_graphql::Error::new(format!("Invalid UUID for {name}: {e}")))
 }
 
-/// Parse an optional `visibility` enum argument, defaulting to `Public`.
-fn parse_visibility_arg(ctx: &async_graphql::dynamic::ResolverContext<'_>, name: &str) -> SpaceVisibility {
+/// Parse a `visibility` argument into `SpaceVisibility`. Returns an error for
+/// unrecognized values instead of silently defaulting to `Public`, so a typo
+/// (e.g. `"Private"`, `"PRIVATE"`, `"internal"`) surfaces as a GraphQL error
+/// rather than silently widening a private space to public.
+fn parse_visibility_arg(
+    ctx: &async_graphql::dynamic::ResolverContext<'_>,
+    name: &str,
+) -> Result<SpaceVisibility, async_graphql::Error> {
     match ctx.args.get(name).and_then(|v| v.string().ok()) {
-        Some("private") => SpaceVisibility::Private,
-        _ => SpaceVisibility::Public,
+        Some("public") => Ok(SpaceVisibility::Public),
+        Some("private") => Ok(SpaceVisibility::Private),
+        Some(other) => Err(async_graphql::Error::new(format!(
+            "Invalid visibility value '{other}': expected 'public' or 'private'"
+        ))),
+        None => Ok(SpaceVisibility::Public),
     }
 }
 
@@ -772,7 +782,15 @@ fn domain_err_to_graphql(e: DomainError) -> async_graphql::Error {
         DomainError::NotSpaceOwner => "FORBIDDEN_SPACE_NOT_OWNER",
         DomainError::SpaceQuotaExceeded => "SPACE_QUOTA_EXCEEDED",
         DomainError::SpaceNotFound => "SPACE_NOT_FOUND",
-        _ => "FORBIDDEN",
+        DomainError::ProcessNotFound | DomainError::ValueStreamNotFound
+        | DomainError::ProcessVersionNotFound | DomainError::CapabilityNotFound
+        | DomainError::InvitationNotFound => "NOT_FOUND",
+        DomainError::SpaceNameEmpty | DomainError::Validation(_) => "VALIDATION_ERROR",
+        DomainError::Semver(_) => "SEMVER_ERROR",
+        DomainError::Database(_) => "INTERNAL_ERROR",
+        DomainError::InvalidTransition { .. } | DomainError::CannotModifyArchived { .. }
+        | DomainError::CannotReferenceArchived | DomainError::AlreadyMember
+        | DomainError::CannotRemoveLastOwner | DomainError::NotOwner => "FORBIDDEN",
     };
     graphql_err_with_code(&e, code)
 }
@@ -790,7 +808,7 @@ fn register_space_domain_mutations(builder: &mut Builder) {
                 let db = ctx.data::<DatabaseConnection>()?;
                 let name = ctx.args.try_get("name")?.string()?.to_owned();
                 let description = ctx.args.get("description").and_then(|v| v.string().ok()).map(|s| s.to_owned());
-                let visibility = parse_visibility_arg(&ctx, "visibility");
+                let visibility = parse_visibility_arg(&ctx, "visibility")?;
 
                 let service = space_service(db);
                 let space_obj = service
@@ -848,7 +866,7 @@ fn register_space_domain_mutations(builder: &mut Builder) {
                 let claims = require_claims(&ctx)?;
                 let db = ctx.data::<DatabaseConnection>()?;
                 let space_id = parse_uuid_arg(&ctx, "id")?;
-                let visibility = parse_visibility_arg(&ctx, "visibility");
+                let visibility = parse_visibility_arg(&ctx, "visibility")?;
                 let service = space_service(db);
                 let space_obj = service
                     .set_visibility(space_id, claims.user_id, claims.user_role(), visibility)
@@ -2143,7 +2161,12 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                     .ensure_can_read(space_id, actor_id, actor_role)
                     .await
                     .map_err(domain_err_to_graphql)?;
-                let row = value_stream::Entity::find_by_id(id)
+                // Filter by both id and SpaceId so a caller with read access to
+                // one space cannot fetch a value stream belonging to a different
+                // space by guessing its id.
+                let row = value_stream::Entity::find()
+                    .filter(value_stream::Column::Id.eq(id))
+                    .filter(value_stream::Column::SpaceId.eq(space_id))
                     .one(db)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;

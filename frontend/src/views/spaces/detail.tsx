@@ -20,7 +20,7 @@ export default function SpaceDetail() {
   const [editOpen, setEditOpen] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
 
-  const { data, loading, error } = useQuery<{ organizations: { nodes: Space[] } }>(GET_SPACE, {
+  const { data, loading, error } = useQuery<{ spaceById: Space | null }>(GET_SPACE, {
     variables: { id: spaceId },
     skip: !spaceId,
   })
@@ -34,16 +34,16 @@ export default function SpaceDetail() {
     onCompleted: () => navigate('/spaces'),
   })
 
-  const space = data?.organizations?.nodes?.[0]
+  const space = data?.spaceById
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">加载中...</div>
   if (error) return <div className="min-h-screen flex items-center justify-center text-destructive">加载失败: {error.message}</div>
   if (!space) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">空间不存在</div>
 
   const statsItems = [
-    { label: '价值流', value: stats?.valueStreams?.paginationInfo?.total ?? 0, to: 'value-streams' },
-    { label: '业务能力', value: stats?.businessCapabilities?.paginationInfo?.total ?? 0, to: 'capabilities' },
-    { label: '业务流程', value: stats?.businessProcesses?.paginationInfo?.total ?? 0, to: 'processes' },
+    { label: '价值流', value: stats?.valueStreamsBySpace?.length ?? 0, to: 'value-streams' },
+    { label: '业务能力', value: stats?.businessCapabilitiesBySpace?.length ?? 0, to: 'capabilities' },
+    { label: '业务流程', value: stats?.businessProcessesBySpace?.length ?? 0, to: 'processes' },
   ]
 
   return (
