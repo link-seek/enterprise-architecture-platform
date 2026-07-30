@@ -88,9 +88,9 @@ export default function Home() {
   const spaces = spacesData?.spaces ?? []
   const stats = [
     { label: '空间', value: spaces.length },
-    { label: '价值流', value: statsData?.valueStreamsBySpace?.length ?? 0 },
-    { label: '业务能力', value: statsData?.businessCapabilitiesBySpace?.length ?? 0 },
-    { label: '业务流程', value: statsData?.businessProcessesBySpace?.length ?? 0 },
+    { label: '价值流', value: statsData?.valueStreamCountBySpace ?? 0 },
+    { label: '业务能力', value: statsData?.businessCapabilityCountBySpace ?? 0 },
+    { label: '业务流程', value: statsData?.businessProcessCountBySpace ?? 0 },
   ]
 
   return (

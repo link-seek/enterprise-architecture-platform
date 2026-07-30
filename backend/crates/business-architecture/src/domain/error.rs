@@ -46,6 +46,8 @@ pub enum DomainError {
     },
     #[error("validation error: {0}")]
     Validation(String),
+    #[error("audit log persistence failed: {0}")]
+    AuditLogFailed(String),
     #[error("semver error: {0}")]
     Semver(String),
     #[error("database error: {0}")]

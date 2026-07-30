@@ -50,7 +50,7 @@ const GET_VALUE_STREAMS = gql`
 export function VersionHistoryDialog({ open, onOpenChange, spaceId, logicalId }: {
   open: boolean
   onOpenChange: (v: boolean) => void
-  spaceId?: string
+  spaceId: string
   logicalId: string | null
 }) {
   const { data, loading } = useQuery(GET_VALUE_STREAM_VERSIONS, {
@@ -113,7 +113,7 @@ export function CreateVersionDialog({ open, onOpenChange, currentItem, spaceId }
   open: boolean
   onOpenChange: (v: boolean) => void
   currentItem: { id: string; logicalId: string; name: string; description: string; businessVersion: string; importance: string } | null
-  spaceId?: string
+  spaceId: string
 }) {
   const [newVersion, setNewVersion] = useState('')
   const [loading, setLoading] = useState(false)
@@ -188,7 +188,7 @@ export function CreateVersionDialog({ open, onOpenChange, currentItem, spaceId }
 // Archive Button (inline)
 // ============================================================================
 
-export function ArchiveButton({ id, onArchived, spaceId }: { id: string; onArchived?: () => void; spaceId?: string }) {
+export function ArchiveButton({ id, onArchived, spaceId }: { id: string; onArchived?: () => void; spaceId: string }) {
   const [archiveMut] = useMutation(ARCHIVE_VALUE_STREAM, {
     refetchQueries: [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
   })

@@ -763,6 +763,7 @@ fn space_service(db: &DatabaseConnection) -> SpaceService<SeaOrmSpaceRepo, SeaOr
         SeaOrmMembershipRepo::new(db.clone()),
         SeaOrmAuditLogRepo::new(db.clone()),
     )
+    .with_strict_audit()
 }
 
 /// Wrap a `DomainError` as a GraphQL error with a semantic `extensions.code`.
@@ -788,6 +789,7 @@ fn domain_err_to_graphql(e: DomainError) -> async_graphql::Error {
         DomainError::SpaceNameEmpty | DomainError::Validation(_) => "VALIDATION_ERROR",
         DomainError::Semver(_) => "SEMVER_ERROR",
         DomainError::Database(_) => "INTERNAL_ERROR",
+        DomainError::AuditLogFailed(_) => "AUDIT_LOG_FAILED",
         DomainError::InvalidTransition { .. } | DomainError::CannotModifyArchived { .. }
         | DomainError::CannotReferenceArchived | DomainError::AlreadyMember
         | DomainError::CannotRemoveLastOwner | DomainError::NotOwner => "FORBIDDEN",
@@ -1819,7 +1821,7 @@ struct SpaceMemberWithUser {
 
 fn register_space_scoped_queries(builder: &mut Builder) {
     use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, Object, TypeRef};
-    use sea_orm::{EntityTrait, ColumnTrait, QueryFilter};
+    use sea_orm::{EntityTrait, ColumnTrait, QueryFilter, PaginatorTrait};
 
     // ── SpaceUserLookup output type ───────────────────────────────────
     let space_user_type = Object::new("SpaceUserLookup")
@@ -2143,6 +2145,85 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     )
     .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
     builder.queries.push(proc_by_space);
+
+    // ── valueStreamCountBySpace ───────────────────────────────────────
+    // Lightweight count query for dashboard stats; avoids loading full rows.
+    let vs_count = Field::new(
+        "valueStreamCountBySpace",
+        TypeRef::named_nn(TypeRef::INT),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let count = value_stream::Entity::find()
+                    .filter(value_stream::Column::SpaceId.eq(space_id))
+                    .count(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::value(count as i64)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(vs_count);
+
+    // ── businessCapabilityCountBySpace ────────────────────────────────
+    let cap_count = Field::new(
+        "businessCapabilityCountBySpace",
+        TypeRef::named_nn(TypeRef::INT),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let count = business_capability::Entity::find()
+                    .filter(business_capability::Column::SpaceId.eq(space_id))
+                    .count(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::value(count as i64)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(cap_count);
+
+    // ── businessProcessCountBySpace ───────────────────────────────────
+    let proc_count = Field::new(
+        "businessProcessCountBySpace",
+        TypeRef::named_nn(TypeRef::INT),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let count = business_process::Entity::find()
+                    .filter(business_process::Column::SpaceId.eq(space_id))
+                    .count(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::value(count as i64)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(proc_count);
 
     // ── valueStreamById ───────────────────────────────────────────────
     // Resolves the owning space from the value stream, then enforces

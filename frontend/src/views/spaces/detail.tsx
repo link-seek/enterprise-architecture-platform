@@ -4,9 +4,9 @@ import { useQuery, useMutation } from '@apollo/client/react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Pencil, Archive, LogIn, ArrowLeft, Users } from 'lucide-react'
-import { GET_SPACE, ARCHIVE_SPACE, GET_SPACES, GET_SPACE_STATS } from '@/api/spaces'
-import type { Space, SpaceStats } from '@/api/spaces'
+import { Pencil, Archive, LogIn, ArrowLeft, Users, Eye, EyeOff } from 'lucide-react'
+import { GET_SPACE, ARCHIVE_SPACE, GET_SPACES, GET_SPACE_STATS, SET_SPACE_VISIBILITY } from '@/api/spaces'
+import type { Space, SpaceStats, SpaceVisibility } from '@/api/spaces'
 import { useAuthStore } from '@/stores/auth'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { SpaceEditDialog } from './crud'
@@ -34,6 +34,10 @@ export default function SpaceDetail() {
     onCompleted: () => navigate('/spaces'),
   })
 
+  const [setVisibility] = useMutation(SET_SPACE_VISIBILITY, {
+    refetchQueries: [{ query: GET_SPACE, variables: { id: spaceId } }],
+  })
+
   const space = data?.spaceById
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">加载中...</div>
@@ -41,9 +45,9 @@ export default function SpaceDetail() {
   if (!space) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">空间不存在</div>
 
   const statsItems = [
-    { label: '价值流', value: stats?.valueStreamsBySpace?.length ?? 0, to: 'value-streams' },
-    { label: '业务能力', value: stats?.businessCapabilitiesBySpace?.length ?? 0, to: 'capabilities' },
-    { label: '业务流程', value: stats?.businessProcessesBySpace?.length ?? 0, to: 'processes' },
+    { label: '价值流', value: stats?.valueStreamCountBySpace ?? 0, to: 'value-streams' },
+    { label: '业务能力', value: stats?.businessCapabilityCountBySpace ?? 0, to: 'capabilities' },
+    { label: '业务流程', value: stats?.businessProcessCountBySpace ?? 0, to: 'processes' },
   ]
 
   return (
@@ -69,6 +73,30 @@ export default function SpaceDetail() {
                   <Button variant="outline" size="sm" onClick={() => setMembersOpen(true)}>
                     <Users className="h-4 w-4 mr-2" />
                     成员
+                  </Button>
+                )}
+                {role === 'owner' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const next: SpaceVisibility = space.visibility === 'public' ? 'private' : 'public'
+                      if (confirm(`确定将此空间设为${next === 'public' ? '公开' : '私有'}？`)) {
+                        setVisibility({ variables: { id: space.id, visibility: next } })
+                      }
+                    }}
+                  >
+                    {space.visibility === 'public' ? (
+                      <>
+                        <EyeOff className="h-4 w-4 mr-2" />
+                        设为私有
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="h-4 w-4 mr-2" />
+                        设为公开
+                      </>
+                    )}
                   </Button>
                 )}
                 {role === 'owner' && (

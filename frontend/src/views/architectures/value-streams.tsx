@@ -105,7 +105,7 @@ export default function ValueStreams() {
                               <Button variant="ghost" size="sm" onClick={() => { setHistoryLogicalId(vs.logicalId); setHistoryOpen(true) }}>
                                 <History className="h-3.5 w-3.5" />
                               </Button>
-                              {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
+                              {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId!} />}
                               <Button variant="ghost" size="sm" onClick={() => setDeleting(vs)}>
                                 <Trash2 className="h-3.5 w-3.5 text-destructive" />
                               </Button>
@@ -127,8 +127,8 @@ export default function ValueStreams() {
 
       <ValueStreamCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} />
       <ValueStreamDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
-      <VersionHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} spaceId={spaceId} logicalId={historyLogicalId} />
-      <CreateVersionDialog open={versionOpen} onOpenChange={setVersionOpen} currentItem={versionItem} spaceId={spaceId} />
+      <VersionHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} spaceId={spaceId!} logicalId={historyLogicalId} />
+      <CreateVersionDialog open={versionOpen} onOpenChange={setVersionOpen} currentItem={versionItem} spaceId={spaceId!} />
     </div>
   )
 }

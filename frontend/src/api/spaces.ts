@@ -62,15 +62,9 @@ export const GET_SPACE_MEMBERS = gql`
 
 export const GET_SPACE_STATS = gql`
   query GetSpaceStats($spaceId: String!) {
-    valueStreamsBySpace(spaceId: $spaceId) {
-      id
-    }
-    businessCapabilitiesBySpace(spaceId: $spaceId) {
-      id
-    }
-    businessProcessesBySpace(spaceId: $spaceId) {
-      id
-    }
+    valueStreamCountBySpace(spaceId: $spaceId)
+    businessCapabilityCountBySpace(spaceId: $spaceId)
+    businessProcessCountBySpace(spaceId: $spaceId)
   }
 `
 
@@ -150,9 +144,9 @@ export interface SpaceMember {
 }
 
 export interface SpaceStats {
-  valueStreamsBySpace: { id: string }[]
-  businessCapabilitiesBySpace: { id: string }[]
-  businessProcessesBySpace: { id: string }[]
+  valueStreamCountBySpace: number
+  businessCapabilityCountBySpace: number
+  businessProcessCountBySpace: number
 }
 
 // Fixed UUID of the seeded "测试空间" (test space) that owns pre-existing

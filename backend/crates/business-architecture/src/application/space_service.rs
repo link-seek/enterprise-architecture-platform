@@ -18,11 +18,28 @@ pub struct SpaceService<S: SpaceRepository, M: MembershipRepository, A: AuditLog
     spaces: S,
     members: M,
     audit: A,
+    /// When `true`, a failure to persist the audit log causes the visibility
+    /// change to fail with `DomainError::AuditLogFailed`. When `false`
+    /// (default, best-effort), the failure is logged as a warning and the
+    /// visibility change still succeeds.
+    strict_audit: bool,
 }
 
 impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceService<S, M, A> {
     pub fn new(spaces: S, members: M, audit: A) -> Self {
-        Self { spaces, members, audit }
+        Self {
+            spaces,
+            members,
+            audit,
+            strict_audit: false,
+        }
+    }
+
+    /// Enable strict audit mode: audit-log persistence failures will cause the
+    /// visibility change to fail rather than being silently swallowed.
+    pub fn with_strict_audit(mut self) -> Self {
+        self.strict_audit = true;
+        self
     }
 
     /// Create a space. The creator becomes its owner. Non-admin users may own
@@ -128,6 +145,9 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
                 actor_id = %actor_id,
                 "failed to record space visibility audit log (best-effort)"
             );
+            if self.strict_audit {
+                return Err(DomainError::AuditLogFailed(e.to_string()));
+            }
         }
         Ok(saved)
     }

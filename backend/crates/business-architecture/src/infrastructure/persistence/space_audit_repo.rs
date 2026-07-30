@@ -50,7 +50,7 @@ pub async fn list_for_space(
     limit: Option<u64>,
     offset: u64,
 ) -> Result<Vec<SpaceAuditLog>, DomainError> {
-    let cap = limit.unwrap_or(200);
+    let cap = limit.unwrap_or(200).min(1000);
     let models = space_audit_log::Entity::find()
         .filter(space_audit_log::Column::SpaceId.eq(space_id))
         .order_by_desc(space_audit_log::Column::CreatedAt)
@@ -58,19 +58,24 @@ pub async fn list_for_space(
         .limit(cap)
         .all(db)
         .await?;
-    Ok(models.into_iter().map(Into::into).collect())
+    Ok(models
+        .into_iter()
+        .map(SpaceAuditLog::try_from)
+        .collect::<Result<Vec<_>, _>>()?)
 }
 
-impl From<space_audit_log::Model> for SpaceAuditLog {
-    fn from(m: space_audit_log::Model) -> Self {
-        SpaceAuditLog {
+impl TryFrom<space_audit_log::Model> for SpaceAuditLog {
+    type Error = DomainError;
+
+    fn try_from(m: space_audit_log::Model) -> Result<Self, Self::Error> {
+        Ok(SpaceAuditLog {
             id: m.id,
             space_id: m.space_id,
             actor_id: m.actor_id,
-            action: SpaceAuditAction::visibility_changed(),
+            action: SpaceAuditAction::try_from(m.action.as_str())?,
             from_value: m.from_value,
             to_value: m.to_value,
             created_at: m.created_at,
-        }
+        })
     }
 }

@@ -79,7 +79,7 @@ export default function Capabilities() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.businessCapabilitiesBySpace.map((cap: Capability) => (
+                {(data?.businessCapabilitiesBySpace ?? []).map((cap: Capability) => (
                   <TableRow key={cap.id}>
                     <TableCell className="font-medium">{cap.name}</TableCell>
                     <TableCell>{cap.level}</TableCell>
