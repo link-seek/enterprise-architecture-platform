@@ -1,4 +1,4 @@
-name: PR Auto-Fix
+name: On Comment Fix
 
 on:
   workflow_dispatch:
@@ -27,9 +27,13 @@ permissions:
   issues: write
   actions: write
 
+concurrency:
+  group: auto-fix-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
 jobs:
-  resolve:
-    uses: link-seek/issue-resolver/.github/workflows/resolve.yml@main
+  fix:
+    uses: link-seek/issue-resolver/.github/workflows/fix.yml@main
     with:
       pr-number: ${{ inputs.pr_number }}
       head-branch: ${{ inputs.head_branch }}
