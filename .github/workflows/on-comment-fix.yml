@@ -33,10 +33,168 @@ concurrency:
 
 jobs:
   fix:
-    uses: link-seek/issue-resolver/.github/workflows/fix.yml@main
-    with:
-      pr-number: ${{ inputs.pr_number }}
-      head-branch: ${{ inputs.head_branch }}
-      head-sha: ${{ inputs.head_sha }}
-      max-iterations: ${{ inputs.max_iterations }}
-    secrets: inherit
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Gather review context
+        id: context
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          HEAD_BRANCH: ${{ inputs.head_branch }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+        run: |
+          REVIEW_BODY=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
+            --paginate \
+            --jq '[.[] | select(.state == "CHANGES_REQUESTED" or .state == "COMMENTED")] | sort_by(.submitted_at) | last | .body')
+
+          REVIEW_ID=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
+            --paginate \
+            --jq '[.[] | select(.state == "CHANGES_REQUESTED" or .state == "COMMENTED")] | sort_by(.submitted_at) | last | .id')
+          REVIEW_COMMENTS=""
+          if [ -n "$REVIEW_ID" ] && [ "$REVIEW_ID" != "null" ]; then
+            REVIEW_COMMENTS=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments \
+              --jq '.[] | "\(.path):\(.line) — \(.body[:200])"' 2>/dev/null || echo "")
+          fi
+
+          CI_FAILURES=""
+          FAILED_CHECKS=$(gh api repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs \
+            --jq '.check_runs[] | select(.conclusion == "failure") | "\(.id)\t\(.name)"' 2>/dev/null)
+          while IFS=$'\t' read -r CHECK_ID CHECK_NAME; do
+            [ -z "$CHECK_ID" ] && continue
+            echo "CI check failed: $CHECK_NAME (ID: $CHECK_ID)"
+            CI_FAILURES+="\n## CI Check Failed: $CHECK_NAME\n"
+            ANNOTATIONS=$(gh api repos/$GITHUB_REPOSITORY/check-runs/$CHECK_ID \
+              --jq '.output.annotations[]? | select(.annotation_level == "failure" or .annotation_level == "warning") | "\(.path):\(.start_line // 1) [\(.annotation_level)] \(.message)"' 2>/dev/null || echo "")
+            if [ -n "$ANNOTATIONS" ]; then
+              CI_FAILURES+="\nStructured annotations:\n\`\`\`\n$ANNOTATIONS\n\`\`\`\n"
+            else
+              TMP_LOGS_DIR=$(mktemp -d)
+              if gh api repos/$GITHUB_REPOSITORY/check-runs/$CHECK_ID/logs > "$TMP_LOGS_DIR/logs.zip" 2>/dev/null; then
+                (cd "$TMP_LOGS_DIR" && unzip -o -q logs.zip 2>/dev/null || true)
+                LOGS=$(grep -rhi "error\|fail\|panic\|not found\|FAIL:" "$TMP_LOGS_DIR" 2>/dev/null | tail -30 || echo "No error lines found in logs")
+              else
+                LOGS="Could not fetch logs"
+              fi
+              rm -rf "$TMP_LOGS_DIR"
+              CI_FAILURES+="\n\`\`\`\n$LOGS\n\`\`\`\n"
+            fi
+          done <<< "$FAILED_CHECKS"
+
+          COMBINED="$REVIEW_BODY"
+          if [ -n "$REVIEW_COMMENTS" ]; then
+            COMBINED+="\n\n## Inline Review Comments\n$REVIEW_COMMENTS"
+          fi
+          if [ -n "$CI_FAILURES" ]; then
+            COMBINED+="\n\n## CI Test Failures (must fix)\n$CI_FAILURES"
+          fi
+
+          echo "fix_context<<CTX_EOF" >> $GITHUB_OUTPUT
+          echo -e "$COMBINED" >> $GITHUB_OUTPUT
+          echo "CTX_EOF" >> $GITHUB_OUTPUT
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.head_branch }}
+          fetch-depth: 0
+          persist-credentials: true
+          path: target-repo
+
+      - name: Check iteration limit
+        id: iter-check
+        working-directory: target-repo
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          MAX_ITERATIONS: ${{ inputs.max_iterations }}
+        run: |
+          AUTO_FIX_COUNT=$(git log --oneline --grep="^auto-fix:" | wc -l | tr -d ' ')
+          echo "auto_fix_count=$AUTO_FIX_COUNT" >> $GITHUB_OUTPUT
+          echo "Auto-fix commits on branch: $AUTO_FIX_COUNT (max: $MAX_ITERATIONS)"
+
+          if [ "$AUTO_FIX_COUNT" -ge "$MAX_ITERATIONS" ]; then
+            echo "exceeded=true" >> $GITHUB_OUTPUT
+            echo "::error::Max auto-fix iterations ($MAX_ITERATIONS) reached (current: $AUTO_FIX_COUNT)"
+            BODY="⚠️ Auto-fix 已修 ${AUTO_FIX_COUNT} 轮，review 仍有问题。在 PR 上评论 \`continue-fix\` 可再跑 3 轮自动修复。"
+            gh api repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments \
+              -f body="$BODY"
+            exit 1
+          else
+            echo "exceeded=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout issue-resolver scripts
+        if: ${{ steps.iter-check.outputs.exceeded == 'false' }}
+        uses: actions/checkout@v4
+        with:
+          repository: link-seek/issue-resolver
+          ref: main
+          path: issue-resolver-scripts
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Set up Python
+        if: ${{ steps.iter-check.outputs.exceeded == 'false' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        if: ${{ steps.iter-check.outputs.exceeded == 'false' }}
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Configure Git
+        if: ${{ steps.iter-check.outputs.exceeded == 'false' }}
+        shell: bash
+        run: |
+          git config --global user.name "ai-bot"
+          git config --global user.email "bot@ai-resolver.dev"
+
+      - name: Run fix (PR mode)
+        if: ${{ steps.iter-check.outputs.exceeded == 'false' }}
+        shell: bash
+        working-directory: target-repo
+        env:
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REPO_NAME: ${{ github.repository }}
+          REVIEW_BODY: ${{ steps.context.outputs.fix_context }}
+          ITERATION: ${{ steps.iter-check.outputs.auto_fix_count }}
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          uv run --no-project --with openhands-sdk --with openhands-tools --with cryptography --with pyyaml \
+            python ../issue-resolver-scripts/scripts/fix_pr.py
+
+      - name: Approve pending CI workflows
+        if: ${{ steps.iter-check.outputs.exceeded == 'false' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BRANCH: ${{ inputs.head_branch }}
+        run: |
+          sleep 15
+          for run_id in $(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_branch=$PR_BRANCH&status=action_required" --jq '.workflow_runs[].id' 2>/dev/null); do
+            echo "Approving workflow run $run_id..."
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/approve" -X POST 2>/dev/null && echo "Approved $run_id" || echo "Failed to approve $run_id"
+          done
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resolve-logs
+          path: target-repo/*.log
+          retention-days: 7
+          if-no-files-found: ignore
