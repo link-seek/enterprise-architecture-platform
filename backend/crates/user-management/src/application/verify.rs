@@ -11,15 +11,15 @@ use crate::domain::error::DomainError;
 use crate::infrastructure::persistence::entities::user;
 
 /// Maximum accepted length for the username field.
-const MAX_USERNAME_LEN: usize = 100;
+const MAX_USERNAME_LEN: u64 = 100;
 /// Maximum accepted length for the password field.
-const MAX_PASSWORD_LEN: usize = 128;
+const MAX_PASSWORD_LEN: u64 = 128;
 
 #[derive(Clone, Deserialize, Validate)]
 pub struct LoginRequest {
-    #[validate(length(max = 100))]
+    #[validate(length(max = MAX_USERNAME_LEN))]
     pub username: String,
-    #[validate(length(max = 128))]
+    #[validate(length(max = MAX_PASSWORD_LEN))]
     pub password: String,
 }
 
@@ -37,22 +37,25 @@ impl fmt::Debug for LoginRequest {
 // A valid Argon2 hash computed once and reused so that the "user not found"
 // path performs the same expensive Argon2 verification as the "user found"
 // path. This mitigates timing-based username enumeration.
-static DUMMY_PASSWORD_HASH: OnceLock<String> = OnceLock::new();
+static DUMMY_PASSWORD_HASH: OnceLock<Option<String>> = OnceLock::new();
 
-fn dummy_password_hash() -> &'static str {
-    DUMMY_PASSWORD_HASH.get_or_init(|| {
-        let salt = SaltString::generate(&mut OsRng);
-        match Argon2::default().hash_password(b"constant-dummy-password", &salt) {
-            Ok(h) => h.to_string(),
-            Err(e) => {
-                // Hashing a constant input should never fail; if it does, the
-                // timing-enumeration mitigation would be silently disabled, so
-                // surface an explicit warning rather than degrading quietly.
-                tracing::warn!(error = %e, "failed to compute dummy password hash; timing mitigation disabled");
-                String::new()
+fn dummy_password_hash() -> Option<&'static str> {
+    DUMMY_PASSWORD_HASH
+        .get_or_init(|| {
+            let salt = SaltString::generate(&mut OsRng);
+            match Argon2::default().hash_password(b"constant-dummy-password", &salt) {
+                Ok(h) => Some(h.to_string()),
+                Err(e) => {
+                    // Hashing a constant input should never fail; if it does, the
+                    // timing-enumeration mitigation cannot run. Surface an explicit
+                    // warning and return `None` so callers can detect the degraded
+                    // state instead of silently skipping the dummy verification.
+                    tracing::warn!(error = %e, "failed to compute dummy password hash; timing mitigation disabled");
+                    None
+                }
             }
-        }
-    })
+        })
+        .as_deref()
 }
 
 pub async fn verify_login(
@@ -62,7 +65,7 @@ pub async fn verify_login(
 ) -> Result<bool, DomainError> {
     // Reject oversized inputs up front to avoid unnecessary memory allocation
     // and Argon2 computation cost (resource-exhaustion hardening).
-    if username.len() > MAX_USERNAME_LEN || password.len() > MAX_PASSWORD_LEN {
+    if username.len() as u64 > MAX_USERNAME_LEN || password.len() as u64 > MAX_PASSWORD_LEN {
         tracing::info!("login failed");
         return Ok(false);
     }
@@ -77,15 +80,27 @@ pub async fn verify_login(
         // Mitigate timing-based username enumeration: perform a dummy Argon2
         // verification so the not-found path takes comparable time to the
         // found path, then return a uniform failure.
-        if let Ok(parsed) = PasswordHash::new(dummy_password_hash()) {
-            let _ = Argon2::default().verify_password(password.as_bytes(), &parsed);
+        match dummy_password_hash() {
+            Some(hash) => {
+                if let Ok(parsed) = PasswordHash::new(hash) {
+                    let _ = Argon2::default().verify_password(password.as_bytes(), &parsed);
+                }
+            }
+            None => {
+                tracing::warn!("timing mitigation disabled on login: dummy password hash unavailable");
+            }
         }
         tracing::info!("login failed");
         return Ok(false);
     };
 
-    let parsed = PasswordHash::new(&model.password_hash)
-        .map_err(|e| DomainError::InvalidPasswordHash(e.to_string()))?;
+    let parsed = PasswordHash::new(&model.password_hash).map_err(|e| {
+        // Log the detailed parsing failure server-side for diagnostics, but do
+        // not propagate the raw error message upward: it may reveal internal
+        // storage/hash format details that must not leak into HTTP responses.
+        tracing::error!(error = %e, "failed to parse stored password hash");
+        DomainError::InvalidPasswordHash
+    })?;
     let verified = Argon2::default()
         .verify_password(password.as_bytes(), &parsed)
         .is_ok();
