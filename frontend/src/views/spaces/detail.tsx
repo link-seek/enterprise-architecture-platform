@@ -4,7 +4,7 @@ import { useQuery, useMutation } from '@apollo/client/react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Pencil, Archive, LogIn, ArrowLeft, Users, Eye, EyeOff } from 'lucide-react'
+import { Pencil, Archive, LogIn, ArrowLeft, Users, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { GET_SPACE, ARCHIVE_SPACE, GET_SPACES, GET_SPACE_STATS, SET_SPACE_VISIBILITY } from '@/api/spaces'
 import type { Space, SpaceStats, SpaceVisibility } from '@/api/spaces'
 import { useAuthStore } from '@/stores/auth'
@@ -35,7 +35,7 @@ export default function SpaceDetail() {
     onCompleted: () => navigate('/spaces'),
   })
 
-  const [setVisibility] = useMutation(SET_SPACE_VISIBILITY, {
+  const [setVisibility, { loading: visibilityLoading }] = useMutation(SET_SPACE_VISIBILITY, {
     refetchQueries: [{ query: GET_SPACE, variables: { id: spaceId } }],
     onError: (e) => setVisibilityError(e.message),
     onCompleted: () => setVisibilityError(null),
@@ -82,6 +82,7 @@ export default function SpaceDetail() {
                   <Button
                     variant="outline"
                     size="sm"
+                    disabled={visibilityLoading}
                     onClick={() => {
                       const next: SpaceVisibility = space.visibility === 'public' ? 'private' : 'public'
                       if (confirm(`确定将此空间设为${next === 'public' ? '公开' : '私有'}？`)) {
@@ -90,7 +91,9 @@ export default function SpaceDetail() {
                       }
                     }}
                   >
-                    {space.visibility === 'public' ? (
+                    {visibilityLoading ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : space.visibility === 'public' ? (
                       <>
                         <EyeOff className="h-4 w-4 mr-2" />
                         设为私有
