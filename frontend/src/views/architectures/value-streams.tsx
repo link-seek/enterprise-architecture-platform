@@ -77,7 +77,7 @@ export default function ValueStreams() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.valueStreams.nodes.map((vs: ValueStream) => (
+                  {data.valueStreamsBySpace.map((vs: ValueStream) => (
                     <TableRow key={vs.id}>
                       <TableCell className="font-medium">
                         {vs.name}
@@ -118,7 +118,7 @@ export default function ValueStreams() {
                 </TableBody>
               </Table>
               <div className="flex items-center justify-between mt-4">
-                <p className="text-sm text-muted-foreground">共 {data.valueStreams.paginationInfo.total} 条</p>
+                <p className="text-sm text-muted-foreground">共 {data.valueStreamsBySpace.length} 条</p>
               </div>
             </>
           )}
@@ -127,7 +127,7 @@ export default function ValueStreams() {
 
       <ValueStreamCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} />
       <ValueStreamDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
-      <VersionHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} logicalId={historyLogicalId} />
+      <VersionHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} spaceId={spaceId} logicalId={historyLogicalId} />
       <CreateVersionDialog open={versionOpen} onOpenChange={setVersionOpen} currentItem={versionItem} spaceId={spaceId} />
     </div>
   )

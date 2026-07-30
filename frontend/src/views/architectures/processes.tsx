@@ -13,10 +13,9 @@ import { useParams } from 'react-router-dom'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 
 const GET_PROCESSES = gql`
-  query GetProcesses($spaceId: String) {
-    businessProcesses(filters: { spaceId: { eq: $spaceId } }) {
-      nodes { id name description sla cycleTime costPerTransaction status }
-      paginationInfo { total }
+  query GetProcesses($spaceId: String!) {
+    businessProcessesBySpace(spaceId: $spaceId) {
+      id name description sla cycleTime costPerTransaction status
     }
   }
 `

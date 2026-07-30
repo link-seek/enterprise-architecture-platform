@@ -14,9 +14,9 @@ import { History, Loader2, Archive } from 'lucide-react'
 // ============================================================================
 
 const GET_VALUE_STREAM_VERSIONS = gql`
-  query GetValueStreamVersions($logicalId: String!) {
-    valueStreams(filters: { logicalId: { eq: $logicalId } }) {
-      nodes { id name description businessVersion status createdAt updatedAt }
+  query GetValueStreamVersions($spaceId: String!, $logicalId: String!) {
+    valueStreamsBySpaceAndLogicalId(spaceId: $spaceId, logicalId: $logicalId) {
+      id name description businessVersion status createdAt updatedAt
     }
   }
 `
@@ -36,10 +36,9 @@ const CREATE_VERSION = gql`
 `
 
 const GET_VALUE_STREAMS = gql`
-  query GetValueStreamsForVersion($spaceId: String) {
-    valueStreams(filters: { spaceId: { eq: $spaceId } }) {
-      nodes { id name description businessVersion status importance logicalId spaceId }
-      paginationInfo { total }
+  query GetValueStreamsForVersion($spaceId: String!) {
+    valueStreamsBySpace(spaceId: $spaceId) {
+      id name description businessVersion status importance logicalId spaceId
     }
   }
 `
@@ -48,17 +47,18 @@ const GET_VALUE_STREAMS = gql`
 // Version History Dialog
 // ============================================================================
 
-export function VersionHistoryDialog({ open, onOpenChange, logicalId }: {
+export function VersionHistoryDialog({ open, onOpenChange, spaceId, logicalId }: {
   open: boolean
   onOpenChange: (v: boolean) => void
+  spaceId?: string
   logicalId: string | null
 }) {
   const { data, loading } = useQuery(GET_VALUE_STREAM_VERSIONS, {
-    variables: { logicalId },
-    skip: !logicalId,
+    variables: { spaceId, logicalId },
+    skip: !logicalId || !spaceId,
   })
 
-  const versions = data?.valueStreams?.nodes || []
+  const versions = data?.valueStreamsBySpaceAndLogicalId || []
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

@@ -3,3 +3,4 @@ pub mod capability_repo;
 pub mod process_repo;
 pub mod value_stream_repo;
 pub mod space_repo;
+pub mod space_audit_repo;

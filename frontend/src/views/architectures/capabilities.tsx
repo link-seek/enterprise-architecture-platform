@@ -13,10 +13,9 @@ import { useParams } from 'react-router-dom'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 
 const GET_CAPABILITIES = gql`
-  query GetCapabilities($spaceId: String) {
-    businessCapabilities(filters: { spaceId: { eq: $spaceId } }) {
-      nodes { id name description level maturity businessValue status }
-      paginationInfo { total }
+  query GetCapabilities($spaceId: String!) {
+    businessCapabilitiesBySpace(spaceId: $spaceId) {
+      id name description level maturity businessValue status
     }
   }
 `
@@ -80,7 +79,7 @@ export default function Capabilities() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.businessCapabilities.nodes.map((cap: Capability) => (
+                {data.businessCapabilitiesBySpace.map((cap: Capability) => (
                   <TableRow key={cap.id}>
                     <TableCell className="font-medium">{cap.name}</TableCell>
                     <TableCell>{cap.level}</TableCell>

@@ -232,3 +232,45 @@ impl SpaceRole {
         }
     }
 }
+
+/// Visibility of a Space (multi-tenant access scope).
+///
+/// - `Public`: content readable by anonymous users and any logged-in user.
+/// - `Private`: content readable only by space members (owner/editor) and
+///   platform Admins.
+///
+/// Defaults to `Public` so existing spaces remain open with zero behavior
+/// change when the column is added.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum SpaceVisibility {
+    #[sea_orm(string_value = "public")]
+    #[serde(rename = "public")]
+    Public,
+    #[sea_orm(string_value = "private")]
+    #[serde(rename = "private")]
+    Private,
+}
+
+impl SpaceVisibility {
+    pub fn is_private(&self) -> bool {
+        matches!(self, SpaceVisibility::Private)
+    }
+    pub fn is_public(&self) -> bool {
+        matches!(self, SpaceVisibility::Public)
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SpaceVisibility::Public => "public",
+            SpaceVisibility::Private => "private",
+        }
+    }
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "public" => Some(SpaceVisibility::Public),
+            "private" => Some(SpaceVisibility::Private),
+            _ => None,
+        }
+    }
+}

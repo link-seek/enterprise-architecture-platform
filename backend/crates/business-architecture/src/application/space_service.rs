@@ -1,42 +1,50 @@
 use chrono::Utc;
-use shared_common::enums::{SpaceRole, UserRole};
+use shared_common::enums::{SpaceRole, SpaceVisibility, UserRole};
 use uuid::Uuid;
 
 use crate::domain::error::DomainError;
 use crate::domain::space::entity::{Space, SpaceMember};
-use crate::domain::space::repository::{MembershipRepository, SpaceRepository};
+use crate::domain::space::audit::SpaceAuditLog;
+use crate::domain::space::repository::{AuditLogRepository, MembershipRepository, SpaceRepository};
 
-/// Application Service for Space: orchestrates space CRUD, membership, and
-/// space-level access control (quota + member ACL).
-pub struct SpaceService<S: SpaceRepository, M: MembershipRepository> {
+/// Maximum number of spaces a non-admin user may own, including archived ones.
+/// Archiving does not release a slot. Admins are unlimited. Fixed per R3/R8
+/// (not configurable).
+pub const SPACE_QUOTA_LIMIT: u64 = 3;
+
+/// Application Service for Space: orchestrates space CRUD, membership,
+/// visibility, and space-level access control (quota + member ACL + visibility).
+pub struct SpaceService<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> {
     spaces: S,
     members: M,
+    audit: A,
 }
 
-impl<S: SpaceRepository, M: MembershipRepository> SpaceService<S, M> {
-    pub fn new(spaces: S, members: M) -> Self {
-        Self { spaces, members }
+impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceService<S, M, A> {
+    pub fn new(spaces: S, members: M, audit: A) -> Self {
+        Self { spaces, members, audit }
     }
 
     /// Create a space. The creator becomes its owner. Non-admin users may own
-    /// at most one space (quota); admins are unlimited.
+    /// at most three spaces (including archived); admins are unlimited.
     pub async fn create_space(
         &self,
         creator_id: Uuid,
         creator_role: UserRole,
         name: String,
         description: Option<String>,
+        visibility: SpaceVisibility,
     ) -> Result<Space, DomainError> {
         if !creator_role.is_admin() {
             let owned = self.spaces.count_owned_by(creator_id).await?;
-            if owned >= 1 {
+            if owned >= SPACE_QUOTA_LIMIT {
                 return Err(DomainError::SpaceQuotaExceeded);
             }
         }
 
         let now = Utc::now();
         let id = Uuid::now_v7();
-        let space = Space::create(id, name, description, now)?;
+        let space = Space::create(id, name, description, visibility, now)?;
         let saved = self.spaces.save(&space).await?;
 
         // Creator becomes owner.
@@ -51,7 +59,8 @@ impl<S: SpaceRepository, M: MembershipRepository> SpaceService<S, M> {
         Ok(saved)
     }
 
-    /// Update a space's name/description. Requires owner or admin.
+    /// Update a space's name/description. Requires owner or admin. Visibility is
+    /// intentionally not mutable here — use `set_visibility` (R4).
     pub async fn update_space(
         &self,
         space_id: Uuid,
@@ -72,6 +81,44 @@ impl<S: SpaceRepository, M: MembershipRepository> SpaceService<S, M> {
         self.spaces.save(&space).await
     }
 
+    /// Change a space's visibility. Requires owner or admin. Records an audit
+    /// log entry (best-effort: a logging failure is warned and does not block
+    /// the visibility change).
+    pub async fn set_visibility(
+        &self,
+        space_id: Uuid,
+        actor_id: Uuid,
+        actor_role: UserRole,
+        visibility: SpaceVisibility,
+    ) -> Result<Space, DomainError> {
+        self.ensure_can_manage(space_id, actor_id, actor_role).await?;
+        let mut space = self.spaces.find_by_id(space_id).await?.ok_or(DomainError::SpaceNotFound)?;
+        let from = space.visibility;
+        let now = Utc::now();
+        space.set_visibility(visibility, now);
+        let saved = self.spaces.save(&space).await?;
+
+        if from != visibility {
+            let log = SpaceAuditLog::visibility_changed(
+                Uuid::now_v7(),
+                saved.id,
+                actor_id,
+                from.as_str(),
+                visibility.as_str(),
+                now,
+            );
+            if let Err(e) = self.audit.record(&log).await {
+                tracing::warn!(
+                    error = %e,
+                    space_id = %saved.id,
+                    actor_id = %actor_id,
+                    "failed to record space visibility audit log (best-effort)"
+                );
+            }
+        }
+        Ok(saved)
+    }
+
     /// Soft-delete (archive) a space. Requires owner or admin.
     pub async fn archive_space(
         &self,
@@ -83,9 +130,57 @@ impl<S: SpaceRepository, M: MembershipRepository> SpaceService<S, M> {
         self.spaces.soft_delete(space_id).await
     }
 
-    /// List all public (non-deleted) spaces.
+    /// Spaces visible to an anonymous caller: public non-deleted spaces only.
     pub async fn list_public(&self) -> Result<Vec<Space>, DomainError> {
         self.spaces.find_all_public().await
+    }
+
+    /// Fetch a single space by id (regardless of visibility). Callers must
+    /// have already passed `ensure_can_read` to authorize the read.
+    pub async fn find_space(&self, space_id: Uuid) -> Result<Option<Space>, DomainError> {
+        self.spaces.find_by_id(space_id).await
+    }
+
+    /// Spaces visible to an authenticated caller: public spaces plus private
+    /// spaces they are a member of. Admins see all non-deleted spaces.
+    pub async fn list_visible(
+        &self,
+        actor_id: Uuid,
+        actor_role: UserRole,
+    ) -> Result<Vec<Space>, DomainError> {
+        if actor_role.is_admin() {
+            return self.spaces.find_all_non_deleted().await;
+        }
+        self.spaces.find_visible_for_user(actor_id).await
+    }
+
+    /// Visibility-aware read guard. Admins always pass. Public spaces pass for
+    /// anyone (including anonymous — callers pass a sentinel id/role for anon).
+    /// Private spaces require membership.
+    pub async fn ensure_can_read(
+        &self,
+        space_id: Uuid,
+        actor_id: Option<Uuid>,
+        actor_role: UserRole,
+    ) -> Result<(), DomainError> {
+        if actor_role.is_admin() {
+            return Ok(());
+        }
+        let space = self
+            .spaces
+            .find_by_id(space_id)
+            .await?
+            .ok_or(DomainError::SpaceNotFound)?;
+        if space.visibility.is_public() {
+            return Ok(());
+        }
+        // Private: require membership.
+        let actor_id = actor_id.ok_or(DomainError::SpacePrivate)?;
+        let m = self.members.find_membership(space_id, actor_id).await?;
+        if m.is_none() {
+            return Err(DomainError::SpacePrivate);
+        }
+        Ok(())
     }
 
     /// Add a member to a space. Requires owner or admin. Prevents duplicates.
@@ -201,7 +296,41 @@ mod tests {
             Ok(self.spaces.lock().await.get(&id).cloned())
         }
         async fn find_all_public(&self) -> Result<Vec<Space>, DomainError> {
-            Ok(self.spaces.lock().await.values().filter(|s| s.deleted_at.is_none()).cloned().collect())
+            Ok(self
+                .spaces
+                .lock()
+                .await
+                .values()
+                .filter(|s| s.deleted_at.is_none() && s.visibility.is_public())
+                .cloned()
+                .collect())
+        }
+        async fn find_all_non_deleted(&self) -> Result<Vec<Space>, DomainError> {
+            Ok(self
+                .spaces
+                .lock()
+                .await
+                .values()
+                .filter(|s| s.deleted_at.is_none())
+                .cloned()
+                .collect())
+        }
+        async fn find_visible_for_user(&self, user_id: Uuid) -> Result<Vec<Space>, DomainError> {
+            let spaces = self.spaces.lock().await;
+            let members = self.members.lock().await;
+            Ok(spaces
+                .values()
+                .filter(|s| {
+                    if s.deleted_at.is_some() {
+                        return false;
+                    }
+                    if s.visibility.is_public() {
+                        return true;
+                    }
+                    members.contains_key(&(s.id, user_id))
+                })
+                .cloned()
+                .collect())
         }
         async fn save(&self, space: &Space) -> Result<Space, DomainError> {
             self.spaces.lock().await.insert(space.id, space.clone());
@@ -215,6 +344,7 @@ mod tests {
             Ok(())
         }
         async fn count_owned_by(&self, user_id: Uuid) -> Result<u64, DomainError> {
+            // Counts all owner memberships (including archived spaces), per R3.
             Ok(self.members.lock().await.values().filter(|m| m.user_id == user_id && m.role.is_owner()).count() as u64)
         }
     }
@@ -250,26 +380,73 @@ mod tests {
         }
     }
 
-    fn svc() -> SpaceService<FakeSpaceRepo, FakeMemberRepo> {
+    struct FakeAuditRepo {
+        logs: tokio::sync::Mutex<Vec<SpaceAuditLog>>,
+    }
+
+    impl FakeAuditRepo {
+        fn new() -> Self {
+            Self { logs: tokio::sync::Mutex::new(Vec::new()) }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl AuditLogRepository for FakeAuditRepo {
+        async fn record(&self, log: &SpaceAuditLog) -> Result<(), DomainError> {
+            self.logs.lock().await.push(log.clone());
+            Ok(())
+        }
+    }
+
+    fn svc() -> SpaceService<FakeSpaceRepo, FakeMemberRepo, FakeAuditRepo> {
         let members: MemberStore = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
-        SpaceService::new(FakeSpaceRepo::new(members.clone()), FakeMemberRepo::new(members))
+        SpaceService::new(
+            FakeSpaceRepo::new(members.clone()),
+            FakeMemberRepo::new(members),
+            FakeAuditRepo::new(),
+        )
+    }
+
+    /// Convenience: create a public space (the common case in existing tests).
+    async fn create_public(
+        s: &SpaceService<FakeSpaceRepo, FakeMemberRepo, FakeAuditRepo>,
+        creator_id: Uuid,
+        creator_role: UserRole,
+        name: &str,
+    ) -> Space {
+        s.create_space(creator_id, creator_role, name.into(), None, SpaceVisibility::Public)
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
     async fn create_space_makes_creator_owner() {
         let s = svc();
         let creator = Uuid::now_v7();
-        let space = s.create_space(creator, UserRole::Architect, "S".into(), None).await.unwrap();
+        let space = create_public(&s, creator, UserRole::Architect, "S").await;
         let m = s.my_membership(space.id, creator).await.unwrap().unwrap();
         assert_eq!(m.role, SpaceRole::Owner);
     }
 
     #[tokio::test]
-    async fn non_admin_quota_one_space() {
+    async fn quota_three_including_archived() {
         let s = svc();
         let user = Uuid::now_v7();
-        s.create_space(user, UserRole::Architect, "first".into(), None).await.unwrap();
-        let err = s.create_space(user, UserRole::Architect, "second".into(), None).await.unwrap_err();
+        let s1 = create_public(&s, user, UserRole::Architect, "first").await;
+        create_public(&s, user, UserRole::Architect, "second").await;
+        create_public(&s, user, UserRole::Architect, "third").await;
+        // Fourth is rejected.
+        let err = s
+            .create_space(user, UserRole::Architect, "fourth".into(), None, SpaceVisibility::Public)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::SpaceQuotaExceeded));
+        // Archiving does not release the slot.
+        s.archive_space(s1.id, user, UserRole::Architect).await.unwrap();
+        let err = s
+            .create_space(user, UserRole::Architect, "fifth".into(), None, SpaceVisibility::Public)
+            .await
+            .unwrap_err();
         assert!(matches!(err, DomainError::SpaceQuotaExceeded));
     }
 
@@ -277,8 +454,10 @@ mod tests {
     async fn admin_unlimited_spaces() {
         let s = svc();
         let admin = Uuid::now_v7();
-        s.create_space(admin, UserRole::Admin, "a".into(), None).await.unwrap();
-        s.create_space(admin, UserRole::Admin, "b".into(), None).await.unwrap();
+        create_public(&s, admin, UserRole::Admin, "a").await;
+        create_public(&s, admin, UserRole::Admin, "b").await;
+        create_public(&s, admin, UserRole::Admin, "c").await;
+        create_public(&s, admin, UserRole::Admin, "d").await;
     }
 
     #[tokio::test]
@@ -287,7 +466,7 @@ mod tests {
         let owner = Uuid::now_v7();
         let editor = Uuid::now_v7();
         let other = Uuid::now_v7();
-        let space = s.create_space(owner, UserRole::Architect, "S".into(), None).await.unwrap();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
         s.add_member(space.id, owner, UserRole::Architect, editor, SpaceRole::Editor).await.unwrap();
         // editor attempting to add a member → denied
         let err = s.add_member(space.id, editor, UserRole::Architect, other, SpaceRole::Editor).await.unwrap_err();
@@ -299,7 +478,7 @@ mod tests {
         let s = svc();
         let owner = Uuid::now_v7();
         let stranger = Uuid::now_v7();
-        let space = s.create_space(owner, UserRole::Architect, "S".into(), None).await.unwrap();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
         let err = s.ensure_can_edit(space.id, stranger, UserRole::Architect).await.unwrap_err();
         assert!(matches!(err, DomainError::NotSpaceMember));
     }
@@ -309,7 +488,7 @@ mod tests {
         let s = svc();
         let owner = Uuid::now_v7();
         let editor = Uuid::now_v7();
-        let space = s.create_space(owner, UserRole::Architect, "S".into(), None).await.unwrap();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
         s.add_member(space.id, owner, UserRole::Architect, editor, SpaceRole::Editor).await.unwrap();
         s.ensure_can_edit(space.id, editor, UserRole::Architect).await.unwrap();
         let err = s.ensure_can_manage(space.id, editor, UserRole::Architect).await.unwrap_err();
@@ -320,7 +499,7 @@ mod tests {
     async fn cannot_remove_last_owner() {
         let s = svc();
         let owner = Uuid::now_v7();
-        let space = s.create_space(owner, UserRole::Architect, "S".into(), None).await.unwrap();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
         let err = s.remove_member(space.id, owner, UserRole::Architect, owner).await.unwrap_err();
         assert!(matches!(err, DomainError::CannotRemoveLastOwner));
     }
@@ -330,7 +509,7 @@ mod tests {
         let s = svc();
         let owner = Uuid::now_v7();
         let editor = Uuid::now_v7();
-        let space = s.create_space(owner, UserRole::Architect, "S".into(), None).await.unwrap();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
         s.add_member(space.id, owner, UserRole::Architect, editor, SpaceRole::Editor).await.unwrap();
         let err = s.add_member(space.id, owner, UserRole::Architect, editor, SpaceRole::Editor).await.unwrap_err();
         assert!(matches!(err, DomainError::AlreadyMember));
@@ -341,7 +520,7 @@ mod tests {
         let s = svc();
         let owner = Uuid::now_v7();
         let admin = Uuid::now_v7();
-        let space = s.create_space(owner, UserRole::Architect, "S".into(), None).await.unwrap();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
         // admin (non-member) can manage
         s.ensure_can_manage(space.id, admin, UserRole::Admin).await.unwrap();
         s.ensure_can_edit(space.id, admin, UserRole::Admin).await.unwrap();
@@ -351,7 +530,101 @@ mod tests {
     async fn empty_space_name_rejected() {
         let s = svc();
         let user = Uuid::now_v7();
-        let err = s.create_space(user, UserRole::Architect, "   ".into(), None).await.unwrap_err();
+        let err = s
+            .create_space(user, UserRole::Architect, "   ".into(), None, SpaceVisibility::Public)
+            .await
+            .unwrap_err();
         assert!(matches!(err, DomainError::SpaceNameEmpty));
+    }
+
+    // --- Visibility / read-access tests (R2) ---
+
+    #[tokio::test]
+    async fn public_space_readable_by_non_member() {
+        let s = svc();
+        let owner = Uuid::now_v7();
+        let stranger = Uuid::now_v7();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
+        // Anonymous (no id) can read public.
+        s.ensure_can_read(space.id, None, UserRole::Architect).await.unwrap();
+        // Logged-in non-member can read public.
+        s.ensure_can_read(space.id, Some(stranger), UserRole::Architect).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn private_space_denied_for_non_member() {
+        let s = svc();
+        let owner = Uuid::now_v7();
+        let stranger = Uuid::now_v7();
+        let space = s
+            .create_space(owner, UserRole::Architect, "S".into(), None, SpaceVisibility::Private)
+            .await
+            .unwrap();
+        // Anonymous denied.
+        let err = s.ensure_can_read(space.id, None, UserRole::Architect).await.unwrap_err();
+        assert!(matches!(err, DomainError::SpacePrivate));
+        // Logged-in non-member denied.
+        let err = s.ensure_can_read(space.id, Some(stranger), UserRole::Architect).await.unwrap_err();
+        assert!(matches!(err, DomainError::SpacePrivate));
+    }
+
+    #[tokio::test]
+    async fn private_space_readable_by_member() {
+        let s = svc();
+        let owner = Uuid::now_v7();
+        let editor = Uuid::now_v7();
+        let space = s
+            .create_space(owner, UserRole::Architect, "S".into(), None, SpaceVisibility::Private)
+            .await
+            .unwrap();
+        s.add_member(space.id, owner, UserRole::Architect, editor, SpaceRole::Editor).await.unwrap();
+        // Owner (member) can read.
+        s.ensure_can_read(space.id, Some(owner), UserRole::Architect).await.unwrap();
+        // Editor (member) can read.
+        s.ensure_can_read(space.id, Some(editor), UserRole::Architect).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn admin_bypasses_private() {
+        let s = svc();
+        let owner = Uuid::now_v7();
+        let admin = Uuid::now_v7();
+        let space = s
+            .create_space(owner, UserRole::Architect, "S".into(), None, SpaceVisibility::Private)
+            .await
+            .unwrap();
+        // Admin (non-member) can read private.
+        s.ensure_can_read(space.id, Some(admin), UserRole::Admin).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_visibility_requires_owner() {
+        let s = svc();
+        let owner = Uuid::now_v7();
+        let editor = Uuid::now_v7();
+        let stranger = Uuid::now_v7();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
+        s.add_member(space.id, owner, UserRole::Architect, editor, SpaceRole::Editor).await.unwrap();
+        // Editor cannot change visibility.
+        let err = s
+            .set_visibility(space.id, editor, UserRole::Architect, SpaceVisibility::Private)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotSpaceOwner));
+        // Non-member cannot change visibility.
+        let err = s
+            .set_visibility(space.id, stranger, UserRole::Architect, SpaceVisibility::Private)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotSpaceOwner));
+        // Owner can.
+        let updated = s
+            .set_visibility(space.id, owner, UserRole::Architect, SpaceVisibility::Private)
+            .await
+            .unwrap();
+        assert!(updated.visibility.is_private());
+        // Admin can.
+        let admin = Uuid::now_v7();
+        s.set_visibility(space.id, admin, UserRole::Admin, SpaceVisibility::Public).await.unwrap();
     }
 }
