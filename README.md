@@ -1,5 +1,7 @@
 # Enterprise Architecture Platform (EAP)
 
+<!-- ocr-review-test: trigger Open Code Review v2 -->
+
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 
 Enterprise Architecture Platform — Rust + React Full-Stack Demo (EAP) is a full-stack enterprise application built with a Domain-Driven Design (DDD) architecture.
