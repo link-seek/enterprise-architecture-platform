@@ -1,15 +1,8 @@
 use argon2::password_hash::{PasswordHash, PasswordVerifier};
 use argon2::Argon2;
-use serde::Deserialize;
 
 use crate::domain::error::DomainError;
 use crate::domain::user::repository::UserRepository;
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct AuthRequest {
-    pub username: String,
-    pub password: String,
-}
 
 /// Verifies credentials using a parameterized query and constant-time
 /// password hash verification.
