@@ -113,6 +113,7 @@ impl From<DomainError> for ApiError {
             DomainError::TokenRevoked => shared_common::AppError::Unauthorized("token revoked".into()),
             DomainError::InvalidAuthCode => shared_common::AppError::BadRequest("invalid authorization code".into()),
             DomainError::PkceFailed => shared_common::AppError::BadRequest("pkce verification failed".into()),
+            DomainError::InvalidPasswordHash(m) => shared_common::AppError::Internal(m),
             DomainError::Database(m) => shared_common::AppError::Database(m),
         })
     }

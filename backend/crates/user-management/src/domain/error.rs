@@ -20,6 +20,8 @@ pub enum DomainError {
     InvalidAuthCode,
     #[error("pkce verification failed")]
     PkceFailed,
+    #[error("invalid password hash: {0}")]
+    InvalidPasswordHash(String),
     #[error("database error: {0}")]
     Database(String),
 }
