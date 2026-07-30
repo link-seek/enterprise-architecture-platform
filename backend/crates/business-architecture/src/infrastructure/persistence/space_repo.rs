@@ -90,17 +90,23 @@ impl SpaceRepository for SeaOrmSpaceRepo {
             .all(&self.db)
             .await?;
 
-        // Membership rows for archived spaces are included here, but the
-        // private_member query below filters by DeletedAt.is_null(), so stale
-        // ids never produce visible results. A join to exclude archived spaces
-        // at this stage would reduce the IN-clause size but is not required for
-        // correctness.
+        // Join membership rows with their space and keep only non-archived
+        // spaces. Filtering archived spaces here (instead of only in the
+        // private_member query below) keeps the IN-clause and the in-memory
+        // id list bounded to currently-relevant spaces.
         let member_space_ids: Vec<Uuid> = space_member::Entity::find()
             .filter(space_member::Column::UserId.eq(user_id))
+            .find_also_related(space::Entity)
             .all(&self.db)
             .await?
             .into_iter()
-            .map(|m| m.space_id)
+            .filter_map(|(m, s)| {
+                if s.map(|s| s.deleted_at.is_none()).unwrap_or(false) {
+                    Some(m.space_id)
+                } else {
+                    None
+                }
+            })
             .collect();
 
         let mut result: Vec<Space> = public.into_iter().map(Into::into).collect();
@@ -156,9 +162,9 @@ impl SpaceRepository for SeaOrmSpaceRepo {
 
     async fn count_owned_by(&self, user_id: Uuid) -> Result<u64, DomainError> {
         // Count all owner memberships regardless of archive status. Quota is
-        // cumulative (上限 3 含已归档): archiving a space does not release the
-        // slot, so a user who owned 3 spaces (even if all archived) cannot
-        // create another and must ask an Admin to create one for them.
+        // cumulative (limit 3 including archived): archiving a space does not
+        // release the slot, so a user who owned 3 spaces (even if all archived)
+        // cannot create another and must ask an Admin to create one for them.
         let count = space_member::Entity::find()
             .filter(space_member::Column::UserId.eq(user_id))
             .filter(space_member::Column::Role.eq("owner"))

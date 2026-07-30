@@ -19,6 +19,7 @@ export default function SpaceDetail() {
   const { canEdit, role } = useSpaceMembership(spaceId)
   const [editOpen, setEditOpen] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
+  const [visibilityError, setVisibilityError] = useState<string | null>(null)
 
   const { data, loading, error } = useQuery<{ spaceById: Space | null }>(GET_SPACE, {
     variables: { id: spaceId },
@@ -36,6 +37,8 @@ export default function SpaceDetail() {
 
   const [setVisibility] = useMutation(SET_SPACE_VISIBILITY, {
     refetchQueries: [{ query: GET_SPACE, variables: { id: spaceId } }],
+    onError: (e) => setVisibilityError(e.message),
+    onCompleted: () => setVisibilityError(null),
   })
 
   const space = data?.spaceById
@@ -82,6 +85,7 @@ export default function SpaceDetail() {
                     onClick={() => {
                       const next: SpaceVisibility = space.visibility === 'public' ? 'private' : 'public'
                       if (confirm(`确定将此空间设为${next === 'public' ? '公开' : '私有'}？`)) {
+                        setVisibilityError(null)
                         setVisibility({ variables: { id: space.id, visibility: next } })
                       }
                     }}
@@ -98,6 +102,9 @@ export default function SpaceDetail() {
                       </>
                     )}
                   </Button>
+                )}
+                {visibilityError && (
+                  <span className="text-sm text-destructive">{visibilityError}</span>
                 )}
                 {role === 'owner' && (
                   <Button

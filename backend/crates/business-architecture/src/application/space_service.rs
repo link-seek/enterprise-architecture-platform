@@ -108,8 +108,10 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
     }
 
     /// Change a space's visibility. Requires owner or admin. Records an audit
-    /// log entry (best-effort: a logging failure is warned and does not block
-    /// the visibility change).
+    /// log entry. In strict-audit mode the log is recorded *before* the
+    /// visibility is persisted, so an audit failure returns an error with no
+    /// database mutation. In best-effort mode the change is persisted first and
+    /// a logging failure is warned but does not block the change.
     pub async fn set_visibility(
         &self,
         space_id: Uuid,
@@ -128,16 +130,29 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
         }
         let now = Utc::now();
         space.set_visibility(visibility, now);
-        let saved = self.spaces.save(&space).await?;
 
         let log = SpaceAuditLog::visibility_changed(
             Uuid::now_v7(),
-            saved.id,
+            space.id,
             actor_id,
             from.as_str(),
             visibility.as_str(),
             now,
         );
+
+        if self.strict_audit {
+            // Record the audit log before persisting so that an audit failure
+            // leaves the space unchanged (no inconsistency between the returned
+            // error and the persisted state).
+            if let Err(e) = self.audit.record(&log).await {
+                return Err(DomainError::AuditLogFailed(e.to_string()));
+            }
+            return self.spaces.save(&space).await;
+        }
+
+        // Best-effort: persist first, then audit. A logging failure is warned
+        // but does not block the visibility change.
+        let saved = self.spaces.save(&space).await?;
         if let Err(e) = self.audit.record(&log).await {
             tracing::warn!(
                 error = %e,
@@ -145,9 +160,6 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
                 actor_id = %actor_id,
                 "failed to record space visibility audit log (best-effort)"
             );
-            if self.strict_audit {
-                return Err(DomainError::AuditLogFailed(e.to_string()));
-            }
         }
         Ok(saved)
     }

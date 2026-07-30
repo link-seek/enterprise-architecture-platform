@@ -22,8 +22,6 @@ pub enum DomainError {
     NotSpaceEditor,
     #[error("only space owners can manage members")]
     NotSpaceOwner,
-    #[error("space is private and you are not a member")]
-    SpacePrivate,
     #[error("space name cannot be empty")]
     SpaceNameEmpty,
     #[error("space quota exceeded: non-admin users may own at most three spaces (including archived)")]

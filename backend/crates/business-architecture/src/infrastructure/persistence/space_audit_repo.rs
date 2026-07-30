@@ -60,8 +60,14 @@ pub async fn list_for_space(
         .await?;
     Ok(models
         .into_iter()
-        .map(SpaceAuditLog::try_from)
-        .collect::<Result<Vec<_>, _>>()?)
+        .filter_map(|m| match SpaceAuditLog::try_from(m) {
+            Ok(log) => Some(log),
+            Err(e) => {
+                tracing::warn!(error = %e, "skipping audit log with unmappable action");
+                None
+            }
+        })
+        .collect())
 }
 
 impl TryFrom<space_audit_log::Model> for SpaceAuditLog {

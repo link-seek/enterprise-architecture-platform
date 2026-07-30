@@ -777,7 +777,6 @@ fn graphql_err_with_code(e: &DomainError, code: &str) -> async_graphql::Error {
 /// Used by the read/edit guards so the frontend can branch on `extensions.code`.
 fn domain_err_to_graphql(e: DomainError) -> async_graphql::Error {
     let code = match &e {
-        DomainError::SpacePrivate => "FORBIDDEN_SPACE_PRIVATE",
         DomainError::NotSpaceMember => "FORBIDDEN_SPACE_NOT_MEMBER",
         DomainError::NotSpaceEditor => "FORBIDDEN_SPACE_NOT_EDITOR",
         DomainError::NotSpaceOwner => "FORBIDDEN_SPACE_NOT_OWNER",

@@ -80,7 +80,7 @@ export default function Processes() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.businessProcessesBySpace.map((p: Process) => (
+                {(data?.businessProcessesBySpace ?? []).map((p: Process) => (
                   <TableRow key={p.id}>
                     <TableCell className="font-medium">{p.name}</TableCell>
                     <TableCell className="text-muted-foreground">{p.description}</TableCell>

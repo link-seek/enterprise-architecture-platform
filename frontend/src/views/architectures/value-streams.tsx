@@ -48,6 +48,14 @@ export default function ValueStreams() {
     ? `/spaces/${spaceId}/architectures/value-streams`
     : '/architectures/value-streams'
 
+  if (!spaceId) {
+    return (
+      <div className="p-6">
+        <div className="text-center py-8 text-destructive">缺少空间标识，无法加载价值流。</div>
+      </div>
+    )
+  }
+
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
@@ -105,7 +113,7 @@ export default function ValueStreams() {
                               <Button variant="ghost" size="sm" onClick={() => { setHistoryLogicalId(vs.logicalId); setHistoryOpen(true) }}>
                                 <History className="h-3.5 w-3.5" />
                               </Button>
-                              {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId!} />}
+                              {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
                               <Button variant="ghost" size="sm" onClick={() => setDeleting(vs)}>
                                 <Trash2 className="h-3.5 w-3.5 text-destructive" />
                               </Button>
@@ -127,8 +135,8 @@ export default function ValueStreams() {
 
       <ValueStreamCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} />
       <ValueStreamDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
-      <VersionHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} spaceId={spaceId!} logicalId={historyLogicalId} />
-      <CreateVersionDialog open={versionOpen} onOpenChange={setVersionOpen} currentItem={versionItem} spaceId={spaceId!} />
+      <VersionHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} spaceId={spaceId} logicalId={historyLogicalId} />
+      <CreateVersionDialog open={versionOpen} onOpenChange={setVersionOpen} currentItem={versionItem} spaceId={spaceId} />
     </div>
   )
 }

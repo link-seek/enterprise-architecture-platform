@@ -11,6 +11,12 @@ use sea_orm_migration::{prelude::*, schema::*};
 /// its audit history. `actor_id` is intentionally not a foreign key so audit
 /// records survive user deletion (an actor that no longer exists is still
 /// attributable by id).
+///
+/// Note: the application only ever soft-deletes spaces (`archive_space`), so
+/// this cascade is not exercised in normal operation. A *hard* delete of an
+/// `organizations` row (e.g. by a DBA or a data-migration script) will,
+/// however, silently cascade-delete its audit logs. Anyone performing such a
+/// hard delete must explicitly back up or export the audit history first.
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
