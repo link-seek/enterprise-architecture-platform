@@ -12,6 +12,26 @@ import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { SpaceEditDialog } from './crud'
 import { SpaceMembersDialog } from './members'
 
+function renderVisibilityButtonContent(loading: boolean, visibility: SpaceVisibility) {
+  if (loading) {
+    return <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+  }
+  if (visibility === 'public') {
+    return (
+      <>
+        <EyeOff className="h-4 w-4 mr-2" />
+        设为私有
+      </>
+    )
+  }
+  return (
+    <>
+      <Eye className="h-4 w-4 mr-2" />
+      设为公开
+    </>
+  )
+}
+
 export default function SpaceDetail() {
   const { spaceId } = useParams<{ spaceId: string }>()
   const navigate = useNavigate()
@@ -91,19 +111,7 @@ export default function SpaceDetail() {
                       }
                     }}
                   >
-                    {visibilityLoading ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : space.visibility === 'public' ? (
-                      <>
-                        <EyeOff className="h-4 w-4 mr-2" />
-                        设为私有
-                      </>
-                    ) : (
-                      <>
-                        <Eye className="h-4 w-4 mr-2" />
-                        设为公开
-                      </>
-                    )}
+                    {renderVisibilityButtonContent(visibilityLoading, space.visibility)}
                   </Button>
                 )}
                 {visibilityError && (
