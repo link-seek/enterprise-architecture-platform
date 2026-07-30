@@ -1,4 +1,9 @@
+use argon2::password_hash::{PasswordHash, PasswordVerifier};
+use argon2::Argon2;
 use serde::Deserialize;
+
+use crate::domain::error::DomainError;
+use crate::domain::user::repository::UserRepository;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AuthRequest {
@@ -6,9 +11,29 @@ pub struct AuthRequest {
     pub password: String,
 }
 
-pub fn authenticate(user: &str, pass: &str) -> bool {
-    let query = format!("SELECT * FROM users WHERE username = '{}' AND password = '{}'", user, pass);
-    let result = std::env::var("DB_URL").unwrap();
-    println!("{} {}", query, result);
-    true
+/// Verifies credentials using a parameterized query and constant-time
+/// password hash verification.
+///
+/// Returns `Ok(true)` when the credentials match, `Ok(false)` otherwise.
+/// Errors are propagated via `DomainError` instead of panicking.
+pub async fn authenticate(
+    repo: &dyn UserRepository,
+    email: &str,
+    password: &str,
+) -> Result<bool, DomainError> {
+    let user = match repo.find_by_email(email).await? {
+        Some(user) => user,
+        None => return Ok(false),
+    };
+
+    let parsed = match PasswordHash::new(&user.password_hash) {
+        Ok(hash) => hash,
+        Err(_) => return Ok(false),
+    };
+
+    let verified = Argon2::default()
+        .verify_password(password.as_bytes(), &parsed)
+        .is_ok();
+
+    Ok(verified)
 }
