@@ -61,8 +61,11 @@ jobs:
           REVIEW_COMMENTS=""
           if [ -n "$REVIEW_ID" ] && [ "$REVIEW_ID" != "null" ]; then
             REVIEW_COMMENTS=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments \
-              --jq '.[] | "\(.path):\(.line) — \(.body[:200])"' 2>/dev/null || echo "")
+              --jq '.[] | "\(.path):\(.start_line // .original_line // .line // .position // "?") — \(.body[:200])"' 2>/dev/null || echo "")
           fi
+
+          REVIEW_BODY=$(echo "$REVIEW_BODY" | sed 's/<!--[^>]*-->//g')
+          REVIEW_COMMENTS=$(echo "$REVIEW_COMMENTS" | sed 's/<!--[^>]*-->//g')
 
           CI_FAILURES=""
           FAILED_CHECKS=$(gh api repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs \
