@@ -18,8 +18,8 @@ on:
       max_iterations:
         description: "Max auto-fix iterations (default 10)"
         required: false
-        type: number
-        default: 10
+        type: string
+        default: "10"
 
 permissions:
   contents: write
