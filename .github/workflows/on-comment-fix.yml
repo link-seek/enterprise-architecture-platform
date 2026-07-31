@@ -39,4 +39,10 @@ jobs:
       head-branch: ${{ inputs.head_branch }}
       head-sha: ${{ inputs.head_sha }}
       max-iterations: ${{ inputs.max_iterations }}
-    secrets: inherit
+    secrets:
+      LLM_API_KEY_1: ${{ secrets.LLM_API_KEY_1 }}
+      LLM_API_KEY_2: ${{ secrets.LLM_API_KEY_2 }}
+      LLM_API_KEY_3: ${{ secrets.LLM_API_KEY_3 }}
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+      TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
