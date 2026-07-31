@@ -5,8 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Link, useParams } from 'react-router-dom'
-import { Plus, Pencil, Trash2, History, GitBranch, MoreVertical } from 'lucide-react'
-import { useState, useCallback } from 'react'
+import { Plus, Pencil, Trash2, History, GitBranch, MoreVertical, type LucideIcon } from 'lucide-react'
+import { useState, useCallback, memo } from 'react'
 import { ValueStreamCrudDialog, ValueStreamDeleteDialog } from './crud'
 import { VersionHistoryDialog, CreateVersionDialog, ArchiveButton, GET_VALUE_STREAMS } from './version-control'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
@@ -36,7 +36,23 @@ function statusColor(status: string): BadgeVariant {
   }
 }
 
-function ValueStreamList({ nodes, canEdit, isMobile, detailBase, spaceId, onEdit, onDelete, onVersion, onHistory }: {
+interface ValueStreamAction {
+  icon: LucideIcon
+  label: string
+  onClick: () => void
+  destructive?: boolean
+}
+
+function buildActions(vs: ValueStream, onEdit: (vs: ValueStream) => void, onVersion: (vs: ValueStream) => void, onHistory: (vs: ValueStream) => void, onDelete: (vs: ValueStream) => void): ValueStreamAction[] {
+  return [
+    { icon: Pencil, label: '编辑', onClick: () => onEdit(vs) },
+    { icon: GitBranch, label: '新版本', onClick: () => onVersion(vs) },
+    { icon: History, label: '历史', onClick: () => onHistory(vs) },
+    { icon: Trash2, label: '删除', onClick: () => onDelete(vs), destructive: true },
+  ]
+}
+
+const ValueStreamList = memo(function ValueStreamList({ nodes, canEdit, isMobile, detailBase, spaceId, onEdit, onDelete, onVersion, onHistory }: {
   nodes: ValueStream[]
   canEdit: boolean
   isMobile: boolean
@@ -50,7 +66,9 @@ function ValueStreamList({ nodes, canEdit, isMobile, detailBase, spaceId, onEdit
   if (isMobile) {
     return (
       <div className="space-y-3">
-        {nodes.map((vs) => (
+        {nodes.map((vs) => {
+          const actions = buildActions(vs, onEdit, onVersion, onHistory, onDelete)
+          return (
           <div key={vs.id} className="rounded-lg border p-4 space-y-2">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
@@ -79,25 +97,22 @@ function ValueStreamList({ nodes, canEdit, isMobile, detailBase, spaceId, onEdit
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => onEdit(vs)}>
-                        <Pencil className="h-4 w-4 mr-2" />编辑
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => onVersion(vs)}>
-                        <GitBranch className="h-4 w-4 mr-2" />新版本
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => onHistory(vs)}>
-                        <History className="h-4 w-4 mr-2" />历史
-                      </DropdownMenuItem>
-                      <DropdownMenuItem className="text-destructive" onClick={() => onDelete(vs)}>
-                        <Trash2 className="h-4 w-4 mr-2" />删除
-                      </DropdownMenuItem>
+                      {actions.map((action) => {
+                        const Icon = action.icon
+                        return (
+                          <DropdownMenuItem key={action.label} className={action.destructive ? 'text-destructive' : undefined} onClick={action.onClick}>
+                            <Icon className="h-4 w-4 mr-2" />{action.label}
+                          </DropdownMenuItem>
+                        )
+                      })}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
               )}
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
     )
   }
@@ -113,7 +128,9 @@ function ValueStreamList({ nodes, canEdit, isMobile, detailBase, spaceId, onEdit
         </TableRow>
       </TableHeader>
       <TableBody>
-        {nodes.map((vs) => (
+        {nodes.map((vs) => {
+          const actions = buildActions(vs, onEdit, onVersion, onHistory, onDelete)
+          return (
           <TableRow key={vs.id}>
             <TableCell className="font-medium">
               {vs.name}
@@ -132,29 +149,26 @@ function ValueStreamList({ nodes, canEdit, isMobile, detailBase, spaceId, onEdit
                 </Link>
                 {canEdit && (
                   <>
-                    <Button variant="ghost" size="sm" onClick={() => onEdit(vs)}>
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onVersion(vs)}>
-                      <GitBranch className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onHistory(vs)}>
-                      <History className="h-3.5 w-3.5" />
-                    </Button>
+                    {actions.map((action) => {
+                      const Icon = action.icon
+                      return (
+                        <Button key={action.label} variant="ghost" size="sm" aria-label={action.label} onClick={action.onClick}>
+                          <Icon className={`h-3.5 w-3.5${action.destructive ? ' text-destructive' : ''}`} />
+                        </Button>
+                      )
+                    })}
                     {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
-                    <Button variant="ghost" size="sm" onClick={() => onDelete(vs)}>
-                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                    </Button>
                   </>
                 )}
               </div>
             </TableCell>
           </TableRow>
-        ))}
+          )
+        })}
       </TableBody>
     </Table>
   )
-}
+})
 
 export default function ValueStreams() {
   const { spaceId } = useParams<{ spaceId: string }>()

@@ -38,7 +38,8 @@ export default function SpaceDetail() {
   const [archive, { loading: archiveLoading }] = useMutation(ARCHIVE_SPACE, {
     refetchQueries: [{ query: GET_SPACES }],
     onCompleted: () => navigate('/spaces'),
-    onError: () => {
+    onError: (error) => {
+      console.error('归档空间失败:', error)
       setArchiveError('归档失败，请稍后重试')
       setArchiveConfirmOpen(false)
     },
@@ -46,14 +47,11 @@ export default function SpaceDetail() {
 
   const space = data?.organizations?.nodes?.[0]
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">加载中...</div>
-  if (error) return <div className="min-h-screen flex items-center justify-center text-destructive">加载失败: {error.message}</div>
-  if (!space) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">空间不存在</div>
-
   const handleEdit = useCallback(() => setEditOpen(true), [])
   const handleMembers = useCallback(() => setMembersOpen(true), [])
   const handleArchive = useCallback(() => { setArchiveError(null); setArchiveConfirmOpen(true) }, [])
   const confirmArchive = useCallback(() => {
+    if (!space) return
     setArchiveError(null)
     archive({ variables: { id: space.id } })
   }, [archive, space])
@@ -69,6 +67,10 @@ export default function SpaceDetail() {
     { icon: Users, label: '成员', onClick: handleMembers, visible: role === 'owner' },
     { icon: Archive, label: '归档', onClick: handleArchive, visible: role === 'owner' },
   ].filter((a) => a.visible), [canEdit, role, handleEdit, handleMembers, handleArchive])
+
+  if (loading) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">加载中...</div>
+  if (error) return <div className="min-h-screen flex items-center justify-center text-destructive">加载失败: {error.message}</div>
+  if (!space) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">空间不存在</div>
 
   return (
     <div className="min-h-screen bg-secondary flex flex-col">

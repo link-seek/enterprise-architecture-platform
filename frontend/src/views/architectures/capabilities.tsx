@@ -124,10 +124,10 @@ function CapabilityList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
               <div className="flex gap-1">
                 {canEdit && (
                   <>
-                    <Button variant="ghost" size="sm" onClick={() => onEdit(cap)}>
+                    <Button variant="ghost" size="sm" aria-label="编辑" onClick={() => onEdit(cap)}>
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onDelete(cap)}>
+                    <Button variant="ghost" size="sm" aria-label="删除" onClick={() => onDelete(cap)}>
                       <Trash2 className="h-3.5 w-3.5 text-destructive" />
                     </Button>
                   </>

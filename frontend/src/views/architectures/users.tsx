@@ -49,6 +49,14 @@ interface User {
 
 const ROLE_OPTIONS = ['admin', 'architect', 'viewer'] as const
 
+function StatusBadge({ status, className }: { status: string; className?: string }) {
+  return (
+    <Badge variant={status === 'active' ? 'default' : 'destructive'} className={className}>
+      {status}
+    </Badge>
+  )
+}
+
 function RoleSelect({ user, disabled, onChange }: {
   user: User
   disabled: boolean
@@ -138,9 +146,7 @@ export default function UsersPage() {
               <p className="font-medium truncate" title={u.name}>{u.name}</p>
               <p className="text-xs text-muted-foreground truncate" title={u.email}>{u.email}</p>
             </div>
-            <Badge variant={u.status === 'active' ? 'default' : 'destructive'} className="shrink-0">
-              {u.status}
-            </Badge>
+            <StatusBadge status={u.status} className="shrink-0" />
           </div>
           <div className="flex items-center gap-2">
             <Label className="text-xs text-muted-foreground">角色</Label>
@@ -165,14 +171,12 @@ export default function UsersPage() {
         {users.map((u) => (
           <TableRow key={u.id}>
             <TableCell className="font-medium">{u.name}</TableCell>
-            <TableCell>{u.email}</TableCell>
+            <TableCell className="max-w-[200px] truncate" title={u.email}>{u.email}</TableCell>
             <TableCell className="whitespace-nowrap">
               <RoleSelect user={u} disabled={roleUpdating === u.id} onChange={onRoleSelect} />
             </TableCell>
             <TableCell className="whitespace-nowrap">
-              <Badge variant={u.status === 'active' ? 'default' : 'destructive'}>
-                {u.status}
-              </Badge>
+              <StatusBadge status={u.status} />
             </TableCell>
           </TableRow>
         ))}
