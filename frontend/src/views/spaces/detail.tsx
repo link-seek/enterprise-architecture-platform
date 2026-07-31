@@ -63,7 +63,10 @@ export default function SpaceDetail() {
   const [setVisibility, { loading: visibilityLoading }] = useMutation(SET_SPACE_VISIBILITY, {
     refetchQueries: [{ query: GET_SPACE, variables: { id: spaceId } }],
     onError: (e) => setVisibilityError(e.message),
-    onCompleted: () => setVisibilityError(null),
+    onCompleted: () => {
+      setVisibilityError(null)
+      setPendingVisibility(null)
+    },
   })
 
   const space = data?.spaceById
@@ -113,9 +116,6 @@ export default function SpaceDetail() {
                     {renderVisibilityButtonContent(visibilityLoading, space.visibility)}
                   </Button>
                 )}
-                {visibilityError && (
-                  <span className="text-sm text-destructive">{visibilityError}</span>
-                )}
                 {role === 'owner' && (
                   <Button
                     variant="outline"
@@ -163,17 +163,22 @@ export default function SpaceDetail() {
 
       <ConfirmDialog
         open={pendingVisibility !== null}
-        onOpenChange={(v) => { if (!v) setPendingVisibility(null) }}
+        onOpenChange={(v) => {
+          if (!v) {
+            setPendingVisibility(null)
+            setVisibilityError(null)
+          }
+        }}
         title={`设为${pendingVisibility === 'public' ? '公开' : '私有'}`}
         description={`确定将此空间设为${pendingVisibility === 'public' ? '公开' : '私有'}？`}
         confirmText="确定"
         loading={visibilityLoading}
+        error={visibilityError}
         onConfirm={() => {
           if (pendingVisibility) {
             setVisibilityError(null)
             setVisibility({ variables: { id: space.id, visibility: pendingVisibility } })
           }
-          setPendingVisibility(null)
         }}
       />
 
