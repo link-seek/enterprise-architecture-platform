@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client/react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
-import { Pencil, Archive, LogIn, ArrowLeft, Users, MoreVertical, X } from 'lucide-react'
+import { Pencil, Archive, LogIn, ArrowLeft, Users, MoreVertical, X, Loader2 } from 'lucide-react'
 import { GET_SPACE, ARCHIVE_SPACE, GET_SPACES, GET_SPACE_STATS } from '@/api/spaces'
 import type { Space, SpaceStats } from '@/api/spaces'
 import { useAuthStore } from '@/stores/auth'
@@ -35,10 +35,10 @@ export default function SpaceDetail() {
   })
 
   const [archiveError, setArchiveError] = useState<string | null>(null)
-  const [archive] = useMutation(ARCHIVE_SPACE, {
+  const [archive, { loading: archiveLoading }] = useMutation(ARCHIVE_SPACE, {
     refetchQueries: [{ query: GET_SPACES }],
     onCompleted: () => navigate('/spaces'),
-    onError: (err) => setArchiveError(err.message || '归档失败'),
+    onError: () => setArchiveError('归档失败，请稍后重试'),
   })
 
   const space = data?.organizations?.nodes?.[0]
@@ -47,14 +47,13 @@ export default function SpaceDetail() {
   if (error) return <div className="min-h-screen flex items-center justify-center text-destructive">加载失败: {error.message}</div>
   if (!space) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">空间不存在</div>
 
-  const handleEdit = () => setEditOpen(true)
-  const handleMembers = () => setMembersOpen(true)
-  const handleArchive = () => { setArchiveError(null); setArchiveConfirmOpen(true) }
-  const confirmArchive = () => {
-    setArchiveConfirmOpen(false)
+  const handleEdit = useCallback(() => setEditOpen(true), [])
+  const handleMembers = useCallback(() => setMembersOpen(true), [])
+  const handleArchive = useCallback(() => { setArchiveError(null); setArchiveConfirmOpen(true) }, [])
+  const confirmArchive = useCallback(() => {
     setArchiveError(null)
     archive({ variables: { id: space.id } })
-  }
+  }, [archive, space])
 
   const statsItems = [
     { label: '价值流', value: stats?.valueStreams?.paginationInfo?.total ?? 0, to: 'value-streams' },
@@ -62,12 +61,11 @@ export default function SpaceDetail() {
     { label: '业务流程', value: stats?.businessProcesses?.paginationInfo?.total ?? 0, to: 'processes' },
   ]
 
-  const spaceActions = [
+  const visibleActions = useMemo(() => [
     { icon: Pencil, label: '编辑', onClick: handleEdit, visible: true },
     { icon: Users, label: '成员', onClick: handleMembers, visible: role === 'owner' },
     { icon: Archive, label: '归档', onClick: handleArchive, visible: role === 'owner' },
-  ]
-  const visibleActions = spaceActions.filter((a) => a.visible)
+  ].filter((a) => a.visible), [role, handleEdit, handleMembers, handleArchive])
 
   return (
     <div className="min-h-screen bg-secondary flex flex-col">
@@ -168,8 +166,8 @@ export default function SpaceDetail() {
             <DialogDescription>确定归档此空间？归档后空间将不可再编辑。</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setArchiveConfirmOpen(false)}>取消</Button>
-            <Button variant="destructive" onClick={confirmArchive}>归档</Button>
+            <Button variant="outline" onClick={() => setArchiveConfirmOpen(false)} disabled={archiveLoading}>取消</Button>
+            <Button variant="destructive" onClick={confirmArchive} disabled={archiveLoading}>{archiveLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : '归档'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

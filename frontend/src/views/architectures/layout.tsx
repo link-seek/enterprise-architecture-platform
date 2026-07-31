@@ -144,7 +144,7 @@ export default function ArchLayout() {
 
       {/* Mobile drawer */}
       <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <DialogContent className="left-0 top-0 h-full max-w-[280px] translate-x-0 translate-y-0 rounded-none sm:rounded-none p-0 data-[state=open]:slide-in-from-left-full data-[state=closed]:slide-out-to-left-full">
+        <DialogContent className="left-0 top-0 h-full max-w-[280px] max-h-none translate-x-0 translate-y-0 rounded-none sm:rounded-none p-0 data-[state=open]:slide-in-from-left-full data-[state=closed]:slide-out-to-left-full data-[state=open]:slide-in-from-top-0 data-[state=closed]:slide-out-to-top-0 data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100">
           <DialogTitle className="sr-only">导航菜单</DialogTitle>
           <div className="h-full bg-card">
             <SidebarContent onNavigate={() => setDrawerOpen(false)} spaceName={spaceName} />

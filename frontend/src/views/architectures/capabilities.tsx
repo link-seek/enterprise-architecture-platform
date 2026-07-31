@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Plus, Pencil, Trash2, Loader2, MoreVertical } from 'lucide-react'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -67,7 +67,7 @@ function CapabilityList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
         {nodes.map((cap) => (
           <div key={cap.id} className="rounded-lg border p-4 space-y-2">
             <div className="flex items-start justify-between gap-2">
-              <p className="font-medium truncate" title={cap.name}>{cap.name}</p>
+              <p className="font-medium break-words">{cap.name}</p>
               <Badge variant="outline">{cap.status}</Badge>
             </div>
             <div className="flex flex-wrap gap-1">
@@ -150,8 +150,8 @@ export default function Capabilities() {
   const [deleting, setDeleting] = useState<Capability | null>(null)
   const { data, loading, error } = useQuery<CapabilitiesQuery>(GET_CAPABILITIES, { variables: { spaceId } })
 
-  const handleEdit = useCallback((cap: Capability) => { setEditing(cap); setDialogOpen(true) }, [])
-  const handleDelete = useCallback((cap: Capability) => setDeleting(cap), [])
+  const handleEdit = (cap: Capability) => { setEditing(cap); setDialogOpen(true) }
+  const handleDelete = (cap: Capability) => setDeleting(cap)
 
   return (
     <div className="p-4 md:p-6 space-y-4">

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Link, useParams } from 'react-router-dom'
 import { Plus, Pencil, Trash2, History, GitBranch, MoreVertical } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { ValueStreamCrudDialog, ValueStreamDeleteDialog } from './crud'
 import { VersionHistoryDialog, CreateVersionDialog, ArchiveButton, GET_VALUE_STREAMS } from './version-control'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
@@ -74,7 +74,7 @@ function ValueStreamList({ nodes, canEdit, isMobile, detailBase, spaceId, onEdit
                   {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" className="h-9 w-9 p-0" aria-label="更多操作">
+                      <Button variant="ghost" size="sm" className="h-11 w-11 p-0" aria-label="更多操作">
                         <MoreVertical className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>
@@ -176,10 +176,10 @@ export default function ValueStreams() {
     ? `/spaces/${spaceId}/architectures/value-streams`
     : '/architectures/value-streams'
 
-  const handleEdit = (vs: ValueStream) => { setEditing(vs); setDialogOpen(true) }
-  const handleDelete = (vs: ValueStream) => setDeleting(vs)
-  const handleVersion = (vs: ValueStream) => { setVersionItem(vs); setVersionOpen(true) }
-  const handleHistory = (vs: ValueStream) => { setHistoryLogicalId(vs.logicalId); setHistoryOpen(true) }
+  const handleEdit = useCallback((vs: ValueStream) => { setEditing(vs); setDialogOpen(true) }, [])
+  const handleDelete = useCallback((vs: ValueStream) => setDeleting(vs), [])
+  const handleVersion = useCallback((vs: ValueStream) => { setVersionItem(vs); setVersionOpen(true) }, [])
+  const handleHistory = useCallback((vs: ValueStream) => { setHistoryLogicalId(vs.logicalId); setHistoryOpen(true) }, [])
 
   return (
     <div className="p-4 md:p-6 space-y-4">
