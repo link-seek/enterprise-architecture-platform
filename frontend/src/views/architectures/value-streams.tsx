@@ -66,6 +66,7 @@ function ValueStreamList({ nodes, canEdit, isMobile, detailBase, spaceId, onEdit
             </div>
             <div className="flex items-center justify-between pt-1">
               <Link to={`${detailBase}/${vs.id}`}>
+                {/* 移动端使用 outline 增强触摸可见性，桌面端使用 ghost 保持简洁 */}
                 <Button variant="outline" size="sm">查看</Button>
               </Link>
               {canEdit && (

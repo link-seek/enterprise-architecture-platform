@@ -113,7 +113,7 @@ function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
           <TableHead>周期(天)</TableHead>
           <TableHead>单次成本</TableHead>
           <TableHead>状态</TableHead>
-          <TableHead>操作</TableHead>
+          {canEdit && <TableHead>操作</TableHead>}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -125,20 +125,18 @@ function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
             <TableCell>{p.cycleTime ?? '-'}</TableCell>
             <TableCell>{p.costPerTransaction ?? '-'}</TableCell>
             <TableCell><Badge variant="outline">{p.status}</Badge></TableCell>
-            <TableCell>
-              <div className="flex gap-1">
-                {canEdit && (
-                  <>
-                    <Button variant="ghost" size="sm" onClick={() => onEdit(p)}>
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onDelete(p)}>
-                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                    </Button>
-                  </>
-                )}
-              </div>
-            </TableCell>
+            {canEdit && (
+              <TableCell>
+                <div className="flex gap-1">
+                  <Button variant="ghost" size="sm" onClick={() => onEdit(p)} aria-label="编辑">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => onDelete(p)} aria-label="删除">
+                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                  </Button>
+                </div>
+              </TableCell>
+            )}
           </TableRow>
         ))}
       </TableBody>

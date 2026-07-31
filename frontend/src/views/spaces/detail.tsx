@@ -38,7 +38,7 @@ export default function SpaceDetail() {
   const [archive] = useMutation(ARCHIVE_SPACE, {
     refetchQueries: [{ query: GET_SPACES }],
     onCompleted: () => navigate('/spaces'),
-    onError: (err) => setArchiveError(err instanceof Error ? err.message : '归档失败'),
+    onError: (err) => setArchiveError(err.message || '归档失败'),
   })
 
   const space = data?.organizations?.nodes?.[0]
@@ -49,7 +49,7 @@ export default function SpaceDetail() {
 
   const handleEdit = () => setEditOpen(true)
   const handleMembers = () => setMembersOpen(true)
-  const handleArchive = () => setArchiveConfirmOpen(true)
+  const handleArchive = () => { setArchiveError(null); setArchiveConfirmOpen(true) }
   const confirmArchive = () => {
     setArchiveConfirmOpen(false)
     setArchiveError(null)

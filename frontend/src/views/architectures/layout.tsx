@@ -137,14 +137,14 @@ export default function ArchLayout() {
     <div className="flex h-screen">
       {/* Desktop sidebar */}
       {!isMobile && (
-        <aside className="w-60 border-r bg-card flex-col">
+        <aside className="w-60 border-r bg-card flex flex-col">
           <SidebarContent spaceName={spaceName} />
         </aside>
       )}
 
       {/* Mobile drawer */}
       <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <DialogContent className="left-0 top-0 h-full max-w-[280px] translate-x-0 translate-y-0 rounded-none sm:rounded-none p-0 data-[state=open]:slide-in-from-left-full data-[state=closed]:slide-out-to-left-full data-[state=open]:slide-in-from-top-0 data-[state=closed]:slide-out-to-top-0">
+        <DialogContent className="left-0 top-0 h-full max-w-[280px] translate-x-0 translate-y-0 rounded-none sm:rounded-none p-0 data-[state=open]:slide-in-from-left-full data-[state=closed]:slide-out-to-left-full">
           <DialogTitle className="sr-only">导航菜单</DialogTitle>
           <div className="h-full bg-card">
             <SidebarContent onNavigate={() => setDrawerOpen(false)} spaceName={spaceName} />
