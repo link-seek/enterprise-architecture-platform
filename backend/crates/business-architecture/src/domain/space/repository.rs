@@ -37,4 +37,13 @@ pub trait MembershipRepository: Send + Sync {
 #[async_trait]
 pub trait AuditLogRepository: Send + Sync {
     async fn record(&self, log: &SpaceAuditLog) -> Result<(), DomainError>;
+    /// List audit logs for a space, ordered by `created_at` descending (most
+    /// recent first), capped at `limit` (default 200) with `offset` for
+    /// pagination.
+    async fn list_for_space(
+        &self,
+        space_id: Uuid,
+        limit: Option<u64>,
+        offset: u64,
+    ) -> Result<Vec<SpaceAuditLog>, DomainError>;
 }

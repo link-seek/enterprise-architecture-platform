@@ -39,19 +39,30 @@ impl std::fmt::Display for SpaceAuditAction {
     }
 }
 
+impl AsRef<str> for SpaceAuditAction {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
 /// An auditable space-level operation. The initial scope is visibility changes
 /// (`action = "visibility_changed"`), recorded by `spaceSetVisibility`. The
 /// shape is intentionally generic so future operations can reuse it without a
 /// schema migration.
+///
+/// Fields are `pub(crate)` so that the persistence layer (same crate) can
+/// reconstruct a log from a database row, while external crates must use the
+/// `visibility_changed` factory — which enforces the invariant that a
+/// visibility change always carries both `from_value` and `to_value`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpaceAuditLog {
-    pub id: Uuid,
-    pub space_id: Uuid,
-    pub actor_id: Uuid,
-    pub action: SpaceAuditAction,
-    pub from_value: Option<String>,
-    pub to_value: Option<String>,
-    pub created_at: DateTime<Utc>,
+    pub(crate) id: Uuid,
+    pub(crate) space_id: Uuid,
+    pub(crate) actor_id: Uuid,
+    pub(crate) action: SpaceAuditAction,
+    pub(crate) from_value: Option<String>,
+    pub(crate) to_value: Option<String>,
+    pub(crate) created_at: DateTime<Utc>,
 }
 
 impl SpaceAuditLog {
@@ -72,5 +83,33 @@ impl SpaceAuditLog {
             to_value: Some(to.to_owned()),
             created_at: now,
         }
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn space_id(&self) -> Uuid {
+        self.space_id
+    }
+
+    pub fn actor_id(&self) -> Uuid {
+        self.actor_id
+    }
+
+    pub fn action(&self) -> &SpaceAuditAction {
+        &self.action
+    }
+
+    pub fn from_value(&self) -> Option<&str> {
+        self.from_value.as_deref()
+    }
+
+    pub fn to_value(&self) -> Option<&str> {
+        self.to_value.as_deref()
+    }
+
+    pub fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
     }
 }

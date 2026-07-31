@@ -120,7 +120,8 @@ export default function SpaceDetail() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setConfirmArchive(true)}
+                    disabled={archiveLoading}
+                    onClick={() => { setArchiveError(null); setConfirmArchive(true) }}
                   >
                     <Archive className="h-4 w-4 mr-2" />
                     归档

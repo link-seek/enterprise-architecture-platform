@@ -34,6 +34,7 @@ export default function ValueStreams() {
 
   const { data, loading, error } = useQuery(GET_VALUE_STREAMS, {
     variables: { spaceId },
+    skip: !spaceId,
   })
 
   const statusColor = (status: string) => {

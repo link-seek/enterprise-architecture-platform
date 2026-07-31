@@ -28,8 +28,21 @@ export function ConfirmDialog({
   error = null,
 }: ConfirmDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (loading && !nextOpen) return
+        onOpenChange(nextOpen)
+      }}
+    >
+      <DialogContent
+        onInteractOutside={(e) => {
+          if (loading) e.preventDefault()
+        }}
+        onEscapeKeyDown={(e) => {
+          if (loading) e.preventDefault()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}

@@ -7,16 +7,13 @@ use sea_orm_migration::{prelude::*, schema::*};
 /// `from_value`, `to_value`) so future auditable operations can reuse it
 /// without a migration.
 ///
-/// Foreign key to `organizations` cascades on delete: removing a space clears
-/// its audit history. `actor_id` is intentionally not a foreign key so audit
+/// Foreign key to `organizations` uses `ON DELETE RESTRICT`: audit logs are
+/// immutable compliance records and must never be silently destroyed. A hard
+/// delete of an `organizations` row that still has audit history will fail at
+/// the database level, forcing the operator to explicitly back up or export the
+/// audit history first. `actor_id` is intentionally not a foreign key so audit
 /// records survive user deletion (an actor that no longer exists is still
 /// attributable by id).
-///
-/// Note: the application only ever soft-deletes spaces (`archive_space`), so
-/// this cascade is not exercised in normal operation. A *hard* delete of an
-/// `organizations` row (e.g. by a DBA or a data-migration script) will,
-/// however, silently cascade-delete its audit logs. Anyone performing such a
-/// hard delete must explicitly back up or export the audit history first.
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -34,7 +31,10 @@ impl MigrationTrait for Migration {
                     .col(string(SpaceAuditLogs::Action))
                     .col(string_null(SpaceAuditLogs::FromValue))
                     .col(string_null(SpaceAuditLogs::ToValue))
-                    .col(timestamp_with_time_zone(SpaceAuditLogs::CreatedAt))
+                    .col(
+                        timestamp_with_time_zone(SpaceAuditLogs::CreatedAt)
+                            .default(Expr::current_timestamp()),
+                    )
                     .primary_key(
                         Index::create().col(SpaceAuditLogs::Id),
                     )
@@ -43,7 +43,7 @@ impl MigrationTrait for Migration {
                             .name("fk_space_audit_logs_space")
                             .from(SpaceAuditLogs::Table, SpaceAuditLogs::SpaceId)
                             .to(Spaces::Table, Spaces::Id)
-                            .on_delete(ForeignKeyAction::Cascade),
+                            .on_delete(ForeignKeyAction::Restrict),
                     )
                     .to_owned(),
             )

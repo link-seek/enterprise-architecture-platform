@@ -274,3 +274,9 @@ impl SpaceVisibility {
         }
     }
 }
+
+impl Default for SpaceVisibility {
+    fn default() -> Self {
+        SpaceVisibility::Public
+    }
+}

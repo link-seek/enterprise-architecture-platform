@@ -35,39 +35,38 @@ impl AuditLogRepository for SeaOrmAuditLogRepo {
         active.insert(&self.db).await?;
         Ok(())
     }
-}
 
-// Re-exported for callers that need to query audit history directly (e.g. an
-// admin audit view). Not currently exposed via GraphQL.
-//
-// Results are ordered by `created_at` descending (most recent first) and
-// capped at `limit` (default 200) to bound memory usage for spaces with large
-// audit histories. Callers may pass an offset for pagination.
-#[allow(dead_code)]
-pub async fn list_for_space(
-    db: &DatabaseConnection,
-    space_id: Uuid,
-    limit: Option<u64>,
-    offset: u64,
-) -> Result<Vec<SpaceAuditLog>, DomainError> {
-    let cap = limit.unwrap_or(200).min(1000);
-    let models = space_audit_log::Entity::find()
-        .filter(space_audit_log::Column::SpaceId.eq(space_id))
-        .order_by_desc(space_audit_log::Column::CreatedAt)
-        .offset(offset)
-        .limit(cap)
-        .all(db)
-        .await?;
-    Ok(models
-        .into_iter()
-        .filter_map(|m| match SpaceAuditLog::try_from(m) {
-            Ok(log) => Some(log),
-            Err(e) => {
-                tracing::warn!(error = %e, "skipping audit log with unmappable action");
-                None
-            }
-        })
-        .collect())
+    async fn list_for_space(
+        &self,
+        space_id: Uuid,
+        limit: Option<u64>,
+        offset: u64,
+    ) -> Result<Vec<SpaceAuditLog>, DomainError> {
+        let cap = limit.unwrap_or(200).min(1000);
+        // Filter to rows with a known action *at the database level* so that
+        // offset/limit apply to the same set the caller receives. Without this,
+        // rows with an unmappable action would consume offset/limit slots and
+        // cause the returned page to be shorter than `limit` or skip real
+        // entries.
+        let models = space_audit_log::Entity::find()
+            .filter(space_audit_log::Column::SpaceId.eq(space_id))
+            .filter(space_audit_log::Column::Action.eq(SpaceAuditAction::visibility_changed().as_str()))
+            .order_by_desc(space_audit_log::Column::CreatedAt)
+            .offset(offset)
+            .limit(cap)
+            .all(&self.db)
+            .await?;
+        Ok(models
+            .into_iter()
+            .filter_map(|m| match SpaceAuditLog::try_from(m) {
+                Ok(log) => Some(log),
+                Err(e) => {
+                    tracing::warn!(error = %e, "skipping audit log with unmappable action");
+                    None
+                }
+            })
+            .collect())
+    }
 }
 
 impl TryFrom<space_audit_log::Model> for SpaceAuditLog {

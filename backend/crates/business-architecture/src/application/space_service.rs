@@ -108,10 +108,12 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
     }
 
     /// Change a space's visibility. Requires owner or admin. Records an audit
-    /// log entry. In strict-audit mode the log is recorded *before* the
-    /// visibility is persisted, so an audit failure returns an error with no
-    /// database mutation. In best-effort mode the change is persisted first and
-    /// a logging failure is warned but does not block the change.
+    /// log entry. In strict-audit mode the visibility is persisted *first* and
+    /// the audit log recorded *after*, so a persistence failure leaves no
+    /// orphan audit log claiming a change that did not happen. An audit-log
+    /// failure in strict mode still returns `AuditLogFailed` (the change is
+    /// real but unaudited). In best-effort mode a logging failure is warned
+    /// but does not block the change.
     pub async fn set_visibility(
         &self,
         space_id: Uuid,
@@ -140,20 +142,15 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
             now,
         );
 
-        if self.strict_audit {
-            // Record the audit log before persisting so that an audit failure
-            // leaves the space unchanged (no inconsistency between the returned
-            // error and the persisted state).
-            if let Err(e) = self.audit.record(&log).await {
+        // Persist the visibility change first. This avoids producing an orphan
+        // audit log when the save fails — the log would otherwise claim a
+        // change that never happened.
+        let saved = self.spaces.save(&space).await?;
+
+        if let Err(e) = self.audit.record(&log).await {
+            if self.strict_audit {
                 return Err(DomainError::AuditLogFailed(e.to_string()));
             }
-            return self.spaces.save(&space).await;
-        }
-
-        // Best-effort: persist first, then audit. A logging failure is warned
-        // but does not block the visibility change.
-        let saved = self.spaces.save(&space).await?;
-        if let Err(e) = self.audit.record(&log).await {
             tracing::warn!(
                 error = %e,
                 space_id = %saved.id,
@@ -435,19 +432,56 @@ mod tests {
 
     struct FakeAuditRepo {
         logs: tokio::sync::Mutex<Vec<SpaceAuditLog>>,
+        fail_record: std::sync::atomic::AtomicBool,
     }
 
     impl FakeAuditRepo {
         fn new() -> Self {
-            Self { logs: tokio::sync::Mutex::new(Vec::new()) }
+            Self {
+                logs: tokio::sync::Mutex::new(Vec::new()),
+                fail_record: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+
+        fn failing() -> Self {
+            let r = Self::new();
+            r.fail_record
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            r
+        }
+
+        async fn count(&self) -> usize {
+            self.logs.lock().await.len()
         }
     }
 
     #[async_trait::async_trait]
     impl AuditLogRepository for FakeAuditRepo {
         async fn record(&self, log: &SpaceAuditLog) -> Result<(), DomainError> {
+            if self.fail_record.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(DomainError::AuditLogFailed("injected failure".into()));
+            }
             self.logs.lock().await.push(log.clone());
             Ok(())
+        }
+
+        async fn list_for_space(
+            &self,
+            space_id: Uuid,
+            limit: Option<u64>,
+            offset: u64,
+        ) -> Result<Vec<SpaceAuditLog>, DomainError> {
+            let cap = limit.unwrap_or(200).min(1000);
+            Ok(self
+                .logs
+                .lock()
+                .await
+                .iter()
+                .filter(|l| l.space_id() == space_id)
+                .skip(offset as usize)
+                .take(cap as usize)
+                .cloned()
+                .collect())
         }
     }
 
@@ -457,6 +491,17 @@ mod tests {
             FakeSpaceRepo::new(members.clone()),
             FakeMemberRepo::new(members),
             FakeAuditRepo::new(),
+        )
+    }
+
+    fn svc_with_audit(
+        audit: FakeAuditRepo,
+    ) -> SpaceService<FakeSpaceRepo, FakeMemberRepo, FakeAuditRepo> {
+        let members: MemberStore = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        SpaceService::new(
+            FakeSpaceRepo::new(members.clone()),
+            FakeMemberRepo::new(members),
+            audit,
         )
     }
 
@@ -695,5 +740,42 @@ mod tests {
             .unwrap();
         assert_eq!(result.updated_at, original_updated_at);
         assert!(result.visibility.is_public());
+    }
+
+    #[tokio::test]
+    async fn strict_audit_failure_returns_error() {
+        let audit = FakeAuditRepo::failing();
+        let s = svc_with_audit(audit).with_strict_audit();
+        let owner = Uuid::now_v7();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
+        // Audit recording is injected to fail. In strict mode the visibility
+        // change should surface an AuditLogFailed error.
+        let err = s
+            .set_visibility(space.id, owner, UserRole::Architect, SpaceVisibility::Private)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::AuditLogFailed(_)));
+        // The space state was persisted before the audit attempt, so the
+        // visibility is now private even though the operation returned an
+        // error — the change is real but unaudited.
+        let current = s.spaces.find_by_id(space.id).await.unwrap().unwrap();
+        assert!(current.visibility.is_private());
+    }
+
+    #[tokio::test]
+    async fn best_effort_audit_failure_succeeds() {
+        let audit = FakeAuditRepo::failing();
+        let s = svc_with_audit(audit);
+        let owner = Uuid::now_v7();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
+        // In best-effort mode an audit failure is swallowed: the visibility
+        // change succeeds and no error is returned.
+        let result = s
+            .set_visibility(space.id, owner, UserRole::Architect, SpaceVisibility::Private)
+            .await
+            .unwrap();
+        assert!(result.visibility.is_private());
+        // No audit log was recorded (recording always fails).
+        assert_eq!(s.audit.count().await, 0);
     }
 }

@@ -739,9 +739,11 @@ fn parse_uuid_arg<'a>(ctx: &'a async_graphql::dynamic::ResolverContext<'a>, name
 }
 
 /// Parse a `visibility` argument into `SpaceVisibility`. Returns an error for
-/// unrecognized values instead of silently defaulting to `Public`, so a typo
-/// (e.g. `"Private"`, `"PRIVATE"`, `"internal"`) surfaces as a GraphQL error
-/// rather than silently widening a private space to public.
+/// unrecognized values so a typo (e.g. `"Private"`, `"PRIVATE"`, `"internal"`)
+/// surfaces as a GraphQL error rather than silently widening a private space to
+/// public. When the argument is omitted, defaults to `Private` (least
+/// privilege) so a caller bug that drops the argument cannot accidentally
+/// expose a space publicly.
 fn parse_visibility_arg(
     ctx: &async_graphql::dynamic::ResolverContext<'_>,
     name: &str,
@@ -752,7 +754,10 @@ fn parse_visibility_arg(
         Some(other) => Err(async_graphql::Error::new(format!(
             "Invalid visibility value '{other}': expected 'public' or 'private'"
         ))),
-        None => Ok(SpaceVisibility::Public),
+        // When the argument is omitted, default to the least-privileged
+        // visibility (Private) rather than Public. This prevents a caller bug
+        // that omits the argument from accidentally exposing a space publicly.
+        None => Ok(SpaceVisibility::Private),
     }
 }
 
@@ -794,6 +799,13 @@ fn domain_err_to_graphql(e: DomainError) -> async_graphql::Error {
         | DomainError::CannotRemoveLastOwner | DomainError::NotOwner => "FORBIDDEN",
     };
     graphql_err_with_code(&e, code)
+}
+
+/// Map a SeaORM database error to a GraphQL error carrying a semantic
+/// `extensions.code` of `INTERNAL_ERROR`, so the frontend can branch on the
+/// code instead of parsing a free-text message.
+fn db_err_to_graphql(e: impl std::fmt::Display) -> async_graphql::Error {
+    domain_err_to_graphql(DomainError::Database(e.to_string()))
 }
 
 fn register_space_domain_mutations(builder: &mut Builder) {
@@ -2077,9 +2089,10 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                     .map_err(domain_err_to_graphql)?;
                 let rows = value_stream::Entity::find()
                     .filter(value_stream::Column::SpaceId.eq(space_id))
+                    .filter(value_stream::Column::DeletedAt.is_null())
                     .all(db)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(db_err_to_graphql)?;
                 let values: Vec<FieldValue> =
                     rows.into_iter().map(FieldValue::owned_any).collect();
                 Ok(Some(FieldValue::list(values)))
@@ -2105,9 +2118,10 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                     .map_err(domain_err_to_graphql)?;
                 let rows = business_capability::Entity::find()
                     .filter(business_capability::Column::SpaceId.eq(space_id))
+                    .filter(business_capability::Column::DeletedAt.is_null())
                     .all(db)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(db_err_to_graphql)?;
                 let values: Vec<FieldValue> =
                     rows.into_iter().map(FieldValue::owned_any).collect();
                 Ok(Some(FieldValue::list(values)))
@@ -2133,9 +2147,10 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                     .map_err(domain_err_to_graphql)?;
                 let rows = business_process::Entity::find()
                     .filter(business_process::Column::SpaceId.eq(space_id))
+                    .filter(business_process::Column::DeletedAt.is_null())
                     .all(db)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(db_err_to_graphql)?;
                 let values: Vec<FieldValue> =
                     rows.into_iter().map(FieldValue::owned_any).collect();
                 Ok(Some(FieldValue::list(values)))
@@ -2162,9 +2177,10 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                     .map_err(domain_err_to_graphql)?;
                 let count = value_stream::Entity::find()
                     .filter(value_stream::Column::SpaceId.eq(space_id))
+                    .filter(value_stream::Column::DeletedAt.is_null())
                     .count(db)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(db_err_to_graphql)?;
                 Ok(Some(FieldValue::value(count as i64)))
             })
         },
@@ -2188,9 +2204,10 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                     .map_err(domain_err_to_graphql)?;
                 let count = business_capability::Entity::find()
                     .filter(business_capability::Column::SpaceId.eq(space_id))
+                    .filter(business_capability::Column::DeletedAt.is_null())
                     .count(db)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(db_err_to_graphql)?;
                 Ok(Some(FieldValue::value(count as i64)))
             })
         },
@@ -2214,9 +2231,10 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                     .map_err(domain_err_to_graphql)?;
                 let count = business_process::Entity::find()
                     .filter(business_process::Column::SpaceId.eq(space_id))
+                    .filter(business_process::Column::DeletedAt.is_null())
                     .count(db)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(db_err_to_graphql)?;
                 Ok(Some(FieldValue::value(count as i64)))
             })
         },
@@ -2247,9 +2265,10 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                 let row = value_stream::Entity::find()
                     .filter(value_stream::Column::Id.eq(id))
                     .filter(value_stream::Column::SpaceId.eq(space_id))
+                    .filter(value_stream::Column::DeletedAt.is_null())
                     .one(db)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(db_err_to_graphql)?;
                 Ok(row.map(FieldValue::owned_any))
             })
         },
@@ -2277,9 +2296,10 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                 let rows = value_stream::Entity::find()
                     .filter(value_stream::Column::SpaceId.eq(space_id))
                     .filter(value_stream::Column::LogicalId.eq(logical_id))
+                    .filter(value_stream::Column::DeletedAt.is_null())
                     .all(db)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(db_err_to_graphql)?;
                 let values: Vec<FieldValue> =
                     rows.into_iter().map(FieldValue::owned_any).collect();
                 Ok(Some(FieldValue::list(values)))
@@ -2313,9 +2333,10 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                     .map_err(domain_err_to_graphql)?;
                 let rows = process_step::Entity::find()
                     .filter(process_step::Column::ProcessId.eq(process_id))
+                    .filter(process_step::Column::DeletedAt.is_null())
                     .all(db)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(db_err_to_graphql)?;
                 let values: Vec<FieldValue> =
                     rows.into_iter().map(FieldValue::owned_any).collect();
                 Ok(Some(FieldValue::list(values)))
@@ -2342,9 +2363,10 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                     .map_err(domain_err_to_graphql)?;
                 let rows = value_stream_stage::Entity::find()
                     .filter(value_stream_stage::Column::ValueStreamId.eq(vs_id))
+                    .filter(value_stream_stage::Column::DeletedAt.is_null())
                     .all(db)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(db_err_to_graphql)?;
                 let values: Vec<FieldValue> =
                     rows.into_iter().map(FieldValue::owned_any).collect();
                 Ok(Some(FieldValue::list(values)))
@@ -2373,7 +2395,7 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                     .filter(capability_process::Column::CapabilityId.eq(cap_id))
                     .all(db)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(db_err_to_graphql)?;
                 let values: Vec<FieldValue> =
                     rows.into_iter().map(FieldValue::owned_any).collect();
                 Ok(Some(FieldValue::list(values)))
@@ -2402,7 +2424,7 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                     .filter(stage_capability::Column::StageId.eq(stage_id))
                     .all(db)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(db_err_to_graphql)?;
                 let values: Vec<FieldValue> =
                     rows.into_iter().map(FieldValue::owned_any).collect();
                 Ok(Some(FieldValue::list(values)))
