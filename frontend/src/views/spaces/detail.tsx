@@ -43,6 +43,7 @@ export default function SpaceDetail() {
   const [visibilityError, setVisibilityError] = useState<string | null>(null)
   const [pendingVisibility, setPendingVisibility] = useState<SpaceVisibility | null>(null)
   const [confirmArchive, setConfirmArchive] = useState(false)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
 
   const { data, loading, error } = useQuery<{ spaceById: Space | null }>(GET_SPACE, {
     variables: { id: spaceId },
@@ -53,9 +54,10 @@ export default function SpaceDetail() {
     skip: !spaceId,
   })
 
-  const [archive] = useMutation(ARCHIVE_SPACE, {
+  const [archive, { loading: archiveLoading }] = useMutation(ARCHIVE_SPACE, {
     refetchQueries: [{ query: GET_SPACES }],
     onCompleted: () => navigate('/spaces'),
+    onError: (e) => setArchiveError(e.message),
   })
 
   const [setVisibility, { loading: visibilityLoading }] = useMutation(SET_SPACE_VISIBILITY, {
@@ -177,13 +179,20 @@ export default function SpaceDetail() {
 
       <ConfirmDialog
         open={confirmArchive}
-        onOpenChange={setConfirmArchive}
+        onOpenChange={(v) => {
+          if (!v) {
+            setConfirmArchive(false)
+            setArchiveError(null)
+          }
+        }}
         title="确认归档"
         description="确定归档此空间？"
         confirmText="归档"
         destructive
+        loading={archiveLoading}
+        error={archiveError}
         onConfirm={() => {
-          setConfirmArchive(false)
+          setArchiveError(null)
           archive({ variables: { id: space.id } })
         }}
       />
