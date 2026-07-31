@@ -137,7 +137,7 @@ export default function ArchLayout() {
     <div className="flex h-screen">
       {/* Desktop sidebar */}
       {!isMobile && (
-        <aside className="hidden md:flex w-60 border-r bg-card flex-col">
+        <aside className="w-60 border-r bg-card flex-col">
           <SidebarContent spaceName={spaceName} />
         </aside>
       )}

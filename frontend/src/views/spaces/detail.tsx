@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Pencil, Archive, LogIn, ArrowLeft, Users, MoreVertical } from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Pencil, Archive, LogIn, ArrowLeft, Users, MoreVertical, X } from 'lucide-react'
 import { GET_SPACE, ARCHIVE_SPACE, GET_SPACES, GET_SPACE_STATS } from '@/api/spaces'
 import type { Space, SpaceStats } from '@/api/spaces'
 import { useAuthStore } from '@/stores/auth'
@@ -22,6 +23,7 @@ export default function SpaceDetail() {
   const isMobile = useIsMobile()
   const [editOpen, setEditOpen] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
 
   const { data, loading, error } = useQuery<{ organizations: { nodes: Space[] } }>(GET_SPACE, {
     variables: { id: spaceId },
@@ -47,11 +49,11 @@ export default function SpaceDetail() {
 
   const handleEdit = () => setEditOpen(true)
   const handleMembers = () => setMembersOpen(true)
-  const handleArchive = () => {
-    if (confirm('确定归档此空间？')) {
-      setArchiveError(null)
-      archive({ variables: { id: space.id } })
-    }
+  const handleArchive = () => setArchiveConfirmOpen(true)
+  const confirmArchive = () => {
+    setArchiveConfirmOpen(false)
+    setArchiveError(null)
+    archive({ variables: { id: space.id } })
   }
 
   const statsItems = [
@@ -65,6 +67,7 @@ export default function SpaceDetail() {
     { icon: Users, label: '成员', onClick: handleMembers, visible: role === 'owner' },
     { icon: Archive, label: '归档', onClick: handleArchive, visible: role === 'owner' },
   ]
+  const visibleActions = spaceActions.filter((a) => a.visible)
 
   return (
     <div className="min-h-screen bg-secondary flex flex-col">
@@ -88,7 +91,7 @@ export default function SpaceDetail() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    {spaceActions.filter((a) => a.visible).map((action) => {
+                    {visibleActions.map((action) => {
                       const Icon = action.icon
                       return (
                         <DropdownMenuItem key={action.label} onClick={action.onClick}>
@@ -100,7 +103,7 @@ export default function SpaceDetail() {
                 </DropdownMenu>
               ) : (
                 <>
-                  {spaceActions.filter((a) => a.visible).map((action) => {
+                  {visibleActions.map((action) => {
                     const Icon = action.icon
                     return (
                       <Button key={action.label} variant="outline" size="sm" onClick={action.onClick}>
@@ -124,7 +127,17 @@ export default function SpaceDetail() {
 
       <main className="flex-1 container mx-auto max-w-6xl px-4 py-10">
         {archiveError && (
-          <div className="mb-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">{archiveError}</div>
+          <div className="mb-4 flex items-start justify-between gap-3 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+            <span>{archiveError}</span>
+            <button
+              type="button"
+              onClick={() => setArchiveError(null)}
+              aria-label="关闭错误提示"
+              className="shrink-0 text-destructive hover:opacity-70"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         )}
         <p className="text-muted-foreground">{space.description || '暂无描述'}</p>
 
@@ -147,6 +160,19 @@ export default function SpaceDetail() {
 
       <SpaceEditDialog space={space} open={editOpen} onOpenChange={setEditOpen} />
       <SpaceMembersDialog spaceId={space.id} open={membersOpen} onOpenChange={setMembersOpen} />
+
+      <Dialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认归档</DialogTitle>
+            <DialogDescription>确定归档此空间？归档后空间将不可再编辑。</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setArchiveConfirmOpen(false)}>取消</Button>
+            <Button variant="destructive" onClick={confirmArchive}>归档</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

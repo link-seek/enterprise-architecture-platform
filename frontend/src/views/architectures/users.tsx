@@ -49,6 +49,27 @@ interface User {
 
 const ROLE_OPTIONS = ['admin', 'architect', 'viewer'] as const
 
+function RoleSelect({ user, disabled, onChange }: {
+  user: User
+  disabled: boolean
+  onChange: (user: User, newRole: string) => void
+}) {
+  return (
+    <select
+      value={user.role}
+      disabled={disabled}
+      onChange={(e) => onChange(user, e.target.value)}
+      className="border rounded px-2 py-1 text-sm bg-background"
+    >
+      {ROLE_OPTIONS.map((r) => (
+        <option key={r} value={r}>
+          {r}
+        </option>
+      ))}
+    </select>
+  )
+}
+
 export default function UsersPage() {
   const { data, loading, refetch } = useQuery(GET_USERS)
   const isMobile = useIsMobile()
@@ -100,6 +121,71 @@ export default function UsersPage() {
     confirmRole.user.role === 'admin' &&
     confirmRole.newRole !== 'admin'
 
+  const renderLoading = () => (
+    <div className="text-center py-8 text-muted-foreground">加载中...</div>
+  )
+
+  const renderEmpty = () => (
+    <div className="text-center py-8 text-muted-foreground">暂无数据</div>
+  )
+
+  const renderMobile = () => (
+    <div className="space-y-3">
+      {users.map((u) => (
+        <div key={u.id} className="rounded-lg border p-4 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-medium truncate" title={u.name}>{u.name}</p>
+              <p className="text-xs text-muted-foreground truncate" title={u.email}>{u.email}</p>
+            </div>
+            <Badge variant={u.status === 'active' ? 'default' : 'destructive'} className="shrink-0">
+              {u.status}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground">角色</Label>
+            <RoleSelect user={u} disabled={roleUpdating === u.id} onChange={onRoleSelect} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+
+  const renderDesktop = () => (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>姓名</TableHead>
+          <TableHead>邮箱</TableHead>
+          <TableHead>角色</TableHead>
+          <TableHead>状态</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {users.map((u) => (
+          <TableRow key={u.id}>
+            <TableCell className="font-medium">{u.name}</TableCell>
+            <TableCell>{u.email}</TableCell>
+            <TableCell className="whitespace-nowrap">
+              <RoleSelect user={u} disabled={roleUpdating === u.id} onChange={onRoleSelect} />
+            </TableCell>
+            <TableCell className="whitespace-nowrap">
+              <Badge variant={u.status === 'active' ? 'default' : 'destructive'}>
+                {u.status}
+              </Badge>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+
+  const renderContent = () => {
+    if (loading) return renderLoading()
+    if (users.length === 0) return renderEmpty()
+    return isMobile ? renderMobile() : renderDesktop()
+  }
+
   return (
     <div className="p-4 md:p-6 space-y-4">
       <div className="flex items-center justify-between">
@@ -110,80 +196,7 @@ export default function UsersPage() {
         </Button>
       </div>
 
-      {loading ? (
-        <div className="text-center py-8 text-muted-foreground">加载中...</div>
-      ) : users.length === 0 ? (
-        <div className="text-center py-8 text-muted-foreground">暂无数据</div>
-      ) : isMobile ? (
-        <div className="space-y-3">
-          {users.map((u) => (
-            <div key={u.id} className="rounded-lg border p-4 space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-medium truncate" title={u.name}>{u.name}</p>
-                  <p className="text-xs text-muted-foreground truncate" title={u.email}>{u.email}</p>
-                </div>
-                <Badge variant={u.status === 'active' ? 'default' : 'destructive'} className="shrink-0">
-                  {u.status}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                <Label className="text-xs text-muted-foreground">角色</Label>
-                <select
-                  value={u.role}
-                  disabled={roleUpdating === u.id}
-                  onChange={(e) => onRoleSelect(u, e.target.value)}
-                  className="border rounded px-2 py-1 text-sm bg-background"
-                >
-                  {ROLE_OPTIONS.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>姓名</TableHead>
-              <TableHead>邮箱</TableHead>
-              <TableHead>角色</TableHead>
-              <TableHead>状态</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {users.map((u) => (
-              <TableRow key={u.id}>
-                <TableCell className="font-medium">{u.name}</TableCell>
-                <TableCell>{u.email}</TableCell>
-                <TableCell className="whitespace-nowrap">
-                  <select
-                    value={u.role}
-                    disabled={roleUpdating === u.id}
-                    onChange={(e) => onRoleSelect(u, e.target.value)}
-                    className="border rounded px-2 py-1 text-sm bg-background"
-                  >
-                    {ROLE_OPTIONS.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
-                </TableCell>
-                <TableCell className="whitespace-nowrap">
-                  <Badge variant={u.status === 'active' ? 'default' : 'destructive'}>
-                    {u.status}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+      {renderContent()}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>

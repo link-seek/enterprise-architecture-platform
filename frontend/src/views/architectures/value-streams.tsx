@@ -55,7 +55,9 @@ function ValueStreamList({ nodes, canEdit, isMobile, detailBase, spaceId, onEdit
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="font-medium truncate" title={vs.name}>{vs.name}</p>
-                <p className="text-xs text-muted-foreground truncate" title={vs.description}>{vs.description}</p>
+                {vs.description && (
+                  <p className="text-xs text-muted-foreground truncate" title={vs.description}>{vs.description}</p>
+                )}
               </div>
               <div className="flex gap-1 shrink-0">
                 <Badge variant="secondary" className="font-mono">{vs.businessVersion}</Badge>
@@ -71,7 +73,7 @@ function ValueStreamList({ nodes, canEdit, isMobile, detailBase, spaceId, onEdit
                   {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" className="h-9 w-9 p-0">
+                      <Button variant="ghost" size="sm" className="h-9 w-9 p-0" aria-label="更多操作">
                         <MoreVertical className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>
