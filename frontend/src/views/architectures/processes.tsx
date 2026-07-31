@@ -46,6 +46,102 @@ interface Process {
   sla: string | null; cycleTime: number | null; costPerTransaction: number | null; status: string
 }
 
+interface ProcessesQuery {
+  businessProcesses?: { nodes: Process[]; paginationInfo?: { total: number } }
+}
+
+function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
+  nodes: Process[]
+  canEdit: boolean
+  isMobile: boolean
+  onEdit: (p: Process) => void
+  onDelete: (p: Process) => void
+}) {
+  if (isMobile) {
+    return (
+      <div className="space-y-3">
+        {nodes.map((p) => (
+          <div key={p.id} className="rounded-lg border p-4 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="font-medium truncate" title={p.name}>{p.name}</p>
+                <p className="text-xs text-muted-foreground truncate" title={p.description}>{p.description}</p>
+              </div>
+              <Badge variant="outline" className="shrink-0">{p.status}</Badge>
+            </div>
+            <div className="flex flex-wrap gap-1 text-xs text-muted-foreground">
+              <span>SLA: {p.sla || '-'}</span>
+              <span>周期: {p.cycleTime || '-'}</span>
+              <span>成本: {p.costPerTransaction || '-'}</span>
+            </div>
+            {canEdit && (
+              <div className="flex justify-end pt-1">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => onEdit(p)}>
+                      <Pencil className="h-4 w-4 mr-2" />编辑
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="text-destructive" onClick={() => onDelete(p)}>
+                      <Trash2 className="h-4 w-4 mr-2" />删除
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>名称</TableHead>
+          <TableHead>描述</TableHead>
+          <TableHead>SLA</TableHead>
+          <TableHead>周期(天)</TableHead>
+          <TableHead>单次成本</TableHead>
+          <TableHead>状态</TableHead>
+          <TableHead>操作</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {nodes.map((p) => (
+          <TableRow key={p.id}>
+            <TableCell className="font-medium">{p.name}</TableCell>
+            <TableCell className="text-muted-foreground">{p.description}</TableCell>
+            <TableCell>{p.sla || '-'}</TableCell>
+            <TableCell>{p.cycleTime || '-'}</TableCell>
+            <TableCell>{p.costPerTransaction || '-'}</TableCell>
+            <TableCell><Badge variant="outline">{p.status}</Badge></TableCell>
+            <TableCell>
+              <div className="flex gap-1">
+                {canEdit && (
+                  <>
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(p)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(p)}>
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
+                  </>
+                )}
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+
 export default function Processes() {
   const { spaceId } = useParams<{ spaceId: string }>()
   const { canEdit } = useSpaceMembership(spaceId)
@@ -53,7 +149,10 @@ export default function Processes() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Process | null>(null)
   const [deleting, setDeleting] = useState<Process | null>(null)
-  const { data, loading, error } = useQuery(GET_PROCESSES, { variables: { spaceId } })
+  const { data, loading, error } = useQuery<ProcessesQuery>(GET_PROCESSES, { variables: { spaceId } })
+
+  const handleEdit = (p: Process) => { setEditing(p); setDialogOpen(true) }
+  const handleDelete = (p: Process) => setDeleting(p)
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -71,88 +170,13 @@ export default function Processes() {
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
           {error && <div className="text-center py-8 text-destructive">加载失败</div>}
           {data && (
-            (() => {
-              const nodes = (data.businessProcesses?.nodes ?? []) as Process[]
-              return isMobile ? (
-                <div className="space-y-3">
-                  {nodes.map((p) => (
-                    <div key={p.id} className="rounded-lg border p-4 space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="font-medium truncate">{p.name}</p>
-                          <p className="text-xs text-muted-foreground truncate">{p.description}</p>
-                        </div>
-                        <Badge variant="outline" className="shrink-0">{p.status}</Badge>
-                      </div>
-                      <div className="flex flex-wrap gap-1 text-xs text-muted-foreground">
-                        <span>SLA: {p.sla || '-'}</span>
-                        <span>周期: {p.cycleTime || '-'}</span>
-                        <span>成本: {p.costPerTransaction || '-'}</span>
-                      </div>
-                      {canEdit && (
-                        <div className="flex justify-end pt-1">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm" className="h-9 w-9 p-0">
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => { setEditing(p); setDialogOpen(true) }}>
-                                <Pencil className="h-4 w-4 mr-2" />编辑
-                              </DropdownMenuItem>
-                              <DropdownMenuItem className="text-destructive" onClick={() => setDeleting(p)}>
-                                <Trash2 className="h-4 w-4 mr-2" />删除
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>名称</TableHead>
-                      <TableHead>描述</TableHead>
-                      <TableHead>SLA</TableHead>
-                      <TableHead>周期(天)</TableHead>
-                      <TableHead>单次成本</TableHead>
-                      <TableHead>状态</TableHead>
-                      <TableHead>操作</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {nodes.map((p) => (
-                      <TableRow key={p.id}>
-                        <TableCell className="font-medium">{p.name}</TableCell>
-                        <TableCell className="text-muted-foreground">{p.description}</TableCell>
-                        <TableCell>{p.sla || '-'}</TableCell>
-                        <TableCell>{p.cycleTime || '-'}</TableCell>
-                        <TableCell>{p.costPerTransaction || '-'}</TableCell>
-                        <TableCell><Badge variant="outline">{p.status}</Badge></TableCell>
-                        <TableCell>
-                          <div className="flex gap-1">
-                            {canEdit && (
-                              <>
-                                <Button variant="ghost" size="sm" onClick={() => { setEditing(p); setDialogOpen(true) }}>
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button variant="ghost" size="sm" onClick={() => setDeleting(p)}>
-                                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )
-            })()
+            <ProcessList
+              nodes={data.businessProcesses?.nodes ?? []}
+              canEdit={canEdit}
+              isMobile={isMobile}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+            />
           )}
         </CardContent>
       </Card>

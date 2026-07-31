@@ -1,6 +1,6 @@
 import { useQuery } from '@apollo/client/react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Badge } from '@/components/ui/badge'
+import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -22,6 +22,137 @@ interface ValueStream {
   logicalId: string
 }
 
+interface ValueStreamsQuery {
+  valueStreams?: { nodes: ValueStream[]; paginationInfo?: { total: number } }
+}
+
+type BadgeVariant = NonNullable<BadgeProps['variant']>
+
+function statusColor(status: string): BadgeVariant {
+  switch (status) {
+    case 'active': return 'default'
+    case 'archived': return 'destructive'
+    default: return 'outline'
+  }
+}
+
+function ValueStreamList({ nodes, canEdit, isMobile, detailBase, spaceId, onEdit, onDelete, onVersion, onHistory }: {
+  nodes: ValueStream[]
+  canEdit: boolean
+  isMobile: boolean
+  detailBase: string
+  spaceId?: string
+  onEdit: (vs: ValueStream) => void
+  onDelete: (vs: ValueStream) => void
+  onVersion: (vs: ValueStream) => void
+  onHistory: (vs: ValueStream) => void
+}) {
+  if (isMobile) {
+    return (
+      <div className="space-y-3">
+        {nodes.map((vs) => (
+          <div key={vs.id} className="rounded-lg border p-4 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="font-medium truncate" title={vs.name}>{vs.name}</p>
+                <p className="text-xs text-muted-foreground truncate" title={vs.description}>{vs.description}</p>
+              </div>
+              <div className="flex gap-1 shrink-0">
+                <Badge variant="secondary" className="font-mono">{vs.businessVersion}</Badge>
+                <Badge variant={statusColor(vs.status)}>{vs.status}</Badge>
+              </div>
+            </div>
+            <div className="flex items-center justify-between pt-1">
+              <Link to={`${detailBase}/${vs.id}`}>
+                <Button variant="outline" size="sm">查看</Button>
+              </Link>
+              {canEdit && (
+                <div className="flex items-center gap-1">
+                  {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm" className="h-9 w-9 p-0">
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => onEdit(vs)}>
+                        <Pencil className="h-4 w-4 mr-2" />编辑
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onVersion(vs)}>
+                        <GitBranch className="h-4 w-4 mr-2" />新版本
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onHistory(vs)}>
+                        <History className="h-4 w-4 mr-2" />历史
+                      </DropdownMenuItem>
+                      <DropdownMenuItem className="text-destructive" onClick={() => onDelete(vs)}>
+                        <Trash2 className="h-4 w-4 mr-2" />删除
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>名称</TableHead>
+          <TableHead>版本</TableHead>
+          <TableHead>状态</TableHead>
+          <TableHead>操作</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {nodes.map((vs) => (
+          <TableRow key={vs.id}>
+            <TableCell className="font-medium">
+              {vs.name}
+              <span className="ml-2 text-xs text-muted-foreground">{vs.description}</span>
+            </TableCell>
+            <TableCell>
+              <Badge variant="secondary" className="font-mono">{vs.businessVersion}</Badge>
+            </TableCell>
+            <TableCell>
+              <Badge variant={statusColor(vs.status)}>{vs.status}</Badge>
+            </TableCell>
+            <TableCell>
+              <div className="flex gap-1">
+                <Link to={`${detailBase}/${vs.id}`}>
+                  <Button variant="ghost" size="sm">查看</Button>
+                </Link>
+                {canEdit && (
+                  <>
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(vs)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => onVersion(vs)}>
+                      <GitBranch className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => onHistory(vs)}>
+                      <History className="h-3.5 w-3.5" />
+                    </Button>
+                    {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(vs)}>
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
+                  </>
+                )}
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+
 export default function ValueStreams() {
   const { spaceId } = useParams<{ spaceId: string }>()
   const { canEdit } = useSpaceMembership(spaceId)
@@ -34,21 +165,18 @@ export default function ValueStreams() {
   const [versionOpen, setVersionOpen] = useState(false)
   const [versionItem, setVersionItem] = useState<ValueStream | null>(null)
 
-  const { data, loading, error } = useQuery(GET_VALUE_STREAMS, {
+  const { data, loading, error } = useQuery<ValueStreamsQuery>(GET_VALUE_STREAMS, {
     variables: { spaceId },
   })
-
-  const statusColor = (status: string) => {
-    switch (status) {
-      case 'active': return 'default'
-      case 'archived': return 'destructive'
-      default: return 'outline'
-    }
-  }
 
   const detailBase = spaceId
     ? `/spaces/${spaceId}/architectures/value-streams`
     : '/architectures/value-streams'
+
+  const handleEdit = (vs: ValueStream) => { setEditing(vs); setDialogOpen(true) }
+  const handleDelete = (vs: ValueStream) => setDeleting(vs)
+  const handleVersion = (vs: ValueStream) => { setVersionItem(vs); setVersionOpen(true) }
+  const handleHistory = (vs: ValueStream) => { setHistoryLogicalId(vs.logicalId); setHistoryOpen(true) }
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -68,117 +196,22 @@ export default function ValueStreams() {
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
           {error && <div className="text-center py-8 text-destructive">加载失败: {error.message}</div>}
           {data && (
-            (() => {
-              const nodes = (data.valueStreams?.nodes ?? []) as ValueStream[]
-              const total = (data.valueStreams?.paginationInfo?.total ?? 0) as number
-              return (
-                <>
-                  {isMobile ? (
-                    <div className="space-y-3">
-                      {nodes.map((vs) => (
-                        <div key={vs.id} className="rounded-lg border p-4 space-y-2">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="font-medium truncate">{vs.name}</p>
-                              <p className="text-xs text-muted-foreground truncate">{vs.description}</p>
-                            </div>
-                            <div className="flex gap-1 shrink-0">
-                              <Badge variant="secondary" className="font-mono">{vs.businessVersion}</Badge>
-                              <Badge variant={statusColor(vs.status) as any}>{vs.status}</Badge>
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between pt-1">
-                            <Link to={`${detailBase}/${vs.id}`}>
-                              <Button variant="outline" size="sm">查看</Button>
-                            </Link>
-                            {canEdit && (
-                              <div className="flex items-center gap-1">
-                                {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0">
-                                      <MoreVertical className="h-4 w-4" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => { setEditing(vs); setDialogOpen(true) }}>
-                                      <Pencil className="h-4 w-4 mr-2" />编辑
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => { setVersionItem(vs); setVersionOpen(true) }}>
-                                      <GitBranch className="h-4 w-4 mr-2" />新版本
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => { setHistoryLogicalId(vs.logicalId); setHistoryOpen(true) }}>
-                                      <History className="h-4 w-4 mr-2" />历史
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem className="text-destructive" onClick={() => setDeleting(vs)}>
-                                      <Trash2 className="h-4 w-4 mr-2" />删除
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>名称</TableHead>
-                          <TableHead>版本</TableHead>
-                          <TableHead>状态</TableHead>
-                          <TableHead>操作</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {nodes.map((vs) => (
-                          <TableRow key={vs.id}>
-                            <TableCell className="font-medium">
-                              {vs.name}
-                              <span className="ml-2 text-xs text-muted-foreground">{vs.description}</span>
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="secondary" className="font-mono">{vs.businessVersion}</Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant={statusColor(vs.status) as any}>{vs.status}</Badge>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex gap-1">
-                                <Link to={`${detailBase}/${vs.id}`}>
-                                  <Button variant="ghost" size="sm">查看</Button>
-                                </Link>
-                                {canEdit && (
-                                  <>
-                                    <Button variant="ghost" size="sm" onClick={() => { setEditing(vs); setDialogOpen(true) }}>
-                                      <Pencil className="h-3.5 w-3.5" />
-                                    </Button>
-                                    <Button variant="ghost" size="sm" onClick={() => { setVersionItem(vs); setVersionOpen(true) }}>
-                                      <GitBranch className="h-3.5 w-3.5" />
-                                    </Button>
-                                    <Button variant="ghost" size="sm" onClick={() => { setHistoryLogicalId(vs.logicalId); setHistoryOpen(true) }}>
-                                      <History className="h-3.5 w-3.5" />
-                                    </Button>
-                                    {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
-                                    <Button variant="ghost" size="sm" onClick={() => setDeleting(vs)}>
-                                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                                    </Button>
-                                  </>
-                                )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  )}
-                  <div className="flex items-center justify-between mt-4">
-                    <p className="text-sm text-muted-foreground">共 {total} 条</p>
-                  </div>
-                </>
-              )
-            })()
+            <>
+              <ValueStreamList
+                nodes={data.valueStreams?.nodes ?? []}
+                canEdit={canEdit}
+                isMobile={isMobile}
+                detailBase={detailBase}
+                spaceId={spaceId}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                onVersion={handleVersion}
+                onHistory={handleHistory}
+              />
+              <div className="flex items-center justify-between mt-4">
+                <p className="text-sm text-muted-foreground">共 {data.valueStreams?.paginationInfo?.total ?? 0} 条</p>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

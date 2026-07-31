@@ -43,6 +43,12 @@ export default function SpaceDetail() {
   if (error) return <div className="min-h-screen flex items-center justify-center text-destructive">加载失败: {error.message}</div>
   if (!space) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">空间不存在</div>
 
+  const handleEdit = () => setEditOpen(true)
+  const handleMembers = () => setMembersOpen(true)
+  const handleArchive = () => {
+    if (confirm('确定归档此空间？')) archive({ variables: { id: space.id } })
+  }
+
   const statsItems = [
     { label: '价值流', value: stats?.valueStreams?.paginationInfo?.total ?? 0, to: 'value-streams' },
     { label: '业务能力', value: stats?.businessCapabilities?.paginationInfo?.total ?? 0, to: 'capabilities' },
@@ -66,22 +72,20 @@ export default function SpaceDetail() {
               isMobile ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-9 w-9 p-0">
+                    <Button variant="outline" size="sm" className="h-9 w-9 p-0" aria-label="更多操作">
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => setEditOpen(true)}>
+                    <DropdownMenuItem onClick={handleEdit}>
                       <Pencil className="h-4 w-4 mr-2" />编辑
                     </DropdownMenuItem>
                     {role === 'owner' && (
                       <>
-                        <DropdownMenuItem onClick={() => setMembersOpen(true)}>
+                        <DropdownMenuItem onClick={handleMembers}>
                           <Users className="h-4 w-4 mr-2" />成员
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => {
-                          if (confirm('确定归档此空间？')) archive({ variables: { id: space.id } })
-                        }}>
+                        <DropdownMenuItem onClick={handleArchive}>
                           <Archive className="h-4 w-4 mr-2" />归档
                         </DropdownMenuItem>
                       </>
@@ -90,12 +94,12 @@ export default function SpaceDetail() {
                 </DropdownMenu>
               ) : (
                 <>
-                  <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+                  <Button variant="outline" size="sm" onClick={handleEdit}>
                     <Pencil className="h-4 w-4 mr-2" />
                     编辑
                   </Button>
                   {role === 'owner' && (
-                    <Button variant="outline" size="sm" onClick={() => setMembersOpen(true)}>
+                    <Button variant="outline" size="sm" onClick={handleMembers}>
                       <Users className="h-4 w-4 mr-2" />
                       成员
                     </Button>
@@ -104,9 +108,7 @@ export default function SpaceDetail() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => {
-                        if (confirm('确定归档此空间？')) archive({ variables: { id: space.id } })
-                      }}
+                      onClick={handleArchive}
                     >
                       <Archive className="h-4 w-4 mr-2" />
                       归档

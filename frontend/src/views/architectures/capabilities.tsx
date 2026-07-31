@@ -46,6 +46,97 @@ interface Capability {
   level: string; maturity: string; businessValue: string; status: string
 }
 
+interface CapabilitiesQuery {
+  businessCapabilities?: { nodes: Capability[]; paginationInfo?: { total: number } }
+}
+
+function CapabilityList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
+  nodes: Capability[]
+  canEdit: boolean
+  isMobile: boolean
+  onEdit: (cap: Capability) => void
+  onDelete: (cap: Capability) => void
+}) {
+  if (isMobile) {
+    return (
+      <div className="space-y-3">
+        {nodes.map((cap) => (
+          <div key={cap.id} className="rounded-lg border p-4 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-medium truncate" title={cap.name}>{cap.name}</p>
+              <Badge variant="outline">{cap.status}</Badge>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              <Badge variant="secondary">{cap.level}</Badge>
+              <Badge variant="secondary">{cap.maturity}</Badge>
+              <Badge variant="secondary">{cap.businessValue}</Badge>
+            </div>
+            {canEdit && (
+              <div className="flex justify-end pt-1">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => onEdit(cap)}>
+                      <Pencil className="h-4 w-4 mr-2" />编辑
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="text-destructive" onClick={() => onDelete(cap)}>
+                      <Trash2 className="h-4 w-4 mr-2" />删除
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>名称</TableHead>
+          <TableHead>层级</TableHead>
+          <TableHead>成熟度</TableHead>
+          <TableHead>业务价值</TableHead>
+          <TableHead>状态</TableHead>
+          <TableHead>操作</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {nodes.map((cap) => (
+          <TableRow key={cap.id}>
+            <TableCell className="font-medium">{cap.name}</TableCell>
+            <TableCell>{cap.level}</TableCell>
+            <TableCell>{cap.maturity}</TableCell>
+            <TableCell>{cap.businessValue}</TableCell>
+            <TableCell><Badge variant="outline">{cap.status}</Badge></TableCell>
+            <TableCell>
+              <div className="flex gap-1">
+                {canEdit && (
+                  <>
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(cap)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(cap)}>
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
+                  </>
+                )}
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+
 export default function Capabilities() {
   const { spaceId } = useParams<{ spaceId: string }>()
   const { canEdit } = useSpaceMembership(spaceId)
@@ -53,7 +144,10 @@ export default function Capabilities() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Capability | null>(null)
   const [deleting, setDeleting] = useState<Capability | null>(null)
-  const { data, loading, error } = useQuery(GET_CAPABILITIES, { variables: { spaceId } })
+  const { data, loading, error } = useQuery<CapabilitiesQuery>(GET_CAPABILITIES, { variables: { spaceId } })
+
+  const handleEdit = (cap: Capability) => { setEditing(cap); setDialogOpen(true) }
+  const handleDelete = (cap: Capability) => setDeleting(cap)
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -71,83 +165,13 @@ export default function Capabilities() {
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
           {error && <div className="text-center py-8 text-destructive">加载失败</div>}
           {data && (
-            (() => {
-              const nodes = (data.businessCapabilities?.nodes ?? []) as Capability[]
-              return isMobile ? (
-                <div className="space-y-3">
-                  {nodes.map((cap) => (
-                    <div key={cap.id} className="rounded-lg border p-4 space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="font-medium truncate">{cap.name}</p>
-                        <Badge variant="outline">{cap.status}</Badge>
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        <Badge variant="secondary">{cap.level}</Badge>
-                        <Badge variant="secondary">{cap.maturity}</Badge>
-                        <Badge variant="secondary">{cap.businessValue}</Badge>
-                      </div>
-                      {canEdit && (
-                        <div className="flex justify-end pt-1">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm" className="h-9 w-9 p-0">
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => { setEditing(cap); setDialogOpen(true) }}>
-                                <Pencil className="h-4 w-4 mr-2" />编辑
-                              </DropdownMenuItem>
-                              <DropdownMenuItem className="text-destructive" onClick={() => setDeleting(cap)}>
-                                <Trash2 className="h-4 w-4 mr-2" />删除
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>名称</TableHead>
-                      <TableHead>层级</TableHead>
-                      <TableHead>成熟度</TableHead>
-                      <TableHead>业务价值</TableHead>
-                      <TableHead>状态</TableHead>
-                      <TableHead>操作</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {nodes.map((cap) => (
-                      <TableRow key={cap.id}>
-                        <TableCell className="font-medium">{cap.name}</TableCell>
-                        <TableCell>{cap.level}</TableCell>
-                        <TableCell>{cap.maturity}</TableCell>
-                        <TableCell>{cap.businessValue}</TableCell>
-                        <TableCell><Badge variant="outline">{cap.status}</Badge></TableCell>
-                        <TableCell>
-                          <div className="flex gap-1">
-                            {canEdit && (
-                              <>
-                                <Button variant="ghost" size="sm" onClick={() => { setEditing(cap); setDialogOpen(true) }}>
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </Button>
-                              <Button variant="ghost" size="sm" onClick={() => setDeleting(cap)}>
-                                <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )
-            })()
+            <CapabilityList
+              nodes={data.businessCapabilities?.nodes ?? []}
+              canEdit={canEdit}
+              isMobile={isMobile}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+            />
           )}
         </CardContent>
       </Card>

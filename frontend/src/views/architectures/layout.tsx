@@ -20,17 +20,11 @@ import { GET_SPACE } from '@/api/spaces'
 import type { Space } from '@/api/spaces'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarContent({ onNavigate, spaceName }: { onNavigate?: () => void; spaceName: string }) {
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
   const { spaceId } = useParams<{ spaceId: string }>()
   const { canEdit } = useSpaceMembership(spaceId)
-
-  const { data: spaceData } = useQuery<{ organizations: { nodes: Space[] } }>(GET_SPACE, {
-    variables: { id: spaceId },
-    skip: !spaceId,
-  })
-  const spaceName = spaceData?.organizations?.nodes?.[0]?.name ?? '空间'
 
   const base = spaceId ? `/spaces/${spaceId}/architectures` : '/architectures'
   const menuItems = [
@@ -117,7 +111,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           variant="ghost"
           size="sm"
           className="w-full justify-start gap-2 text-muted-foreground"
-          onClick={() => logout()}
+          onClick={() => { logout(); onNavigate?.() }}
         >
           <LogOut className="h-4 w-4" />
           退出登录
@@ -141,7 +135,7 @@ export default function ArchLayout() {
     <div className="flex h-screen">
       {/* Desktop sidebar */}
       <aside className="hidden md:flex w-60 border-r bg-card flex-col">
-        <SidebarContent />
+        <SidebarContent spaceName={spaceName} />
       </aside>
 
       {/* Mobile drawer */}
@@ -149,7 +143,7 @@ export default function ArchLayout() {
         <DialogContent className="left-0 top-0 h-full max-w-[280px] translate-x-0 translate-y-0 rounded-none sm:rounded-none p-0">
           <DialogTitle className="sr-only">导航菜单</DialogTitle>
           <div className="h-full bg-card">
-            <SidebarContent onNavigate={() => setDrawerOpen(false)} />
+            <SidebarContent onNavigate={() => setDrawerOpen(false)} spaceName={spaceName} />
           </div>
         </DialogContent>
       </Dialog>
