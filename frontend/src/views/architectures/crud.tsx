@@ -5,8 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { GET_VALUE_STREAMS } from './version-control'
 
 // ============================================================================
@@ -132,7 +131,7 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: 
             <Label>描述</Label>
             <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="价值流描述" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>版本</Label>
               <Input value={version} onChange={e => setVersion(e.target.value)} />

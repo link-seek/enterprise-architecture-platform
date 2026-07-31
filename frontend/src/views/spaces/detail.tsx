@@ -4,11 +4,13 @@ import { useQuery, useMutation } from '@apollo/client/react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Pencil, Archive, LogIn, ArrowLeft, Users } from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Pencil, Archive, LogIn, ArrowLeft, Users, MoreVertical } from 'lucide-react'
 import { GET_SPACE, ARCHIVE_SPACE, GET_SPACES, GET_SPACE_STATS } from '@/api/spaces'
 import type { Space, SpaceStats } from '@/api/spaces'
 import { useAuthStore } from '@/stores/auth'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
+import { useIsMobile } from '@/hooks/use-media-query'
 import { SpaceEditDialog } from './crud'
 import { SpaceMembersDialog } from './members'
 
@@ -17,6 +19,7 @@ export default function SpaceDetail() {
   const navigate = useNavigate()
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const { canEdit, role } = useSpaceMembership(spaceId)
+  const isMobile = useIsMobile()
   const [editOpen, setEditOpen] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
 
@@ -58,32 +61,59 @@ export default function SpaceDetail() {
             <span className="text-lg font-semibold">{space.name}</span>
             {role && <Badge variant="secondary">{role === 'owner' ? '拥有者' : '编辑者'}</Badge>}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {canEdit && (
-              <>
-                <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
-                  <Pencil className="h-4 w-4 mr-2" />
-                  编辑
-                </Button>
-                {role === 'owner' && (
-                  <Button variant="outline" size="sm" onClick={() => setMembersOpen(true)}>
-                    <Users className="h-4 w-4 mr-2" />
-                    成员
+              isMobile ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-9 w-9 p-0">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setEditOpen(true)}>
+                      <Pencil className="h-4 w-4 mr-2" />编辑
+                    </DropdownMenuItem>
+                    {role === 'owner' && (
+                      <>
+                        <DropdownMenuItem onClick={() => setMembersOpen(true)}>
+                          <Users className="h-4 w-4 mr-2" />成员
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => {
+                          if (confirm('确定归档此空间？')) archive({ variables: { id: space.id } })
+                        }}>
+                          <Archive className="h-4 w-4 mr-2" />归档
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <>
+                  <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+                    <Pencil className="h-4 w-4 mr-2" />
+                    编辑
                   </Button>
-                )}
-                {role === 'owner' && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (confirm('确定归档此空间？')) archive({ variables: { id: space.id } })
-                    }}
-                  >
-                    <Archive className="h-4 w-4 mr-2" />
-                    归档
-                  </Button>
-                )}
-              </>
+                  {role === 'owner' && (
+                    <Button variant="outline" size="sm" onClick={() => setMembersOpen(true)}>
+                      <Users className="h-4 w-4 mr-2" />
+                      成员
+                    </Button>
+                  )}
+                  {role === 'owner' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (confirm('确定归档此空间？')) archive({ variables: { id: space.id } })
+                      }}
+                    >
+                      <Archive className="h-4 w-4 mr-2" />
+                      归档
+                    </Button>
+                  )}
+                </>
+              )
             )}
             {!isAuthenticated && (
               <Button variant="outline" size="sm" onClick={() => navigate('/login')}>

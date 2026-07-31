@@ -99,7 +99,7 @@ export default function UsersPage() {
     confirmRole.newRole !== 'admin'
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-4 md:p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">用户管理</h1>
         <Button onClick={() => setDialogOpen(true)}>
@@ -111,43 +111,45 @@ export default function UsersPage() {
       {loading ? (
         <div className="text-center py-8 text-muted-foreground">加载中...</div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>姓名</TableHead>
-              <TableHead>邮箱</TableHead>
-              <TableHead>角色</TableHead>
-              <TableHead>状态</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {users.map((u) => (
-              <TableRow key={u.id}>
-                <TableCell className="font-medium">{u.name}</TableCell>
-                <TableCell>{u.email}</TableCell>
-                <TableCell>
-                  <select
-                    value={u.role}
-                    disabled={roleUpdating === u.id}
-                    onChange={(e) => onRoleSelect(u, e.target.value)}
-                    className="border rounded px-2 py-1 text-sm bg-background"
-                  >
-                    {ROLE_OPTIONS.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
-                </TableCell>
-                <TableCell>
-                  <Badge variant={u.status === 'active' ? 'default' : 'destructive'}>
-                    {u.status}
-                  </Badge>
-                </TableCell>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="min-w-[100px]">姓名</TableHead>
+                <TableHead className="min-w-[160px]">邮箱</TableHead>
+                <TableHead>角色</TableHead>
+                <TableHead>状态</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {users.map((u) => (
+                <TableRow key={u.id}>
+                  <TableCell className="font-medium min-w-[100px]">{u.name}</TableCell>
+                  <TableCell className="min-w-[160px]">{u.email}</TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    <select
+                      value={u.role}
+                      disabled={roleUpdating === u.id}
+                      onChange={(e) => onRoleSelect(u, e.target.value)}
+                      className="border rounded px-2 py-1 text-sm bg-background"
+                    >
+                      {ROLE_OPTIONS.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    <Badge variant={u.status === 'active' ? 'default' : 'destructive'}>
+                      {u.status}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

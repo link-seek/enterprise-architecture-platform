@@ -93,31 +93,37 @@ test.describe('Navigation & Layout - Sidebar', () => {
   });
 
   test('Responsive Sidebar Behavior', { tag: '@smoke' }, async ({ page }) => {
-    // Test on different viewport sizes
-    const viewports = [
-      { width: 1280, height: 720 }, // Desktop
-      { width: 768, height: 1024 }, // Tablet
-      { width: 375, height: 667 }, // Mobile
-    ];
-    
-    for (const viewport of viewports) {
-      await page.setViewportSize(viewport);
-      
-      // Verify sidebar is visible on all sizes (might collapse on mobile)
+    // Desktop and tablet (>=768): sidebar links directly visible
+    for (const [w, h] of [[1280, 720], [768, 1024]] as const) {
+      await page.setViewportSize({ width: w, height: h });
       await expect(page.getByRole('link', { name: '价值流' })).toBeVisible();
       await expect(page.getByRole('link', { name: '业务能力' })).toBeVisible();
       await expect(page.getByRole('link', { name: '业务流程' })).toBeVisible();
-      
-      // Verify user info is visible
       await expect(page.getByText(TEST_EMAIL)).toBeVisible();
-      
-      // On mobile, sidebar might be collapsed - check if navigation still works
-      if (viewport.width < 768) {
-        // If sidebar is collapsed, there might be a hamburger menu
-        // For now, just verify main content is accessible
-        await expect(page.getByRole('heading', { name: '价值流' }).first()).toBeVisible();
-      }
     }
+
+    // Mobile (375): sidebar collapsed into drawer
+    await page.setViewportSize({ width: 375, height: 667 });
+
+    // Links should not be visible until drawer opens
+    await expect(page.getByRole('link', { name: '价值流' })).not.toBeVisible();
+
+    // Open drawer via Menu button
+    await page.getByRole('button', { name: '打开菜单' }).click();
+    await expect(page.getByRole('link', { name: '价值流' })).toBeVisible();
+    await expect(page.getByRole('link', { name: '业务能力' })).toBeVisible();
+    await expect(page.getByRole('link', { name: '业务流程' })).toBeVisible();
+
+    // Click a link: drawer closes and URL changes
+    await page.getByRole('link', { name: '业务能力' }).click();
+    await expect(page).toHaveURL(`${SPACE_BASE}/capabilities`);
+    await expect(page.getByRole('link', { name: '业务能力' })).not.toBeVisible();
+
+    // No horizontal overflow
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - window.innerWidth
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
   });
 
   test('Keyboard Navigation in Sidebar', { tag: '@smoke' }, async ({ page }) => {

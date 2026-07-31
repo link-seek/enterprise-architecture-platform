@@ -118,7 +118,7 @@ export default function Home() {
             一体化的企业架构建模与协同平台，帮助您梳理价值流、规划业务能力、编排业务流程，
             实现战略对齐、端到端可视化与决策支撑。
           </p>
-          <div className="mt-8 flex items-center justify-center gap-4">
+          <div className="mt-8 flex items-center justify-center gap-4 flex-wrap">
             <Link to="/spaces">
               <Button size="lg">
                 浏览架构空间

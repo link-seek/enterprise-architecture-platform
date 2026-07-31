@@ -4,13 +4,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Plus, Pencil, Trash2, Loader2, MoreVertical } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useParams } from 'react-router-dom'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
+import { useIsMobile } from '@/hooks/use-media-query'
 
 const GET_CAPABILITIES = gql`
   query GetCapabilities($spaceId: String) {
@@ -47,13 +49,14 @@ interface Capability {
 export default function Capabilities() {
   const { spaceId } = useParams<{ spaceId: string }>()
   const { canEdit } = useSpaceMembership(spaceId)
+  const isMobile = useIsMobile()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Capability | null>(null)
   const [deleting, setDeleting] = useState<Capability | null>(null)
   const { data, loading, error } = useQuery(GET_CAPABILITIES, { variables: { spaceId } })
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-4 md:p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">业务能力</h1>
         {canEdit && (
@@ -68,43 +71,83 @@ export default function Capabilities() {
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
           {error && <div className="text-center py-8 text-destructive">加载失败</div>}
           {data && (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>名称</TableHead>
-                  <TableHead>层级</TableHead>
-                  <TableHead>成熟度</TableHead>
-                  <TableHead>业务价值</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.businessCapabilities.nodes.map((cap: Capability) => (
-                  <TableRow key={cap.id}>
-                    <TableCell className="font-medium">{cap.name}</TableCell>
-                    <TableCell>{cap.level}</TableCell>
-                    <TableCell>{cap.maturity}</TableCell>
-                    <TableCell>{cap.businessValue}</TableCell>
-                    <TableCell><Badge variant="outline">{cap.status}</Badge></TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        {canEdit && (
-                          <>
-                            <Button variant="ghost" size="sm" onClick={() => { setEditing(cap); setDialogOpen(true) }}>
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button variant="ghost" size="sm" onClick={() => setDeleting(cap)}>
-                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                            </Button>
-                          </>
-                        )}
+            (() => {
+              const nodes = (data.businessCapabilities?.nodes ?? []) as Capability[]
+              return isMobile ? (
+                <div className="space-y-3">
+                  {nodes.map((cap) => (
+                    <div key={cap.id} className="rounded-lg border p-4 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="font-medium truncate">{cap.name}</p>
+                        <Badge variant="outline">{cap.status}</Badge>
                       </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                      <div className="flex flex-wrap gap-1">
+                        <Badge variant="secondary">{cap.level}</Badge>
+                        <Badge variant="secondary">{cap.maturity}</Badge>
+                        <Badge variant="secondary">{cap.businessValue}</Badge>
+                      </div>
+                      {canEdit && (
+                        <div className="flex justify-end pt-1">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-9 w-9 p-0">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => { setEditing(cap); setDialogOpen(true) }}>
+                                <Pencil className="h-4 w-4 mr-2" />编辑
+                              </DropdownMenuItem>
+                              <DropdownMenuItem className="text-destructive" onClick={() => setDeleting(cap)}>
+                                <Trash2 className="h-4 w-4 mr-2" />删除
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>名称</TableHead>
+                      <TableHead>层级</TableHead>
+                      <TableHead>成熟度</TableHead>
+                      <TableHead>业务价值</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead>操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {nodes.map((cap) => (
+                      <TableRow key={cap.id}>
+                        <TableCell className="font-medium">{cap.name}</TableCell>
+                        <TableCell>{cap.level}</TableCell>
+                        <TableCell>{cap.maturity}</TableCell>
+                        <TableCell>{cap.businessValue}</TableCell>
+                        <TableCell><Badge variant="outline">{cap.status}</Badge></TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            {canEdit && (
+                              <>
+                                <Button variant="ghost" size="sm" onClick={() => { setEditing(cap); setDialogOpen(true) }}>
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                              <Button variant="ghost" size="sm" onClick={() => setDeleting(cap)}>
+                                <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )
+            })()
           )}
         </CardContent>
       </Card>
@@ -168,7 +211,7 @@ function CapabilityCrudDialog({ open, onOpenChange, editing, spaceId }: {
           {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
           <div className="space-y-2"><Label>名称</Label><Input value={name} onChange={e => setName(e.target.value)} /></div>
           <div className="space-y-2"><Label>描述</Label><Input value={description} onChange={e => setDescription(e.target.value)} /></div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label>层级</Label>
               <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={level} onChange={e => setLevel(e.target.value)}>
