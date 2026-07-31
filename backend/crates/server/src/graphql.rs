@@ -2379,7 +2379,7 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     // capabilityProcessesByCapability
     let cp_by_cap = Field::new(
         "capabilityProcessesByCapability",
-        TypeRef::named_nn_list_nn("CapabilityProcesses"),
+        TypeRef::named_nn_list_nn("BusinessCapabilityProcesses"),
         |ctx| {
             FieldFuture::new(async move {
                 let db = ctx.data::<DatabaseConnection>()?;
@@ -2408,7 +2408,7 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     // stageCapabilitiesByStage
     let sc_by_stage = Field::new(
         "stageCapabilitiesByStage",
-        TypeRef::named_nn_list_nn("StageCapabilities"),
+        TypeRef::named_nn_list_nn("ValueStreamStageCapabilities"),
         |ctx| {
             FieldFuture::new(async move {
                 let db = ctx.data::<DatabaseConnection>()?;
