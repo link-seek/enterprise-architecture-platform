@@ -38,7 +38,10 @@ export default function SpaceDetail() {
   const [archive, { loading: archiveLoading }] = useMutation(ARCHIVE_SPACE, {
     refetchQueries: [{ query: GET_SPACES }],
     onCompleted: () => navigate('/spaces'),
-    onError: () => setArchiveError('归档失败，请稍后重试'),
+    onError: () => {
+      setArchiveError('归档失败，请稍后重试')
+      setArchiveConfirmOpen(false)
+    },
   })
 
   const space = data?.organizations?.nodes?.[0]
@@ -62,10 +65,10 @@ export default function SpaceDetail() {
   ]
 
   const visibleActions = useMemo(() => [
-    { icon: Pencil, label: '编辑', onClick: handleEdit, visible: true },
+    { icon: Pencil, label: '编辑', onClick: handleEdit, visible: canEdit },
     { icon: Users, label: '成员', onClick: handleMembers, visible: role === 'owner' },
     { icon: Archive, label: '归档', onClick: handleArchive, visible: role === 'owner' },
-  ].filter((a) => a.visible), [role, handleEdit, handleMembers, handleArchive])
+  ].filter((a) => a.visible), [canEdit, role, handleEdit, handleMembers, handleArchive])
 
   return (
     <div className="min-h-screen bg-secondary flex flex-col">

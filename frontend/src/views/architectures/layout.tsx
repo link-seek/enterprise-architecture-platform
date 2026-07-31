@@ -21,10 +21,9 @@ import type { Space } from '@/api/spaces'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { useIsMobile } from '@/hooks/use-media-query'
 
-function SidebarContent({ onNavigate, spaceName }: { onNavigate?: () => void; spaceName: string }) {
+function SidebarContent({ onNavigate, spaceName, spaceId }: { onNavigate?: () => void; spaceName: string; spaceId?: string }) {
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
-  const { spaceId } = useParams<{ spaceId: string }>()
   const { canEdit } = useSpaceMembership(spaceId)
 
   const base = spaceId ? `/spaces/${spaceId}/architectures` : '/architectures'
@@ -112,7 +111,7 @@ function SidebarContent({ onNavigate, spaceName }: { onNavigate?: () => void; sp
           variant="ghost"
           size="sm"
           className="w-full justify-start gap-2 text-muted-foreground"
-          onClick={async () => { await logout(); onNavigate?.() }}
+          onClick={async () => { try { await logout() } finally { onNavigate?.() } }}
         >
           <LogOut className="h-4 w-4" />
           退出登录
@@ -138,7 +137,7 @@ export default function ArchLayout() {
       {/* Desktop sidebar */}
       {!isMobile && (
         <aside className="w-60 border-r bg-card flex flex-col">
-          <SidebarContent spaceName={spaceName} />
+          <SidebarContent spaceName={spaceName} spaceId={spaceId} />
         </aside>
       )}
 
@@ -147,7 +146,7 @@ export default function ArchLayout() {
         <DialogContent className="left-0 top-0 h-full max-w-[280px] max-h-none translate-x-0 translate-y-0 rounded-none sm:rounded-none p-0 data-[state=open]:slide-in-from-left-full data-[state=closed]:slide-out-to-left-full data-[state=open]:slide-in-from-top-0 data-[state=closed]:slide-out-to-top-0 data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100">
           <DialogTitle className="sr-only">导航菜单</DialogTitle>
           <div className="h-full bg-card">
-            <SidebarContent onNavigate={() => setDrawerOpen(false)} spaceName={spaceName} />
+            <SidebarContent onNavigate={() => setDrawerOpen(false)} spaceName={spaceName} spaceId={spaceId} />
           </div>
         </DialogContent>
       </Dialog>
