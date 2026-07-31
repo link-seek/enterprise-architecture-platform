@@ -23,6 +23,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Loader2, UserPlus } from 'lucide-react'
+import { useIsMobile } from '@/hooks/use-media-query'
 
 const GET_USERS = gql`
   query GetUsers {
@@ -50,6 +51,7 @@ const ROLE_OPTIONS = ['admin', 'architect', 'viewer'] as const
 
 export default function UsersPage() {
   const { data, loading, refetch } = useQuery(GET_USERS)
+  const isMobile = useIsMobile()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState({ email: '', name: '', password: '', role: 'viewer' })
   const [submitting, setSubmitting] = useState(false)
@@ -110,46 +112,77 @@ export default function UsersPage() {
 
       {loading ? (
         <div className="text-center py-8 text-muted-foreground">加载中...</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="min-w-[100px]">姓名</TableHead>
-                <TableHead className="min-w-[160px]">邮箱</TableHead>
-                <TableHead>角色</TableHead>
-                <TableHead>状态</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users.map((u) => (
-                <TableRow key={u.id}>
-                  <TableCell className="font-medium min-w-[100px]">{u.name}</TableCell>
-                  <TableCell className="min-w-[160px]">{u.email}</TableCell>
-                  <TableCell className="whitespace-nowrap">
-                    <select
-                      value={u.role}
-                      disabled={roleUpdating === u.id}
-                      onChange={(e) => onRoleSelect(u, e.target.value)}
-                      className="border rounded px-2 py-1 text-sm bg-background"
-                    >
-                      {ROLE_OPTIONS.map((r) => (
-                        <option key={r} value={r}>
-                          {r}
-                        </option>
-                      ))}
-                    </select>
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap">
-                    <Badge variant={u.status === 'active' ? 'default' : 'destructive'}>
-                      {u.status}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+      ) : users.length === 0 ? (
+        <div className="text-center py-8 text-muted-foreground">暂无数据</div>
+      ) : isMobile ? (
+        <div className="space-y-3">
+          {users.map((u) => (
+            <div key={u.id} className="rounded-lg border p-4 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium truncate" title={u.name}>{u.name}</p>
+                  <p className="text-xs text-muted-foreground truncate" title={u.email}>{u.email}</p>
+                </div>
+                <Badge variant={u.status === 'active' ? 'default' : 'destructive'} className="shrink-0">
+                  {u.status}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="text-xs text-muted-foreground">角色</Label>
+                <select
+                  value={u.role}
+                  disabled={roleUpdating === u.id}
+                  onChange={(e) => onRoleSelect(u, e.target.value)}
+                  className="border rounded px-2 py-1 text-sm bg-background"
+                >
+                  {ROLE_OPTIONS.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          ))}
         </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>姓名</TableHead>
+              <TableHead>邮箱</TableHead>
+              <TableHead>角色</TableHead>
+              <TableHead>状态</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {users.map((u) => (
+              <TableRow key={u.id}>
+                <TableCell className="font-medium">{u.name}</TableCell>
+                <TableCell>{u.email}</TableCell>
+                <TableCell className="whitespace-nowrap">
+                  <select
+                    value={u.role}
+                    disabled={roleUpdating === u.id}
+                    onChange={(e) => onRoleSelect(u, e.target.value)}
+                    className="border rounded px-2 py-1 text-sm bg-background"
+                  >
+                    {ROLE_OPTIONS.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  <Badge variant={u.status === 'active' ? 'default' : 'destructive'}>
+                    {u.status}
+                  </Badge>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

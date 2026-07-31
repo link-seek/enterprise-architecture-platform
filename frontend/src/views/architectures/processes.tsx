@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Plus, Pencil, Trash2, Loader2, MoreVertical } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -57,6 +57,10 @@ function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
   onEdit: (p: Process) => void
   onDelete: (p: Process) => void
 }) {
+  if (nodes.length === 0) {
+    return <div className="text-center py-8 text-muted-foreground">暂无数据</div>
+  }
+
   if (isMobile) {
     return (
       <div className="space-y-3">
@@ -78,7 +82,7 @@ function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
               <div className="flex justify-end pt-1">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0">
+                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0" aria-label="更多操作">
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -151,8 +155,8 @@ export default function Processes() {
   const [deleting, setDeleting] = useState<Process | null>(null)
   const { data, loading, error } = useQuery<ProcessesQuery>(GET_PROCESSES, { variables: { spaceId } })
 
-  const handleEdit = (p: Process) => { setEditing(p); setDialogOpen(true) }
-  const handleDelete = (p: Process) => setDeleting(p)
+  const handleEdit = useCallback((p: Process) => { setEditing(p); setDialogOpen(true) }, [])
+  const handleDelete = useCallback((p: Process) => setDeleting(p), [])
 
   return (
     <div className="p-4 md:p-6 space-y-4">

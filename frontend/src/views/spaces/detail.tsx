@@ -32,9 +32,11 @@ export default function SpaceDetail() {
     skip: !spaceId,
   })
 
+  const [archiveError, setArchiveError] = useState<string | null>(null)
   const [archive] = useMutation(ARCHIVE_SPACE, {
     refetchQueries: [{ query: GET_SPACES }],
     onCompleted: () => navigate('/spaces'),
+    onError: (err) => setArchiveError(err instanceof Error ? err.message : '归档失败'),
   })
 
   const space = data?.organizations?.nodes?.[0]
@@ -46,13 +48,22 @@ export default function SpaceDetail() {
   const handleEdit = () => setEditOpen(true)
   const handleMembers = () => setMembersOpen(true)
   const handleArchive = () => {
-    if (confirm('确定归档此空间？')) archive({ variables: { id: space.id } })
+    if (confirm('确定归档此空间？')) {
+      setArchiveError(null)
+      archive({ variables: { id: space.id } })
+    }
   }
 
   const statsItems = [
     { label: '价值流', value: stats?.valueStreams?.paginationInfo?.total ?? 0, to: 'value-streams' },
     { label: '业务能力', value: stats?.businessCapabilities?.paginationInfo?.total ?? 0, to: 'capabilities' },
     { label: '业务流程', value: stats?.businessProcesses?.paginationInfo?.total ?? 0, to: 'processes' },
+  ]
+
+  const spaceActions = [
+    { icon: Pencil, label: '编辑', onClick: handleEdit, visible: true },
+    { icon: Users, label: '成员', onClick: handleMembers, visible: role === 'owner' },
+    { icon: Archive, label: '归档', onClick: handleArchive, visible: role === 'owner' },
   ]
 
   return (
@@ -77,43 +88,27 @@ export default function SpaceDetail() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={handleEdit}>
-                      <Pencil className="h-4 w-4 mr-2" />编辑
-                    </DropdownMenuItem>
-                    {role === 'owner' && (
-                      <>
-                        <DropdownMenuItem onClick={handleMembers}>
-                          <Users className="h-4 w-4 mr-2" />成员
+                    {spaceActions.filter((a) => a.visible).map((action) => {
+                      const Icon = action.icon
+                      return (
+                        <DropdownMenuItem key={action.label} onClick={action.onClick}>
+                          <Icon className="h-4 w-4 mr-2" />{action.label}
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={handleArchive}>
-                          <Archive className="h-4 w-4 mr-2" />归档
-                        </DropdownMenuItem>
-                      </>
-                    )}
+                      )
+                    })}
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : (
                 <>
-                  <Button variant="outline" size="sm" onClick={handleEdit}>
-                    <Pencil className="h-4 w-4 mr-2" />
-                    编辑
-                  </Button>
-                  {role === 'owner' && (
-                    <Button variant="outline" size="sm" onClick={handleMembers}>
-                      <Users className="h-4 w-4 mr-2" />
-                      成员
-                    </Button>
-                  )}
-                  {role === 'owner' && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleArchive}
-                    >
-                      <Archive className="h-4 w-4 mr-2" />
-                      归档
-                    </Button>
-                  )}
+                  {spaceActions.filter((a) => a.visible).map((action) => {
+                    const Icon = action.icon
+                    return (
+                      <Button key={action.label} variant="outline" size="sm" onClick={action.onClick}>
+                        <Icon className="h-4 w-4 mr-2" />
+                        {action.label}
+                      </Button>
+                    )
+                  })}
                 </>
               )
             )}
@@ -128,6 +123,9 @@ export default function SpaceDetail() {
       </header>
 
       <main className="flex-1 container mx-auto max-w-6xl px-4 py-10">
+        {archiveError && (
+          <div className="mb-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">{archiveError}</div>
+        )}
         <p className="text-muted-foreground">{space.description || '暂无描述'}</p>
 
         <div className="mt-8 grid gap-6 md:grid-cols-3">

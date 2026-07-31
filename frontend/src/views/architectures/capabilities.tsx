@@ -57,6 +57,10 @@ function CapabilityList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
   onEdit: (cap: Capability) => void
   onDelete: (cap: Capability) => void
 }) {
+  if (nodes.length === 0) {
+    return <div className="text-center py-8 text-muted-foreground">暂无数据</div>
+  }
+
   if (isMobile) {
     return (
       <div className="space-y-3">
@@ -75,7 +79,7 @@ function CapabilityList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
               <div className="flex justify-end pt-1">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0">
+                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0" aria-label="更多操作">
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>

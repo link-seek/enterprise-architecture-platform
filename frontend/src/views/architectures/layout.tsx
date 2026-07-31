@@ -19,6 +19,7 @@ import {
 import { GET_SPACE } from '@/api/spaces'
 import type { Space } from '@/api/spaces'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
+import { useIsMobile } from '@/hooks/use-media-query'
 
 function SidebarContent({ onNavigate, spaceName }: { onNavigate?: () => void; spaceName: string }) {
   const location = useLocation()
@@ -111,7 +112,7 @@ function SidebarContent({ onNavigate, spaceName }: { onNavigate?: () => void; sp
           variant="ghost"
           size="sm"
           className="w-full justify-start gap-2 text-muted-foreground"
-          onClick={() => { logout(); onNavigate?.() }}
+          onClick={async () => { await logout(); onNavigate?.() }}
         >
           <LogOut className="h-4 w-4" />
           退出登录
@@ -123,6 +124,7 @@ function SidebarContent({ onNavigate, spaceName }: { onNavigate?: () => void; sp
 
 export default function ArchLayout() {
   const { spaceId } = useParams<{ spaceId: string }>()
+  const isMobile = useIsMobile()
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   const { data: spaceData } = useQuery<{ organizations: { nodes: Space[] } }>(GET_SPACE, {
@@ -134,13 +136,15 @@ export default function ArchLayout() {
   return (
     <div className="flex h-screen">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex w-60 border-r bg-card flex-col">
-        <SidebarContent spaceName={spaceName} />
-      </aside>
+      {!isMobile && (
+        <aside className="hidden md:flex w-60 border-r bg-card flex-col">
+          <SidebarContent spaceName={spaceName} />
+        </aside>
+      )}
 
       {/* Mobile drawer */}
       <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <DialogContent className="left-0 top-0 h-full max-w-[280px] translate-x-0 translate-y-0 rounded-none sm:rounded-none p-0">
+        <DialogContent className="left-0 top-0 h-full max-w-[280px] translate-x-0 translate-y-0 rounded-none sm:rounded-none p-0 data-[state=open]:slide-in-from-left-full data-[state=closed]:slide-out-to-left-full data-[state=open]:slide-in-from-top-0 data-[state=closed]:slide-out-to-top-0">
           <DialogTitle className="sr-only">导航菜单</DialogTitle>
           <div className="h-full bg-card">
             <SidebarContent onNavigate={() => setDrawerOpen(false)} spaceName={spaceName} />
