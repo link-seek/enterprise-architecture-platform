@@ -9,6 +9,7 @@ import { GET_SPACE, ARCHIVE_SPACE, GET_SPACES, GET_SPACE_STATS, SET_SPACE_VISIBI
 import type { Space, SpaceStats, SpaceVisibility } from '@/api/spaces'
 import { useAuthStore } from '@/stores/auth'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { SpaceEditDialog } from './crud'
 import { SpaceMembersDialog } from './members'
 
@@ -40,6 +41,8 @@ export default function SpaceDetail() {
   const [editOpen, setEditOpen] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
   const [visibilityError, setVisibilityError] = useState<string | null>(null)
+  const [pendingVisibility, setPendingVisibility] = useState<SpaceVisibility | null>(null)
+  const [confirmArchive, setConfirmArchive] = useState(false)
 
   const { data, loading, error } = useQuery<{ spaceById: Space | null }>(GET_SPACE, {
     variables: { id: spaceId },
@@ -103,13 +106,7 @@ export default function SpaceDetail() {
                     variant="outline"
                     size="sm"
                     disabled={visibilityLoading}
-                    onClick={() => {
-                      const next: SpaceVisibility = space.visibility === 'public' ? 'private' : 'public'
-                      if (confirm(`确定将此空间设为${next === 'public' ? '公开' : '私有'}？`)) {
-                        setVisibilityError(null)
-                        setVisibility({ variables: { id: space.id, visibility: next } })
-                      }
-                    }}
+                    onClick={() => setPendingVisibility(space.visibility === 'public' ? 'private' : 'public')}
                   >
                     {renderVisibilityButtonContent(visibilityLoading, space.visibility)}
                   </Button>
@@ -121,9 +118,7 @@ export default function SpaceDetail() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => {
-                      if (confirm('确定归档此空间？')) archive({ variables: { id: space.id } })
-                    }}
+                    onClick={() => setConfirmArchive(true)}
                   >
                     <Archive className="h-4 w-4 mr-2" />
                     归档
@@ -163,6 +158,35 @@ export default function SpaceDetail() {
 
       <SpaceEditDialog space={space} open={editOpen} onOpenChange={setEditOpen} />
       <SpaceMembersDialog spaceId={space.id} open={membersOpen} onOpenChange={setMembersOpen} />
+
+      <ConfirmDialog
+        open={pendingVisibility !== null}
+        onOpenChange={(v) => { if (!v) setPendingVisibility(null) }}
+        title={`设为${pendingVisibility === 'public' ? '公开' : '私有'}`}
+        description={`确定将此空间设为${pendingVisibility === 'public' ? '公开' : '私有'}？`}
+        confirmText="确定"
+        loading={visibilityLoading}
+        onConfirm={() => {
+          if (pendingVisibility) {
+            setVisibilityError(null)
+            setVisibility({ variables: { id: space.id, visibility: pendingVisibility } })
+          }
+          setPendingVisibility(null)
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmArchive}
+        onOpenChange={setConfirmArchive}
+        title="确认归档"
+        description="确定归档此空间？"
+        confirmText="归档"
+        destructive
+        onConfirm={() => {
+          setConfirmArchive(false)
+          archive({ variables: { id: space.id } })
+        }}
+      />
     </div>
   )
 }

@@ -67,9 +67,11 @@ test.describe('Spaces - CRUD Main Flow', () => {
     await page.getByRole('link', { name: new RegExp(editedName) }).click();
     await expect(page).toHaveURL(/\/spaces\/[0-9a-f-]{36}$/);
 
-    // Accept the native confirm() dialog, then click 归档.
-    page.once('dialog', (d) => d.accept());
+    // Click 归档 to open the confirmation dialog, then confirm.
     await page.getByRole('button', { name: '归档' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '确认归档' })).toBeVisible();
+    await page.getByRole('dialog').getByRole('button', { name: '归档' }).click();
 
     // Archiving navigates back to the spaces list.
     await expect(page).toHaveURL('/spaces', { timeout: 10000 });
