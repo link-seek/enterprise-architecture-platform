@@ -40,11 +40,14 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
         state.config.server.allow_public_register,
     ));
 
-    // Rate limiter: generous for GraphQL + REST + E2E tests
+    // Rate limiter: configurable per environment.
+    // Production defaults: per_second(4) / burst_size(25) (see config.rs).
+    // CI/E2E overrides via APP_SERVER__RATE_LIMIT__PER_SECOND etc.
+    let rl = &state.config.server.rate_limit;
     let governor_config = std::sync::Arc::new(
         tower_governor::governor::GovernorConfigBuilder::default()
-            .per_second(100)
-            .burst_size(1000)
+            .per_second(rl.per_second)
+            .burst_size(rl.burst_size)
             .finish()
             .unwrap(),
     );

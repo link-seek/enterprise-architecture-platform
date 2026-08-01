@@ -15,6 +15,33 @@ pub struct ServerConfig {
     pub port: u16,
     #[serde(default)]
     pub allow_public_register: bool,
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitConfig {
+    #[serde(default = "default_rate_limit_per_second")]
+    pub per_second: u64,
+    #[serde(default = "default_rate_limit_burst_size")]
+    pub burst_size: u32,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            per_second: default_rate_limit_per_second(),
+            burst_size: default_rate_limit_burst_size(),
+        }
+    }
+}
+
+fn default_rate_limit_per_second() -> u64 {
+    4
+}
+
+fn default_rate_limit_burst_size() -> u32 {
+    25
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

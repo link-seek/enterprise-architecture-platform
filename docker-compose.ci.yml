@@ -9,6 +9,8 @@ services:
       - APP_DATABASE__URL=sqlite://./data/platform.db?mode=rwc
       - APP_SERVER__HOST=0.0.0.0
       - APP_SERVER__PORT=8080
+      - APP_SERVER__RATE_LIMIT__PER_SECOND=100
+      - APP_SERVER__RATE_LIMIT__BURST_SIZE=1000
     healthcheck:
       test: ["NONE"]
 
