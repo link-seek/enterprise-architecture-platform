@@ -20,11 +20,11 @@ static START_TIME: OnceLock<Instant> = OnceLock::new();
 
 pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
     START_TIME.get_or_init(Instant::now);
-    let jwt_secret = state.config.jwt.rsa_private_key_pem.clone();
+    let jwt_secret = state.config.jwt.secret.clone();
 
     let auth_service = Arc::new(AuthService::new(
         state.db.clone(),
-        state.config.jwt.rsa_private_key_pem.clone(),
+        state.config.jwt.secret.clone(),
         state.config.jwt.access_token_ttl_minutes * 60,
         state.config.jwt.refresh_token_ttl_days * 24 * 60 * 60,
         state

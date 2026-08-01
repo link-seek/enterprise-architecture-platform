@@ -17,6 +17,7 @@ use crate::config::Configuration;
 pub struct AppState {
     pub db: DatabaseConnection,
     pub config: Arc<Configuration>,
+    #[allow(dead_code)]
     pub cache: Cache<String, serde_json::Value>,
 }
 

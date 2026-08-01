@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    Set, QueryOrder,
+    Set, QueryOrder, TransactionTrait,
 };
 use shared_common::enums::LifecycleStatus;
 use uuid::Uuid;
@@ -157,6 +157,56 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
         };
 
         Ok(result.into())
+    }
+
+    async fn save_batch(&self, vss: &[ValueStream]) -> Result<(), DomainError> {
+        let txn = self.db.begin().await?;
+        for vs in vss {
+            let existing = value_stream::Entity::find_by_id(vs.id)
+                .one(&txn)
+                .await?;
+
+            if let Some(model) = existing {
+                let mut active: value_stream::ActiveModel = model.into();
+                active.business_version = Set(vs.business_version.clone());
+                active.status = Set(vs.status);
+                active.name = Set(vs.name.clone());
+                active.description = Set(vs.description.clone());
+                active.triggering_event = Set(vs.triggering_event.clone());
+                active.end_deliverable = Set(vs.end_deliverable.clone());
+                active.owner_id = Set(vs.owner_id);
+                active.importance = Set(vs.importance);
+                active.stakeholders = Set(vs.stakeholders.clone());
+                active.performance_metrics = Set(vs.performance_metrics.clone());
+                active.updated_by = Set(vs.updated_by);
+                active.updated_at = Set(vs.updated_at);
+                active.update(&txn).await?;
+            } else {
+                let active = value_stream::ActiveModel {
+                    id: Set(vs.id),
+                    logical_id: Set(vs.logical_id),
+                    business_version: Set(vs.business_version.clone()),
+                    status: Set(vs.status),
+                    name: Set(vs.name.clone()),
+                    description: Set(vs.description.clone()),
+                    triggering_event: Set(vs.triggering_event.clone()),
+                    end_deliverable: Set(vs.end_deliverable.clone()),
+                    owner_id: Set(vs.owner_id),
+                    importance: Set(vs.importance),
+                    stakeholders: Set(vs.stakeholders.clone()),
+                    performance_metrics: Set(vs.performance_metrics.clone()),
+                    created_by: Set(vs.created_by),
+                    updated_by: Set(vs.updated_by),
+                    created_at: Set(vs.created_at),
+                    updated_at: Set(vs.updated_at),
+                    deleted_at: Set(None),
+                    space_id: Set(vs.space_id),
+                };
+                active.insert(&txn).await?;
+            }
+        }
+        txn.commit().await?;
+        Ok(())
     }
 
     async fn soft_delete(&self, id: Uuid) -> Result<(), DomainError> {

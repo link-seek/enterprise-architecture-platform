@@ -2,9 +2,24 @@ use crate::config::LlmConfig;
 use crate::ai::dto::{AiScenario, AiSuggestion};
 
 pub enum LlmBackend {
-    OpenAi { api_key: String, model: String },
-    AzureOpenAi { endpoint: String, api_key: String, deployment: String },
-    Ollama { url: String, model: String },
+    OpenAi {
+        api_key: String,
+        #[allow(dead_code)]
+        model: String,
+    },
+    AzureOpenAi {
+        #[allow(dead_code)]
+        endpoint: String,
+        api_key: String,
+        #[allow(dead_code)]
+        deployment: String,
+    },
+    Ollama {
+        #[allow(dead_code)]
+        url: String,
+        #[allow(dead_code)]
+        model: String,
+    },
     Mock,
 }
 
@@ -29,6 +44,7 @@ impl LlmBackend {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn chat(&self, _prompt: &str) -> anyhow::Result<String> {
         match self {
             LlmBackend::Mock => Ok("Mock LLM response".to_string()),

@@ -33,13 +33,6 @@ pub type GraphqlSchema = async_graphql::dynamic::Schema;
 // GraphQL Auth Guard (seaography LifecycleHooks)
 // ============================================================================
 
-/// Entities that support ownership (have `created_by` field).
-const OWNED_ENTITIES: &[&str] = &[
-    "business_capabilities",
-    "business_processes",
-    "value_streams",
-];
-
 /// User-management entities: only Admin can manage users.
 const USER_ENTITIES: &[&str] = &[
     "users",
@@ -81,6 +74,8 @@ const ADMIN_READ_ENTITIES: &[&str] = &[
 /// Fields hidden from all users (including Admin) in queries.
 const HIDDEN_FIELDS: &[(&str, &str)] = &[
     ("users", "password_hash"),
+    ("refresh_tokens", "token_hash"),
+    ("oauth_authorization_codes", "code_hash"),
 ];
 
 /// Fields restricted to Admin only.
@@ -351,21 +346,11 @@ impl tower::Service<axum::extract::Request> for GraphQLService {
                             }
                         };
 
-                    // Inject Claims into GraphQL context if JWT was valid
+                    // Inject Claims into GraphQL context if JWT was valid.
+                    // entity_guard handles auth for seaography mutations;
+                    // custom ValueStream mutations check Claims explicitly.
                     if let Some(claims) = has_jwt {
                         request = request.data(claims);
-                    } else {
-                        // Fallback: reject mutation requests without JWT
-                        let body_str = String::from_utf8_lossy(&bytes);
-                        if body_str.contains("mutation") {
-                            return Ok((
-                                axum::http::StatusCode::UNAUTHORIZED,
-                                axum::Json(serde_json::json!({
-                                    "errors": [{"message": "Authentication required for mutations. Provide a valid JWT via Authorization header."}]
-                                })),
-                            )
-                                .into_response());
-                        }
                     }
 
                     let response = schema.execute(request).await;
