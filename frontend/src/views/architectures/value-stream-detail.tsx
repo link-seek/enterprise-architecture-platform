@@ -24,7 +24,9 @@ const GET_VALUE_STREAM_DETAIL = gql`
 
 export default function ValueStreamDetail() {
   const { id, spaceId } = useParams<{ id: string; spaceId: string }>()
-  const { data, loading, error } = useQuery(GET_VALUE_STREAM_DETAIL, {
+  const { data, loading, error } = useQuery<{
+    valueStreams: { nodes: { id: string; name: string; description: string; businessVersion: string; status: string; createdAt: string; updatedAt: string }[] }
+  }>(GET_VALUE_STREAM_DETAIL, {
     variables: { id },
   })
 

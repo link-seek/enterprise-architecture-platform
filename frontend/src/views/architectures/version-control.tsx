@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { History, Loader2, Archive } from 'lucide-react'
+import { Loader2, Archive } from 'lucide-react'
 
 // ============================================================================
 // Version Control Queries & Mutations
@@ -53,7 +53,7 @@ export function VersionHistoryDialog({ open, onOpenChange, spaceId, logicalId }:
   spaceId: string
   logicalId: string | null
 }) {
-  const { data, loading } = useQuery(GET_VALUE_STREAM_VERSIONS, {
+  const { data, loading } = useQuery<{ valueStreamsBySpaceAndLogicalId: { id: string; name: string; description: string; businessVersion: string; status: string; createdAt: string; updatedAt: string }[] }>(GET_VALUE_STREAM_VERSIONS, {
     variables: { spaceId, logicalId },
     skip: !logicalId || !spaceId,
   })

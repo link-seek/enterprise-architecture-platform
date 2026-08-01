@@ -49,7 +49,7 @@ export default function Processes() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Process | null>(null)
   const [deleting, setDeleting] = useState<Process | null>(null)
-  const { data, loading, error } = useQuery(GET_PROCESSES, { variables: { spaceId } })
+  const { data, loading, error } = useQuery<{ businessProcessesBySpace: Process[] }>(GET_PROCESSES, { variables: { spaceId } })
 
   return (
     <div className="p-6 space-y-4">
@@ -65,7 +65,7 @@ export default function Processes() {
         <CardHeader><CardTitle>流程列表</CardTitle></CardHeader>
         <CardContent>
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
-          {error && <div className="text-center py-8 text-destructive">加载失败</div>}
+          {Boolean(error) && <div className="text-center py-8 text-destructive">加载失败</div>}
           {data && (
             <Table>
               <TableHeader>

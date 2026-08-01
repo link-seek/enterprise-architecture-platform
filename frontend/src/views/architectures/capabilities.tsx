@@ -49,7 +49,7 @@ export default function Capabilities() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Capability | null>(null)
   const [deleting, setDeleting] = useState<Capability | null>(null)
-  const { data, loading, error } = useQuery(GET_CAPABILITIES, { variables: { spaceId } })
+  const { data, loading, error } = useQuery<{ businessCapabilitiesBySpace: Capability[] }>(GET_CAPABILITIES, { variables: { spaceId } })
 
   return (
     <div className="p-6 space-y-4">
@@ -65,7 +65,7 @@ export default function Capabilities() {
         <CardHeader><CardTitle>能力列表</CardTitle></CardHeader>
         <CardContent>
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
-          {error && <div className="text-center py-8 text-destructive">加载失败</div>}
+          {Boolean(error) && <div className="text-center py-8 text-destructive">加载失败</div>}
           {data && (
             <Table>
               <TableHeader>

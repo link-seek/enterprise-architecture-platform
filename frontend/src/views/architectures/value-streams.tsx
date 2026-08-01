@@ -1,5 +1,4 @@
 import { useQuery } from '@apollo/client/react'
-import { gql } from '@apollo/client'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -32,7 +31,7 @@ export default function ValueStreams() {
   const [versionOpen, setVersionOpen] = useState(false)
   const [versionItem, setVersionItem] = useState<ValueStream | null>(null)
 
-  const { data, loading, error } = useQuery(GET_VALUE_STREAMS, {
+  const { data, loading, error } = useQuery<{ valueStreamsBySpace: ValueStream[] }>(GET_VALUE_STREAMS, {
     variables: { spaceId },
     skip: !spaceId,
   })
@@ -73,7 +72,7 @@ export default function ValueStreams() {
         <CardHeader><CardTitle>价值流列表</CardTitle></CardHeader>
         <CardContent>
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
-          {error && <div className="text-center py-8 text-destructive">加载失败: {error.message}</div>}
+          {Boolean(error) && <div className="text-center py-8 text-destructive">加载失败</div>}
           {data && (
             <>
               <Table>

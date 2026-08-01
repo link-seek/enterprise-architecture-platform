@@ -33,5 +33,5 @@ export const apolloClient = new ApolloClient({
     query: {
       errorPolicy: 'all',
     },
-  },
+  } as ApolloClient['defaultOptions'],
 })
