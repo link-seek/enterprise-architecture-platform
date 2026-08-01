@@ -2535,6 +2535,12 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     builder.register_enumeration::<CapabilityStatus>();
     builder.register_enumeration::<LifecycleStatus>();
 
+    // SpaceVisibility is used as a field type on the `Organizations` entity
+    // (the `visibility` column). If the enum is not registered, seaography
+    // silently skips the field, causing `Unknown field "visibility" on type
+    // "Organizations"` at query time.
+    builder.register_enumeration::<SpaceVisibility>();
+
     let schema = builder.schema_builder()
         .data(db.clone())
         .finish()?;

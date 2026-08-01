@@ -6,6 +6,7 @@ use moka::future::Cache;
 use sea_orm::DatabaseConnection;
 use migration::MigratorTrait;
 use shared_common::enums::UserRole;
+use uuid::Uuid;
 use user_management::domain::user::entity::User;
 use user_management::domain::user::repository::UserRepository;
 use user_management::infrastructure::persistence::user_repo::SeaOrmUserRepo;
@@ -75,13 +76,24 @@ impl AppState {
     }
 }
 
+/// Format a `Uuid` as a SQLite hex blob literal (`X'...'`), matching how
+/// SeaORM stores `Uuid` columns in SQLite (16-byte binary blob).
+fn uuid_to_sqlite_blob(uuid: &Uuid) -> String {
+    let mut s = String::with_capacity(34);
+    s.push_str("X'");
+    for b in uuid.as_bytes() {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s.push('\'');
+    s
+}
+
 /// Idempotently ensure the test space exists (created by migration with a
 /// fixed UUID) and, if an admin user is present, make that admin its owner.
 /// Also seeds the E2E test users as space members (editor role) so that
 /// integration/E2E tests can exercise the edit path instead of read-only mode.
 async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
     use sea_orm::ConnectionTrait;
-    use uuid::Uuid;
 
     let test_space_id =
         Uuid::parse_str(migration::m20250101_000029_add_space_id_to_business_entities::TEST_SPACE_ID)
@@ -104,14 +116,19 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
     .await?
     .map(|r| r.id);
 
+    // SeaORM stores Uuid as a 16-byte binary blob in SQLite. Raw SQL must use
+    // X'...' hex literals (not string UUIDs) so that SeaORM entity queries —
+    // which compare against binary blobs — can actually match these rows.
+    let space_blob = uuid_to_sqlite_blob(&test_space_id);
     if let Some(admin_id) = admin_id {
-        let now = chrono::Utc::now();
+        let user_blob = uuid_to_sqlite_blob(&admin_id);
+        let now = chrono::Utc::now().to_rfc3339();
         let insert = format!(
             r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
-               VALUES ('{space}','{user}','owner','{now}','{now}')
+               VALUES ({space},{user},'owner','{now}','{now}')
                ON CONFLICT ("space_id","user_id") DO NOTHING"#,
-            space = test_space_id,
-            user = admin_id,
+            space = space_blob,
+            user = user_blob,
             now = now
         );
         let _ = db.execute_unprepared(&insert).await;
@@ -146,13 +163,14 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
                 let saved = repo.save(&user).await?;
                 saved.id
             };
-            let now = chrono::Utc::now();
+            let now = chrono::Utc::now().to_rfc3339();
+            let user_blob = uuid_to_sqlite_blob(&user_id);
             let insert = format!(
                 r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
-                   VALUES ('{space}','{user}','editor','{now}','{now}')
+                   VALUES ({space},{user},'editor','{now}','{now}')
                    ON CONFLICT ("space_id","user_id") DO NOTHING"#,
-                space = test_space_id,
-                user = user_id,
+                space = space_blob,
+                user = user_blob,
                 now = now
             );
             let _ = db.execute_unprepared(&insert).await;

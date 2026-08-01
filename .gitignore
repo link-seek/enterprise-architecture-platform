@@ -23,6 +23,7 @@ Thumbs.db
 .env.local
 
 # Test artifacts (Playwright screenshots, error context, traces)
+test-results/
 frontend/test-results/
 frontend/playwright-report/
 
