@@ -87,8 +87,11 @@ impl Configuration {
             config::File::with_name(&format!("config/{env}")).required(false),
         );
 
-        builder = builder
-            .add_source(config::Environment::with_prefix("APP").separator("__"));
+        builder = builder.add_source(
+            config::Environment::with_prefix("APP")
+                .prefix_separator("_")
+                .separator("__"),
+        );
 
         let cfg: Self = builder.build()?.try_deserialize()?;
         Ok(cfg)
