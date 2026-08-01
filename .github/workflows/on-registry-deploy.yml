@@ -49,7 +49,7 @@ jobs:
   deploy:
     needs: resolve-tag
     if: needs.resolve-tag.outputs.tag != ''
-    uses: link-seek/issue-resolver/.github/workflows/deploy-pipeline.yml@main
+    uses: link-seek/issue-resolver-l1/.github/workflows/deploy-pipeline.yml@main
     with:
       image-tag: ${{ needs.resolve-tag.outputs.tag }}
       runner-label: eap-prod

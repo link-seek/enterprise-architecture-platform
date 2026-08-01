@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   fix:
-    uses: link-seek/issue-resolver/.github/workflows/fix.yml@main
+    uses: link-seek/issue-resolver-l1/.github/workflows/fix.yml@main
     with:
       pr-number: ${{ inputs.pr_number }}
       head-branch: ${{ inputs.head_branch }}

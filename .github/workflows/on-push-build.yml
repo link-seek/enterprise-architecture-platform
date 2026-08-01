@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   ci-cd:
-    uses: link-seek/issue-resolver/.github/workflows/ci-cd-acr.yml@main
+    uses: link-seek/issue-resolver-l1/.github/workflows/ci-cd-acr.yml@main
     with:
       ghcr-image: ghcr.io/link-seek/eap-backend
       oss-bucket: eap-frontend-xyc

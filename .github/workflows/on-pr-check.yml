@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   pr-ci:
-    uses: link-seek/issue-resolver/.github/workflows/pr-ci.yml@main
+    uses: link-seek/issue-resolver-l1/.github/workflows/pr-ci.yml@main
     with:
       enable-backend-tests: true
       enable-frontend-tests: true
