@@ -51,6 +51,7 @@ rand = "0.8"
 base64 = "0.22"
 sha2 = "0.10"
 url = "2"
+percent-encoding = "2"
 
 # API docs
 utoipa = { version = "5", features = ["uuid", "chrono", "axum_extras"] }

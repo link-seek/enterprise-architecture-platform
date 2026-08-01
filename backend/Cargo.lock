@@ -4632,6 +4632,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "jsonwebtoken",
+ "percent-encoding",
  "rand 0.8.6",
  "rsa",
  "sea-orm",
