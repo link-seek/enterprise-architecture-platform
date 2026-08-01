@@ -7,17 +7,15 @@ import { Badge } from '@/components/ui/badge'
 import { ArrowLeft } from 'lucide-react'
 
 const GET_VALUE_STREAM_DETAIL = gql`
-  query GetValueStreamDetail($id: String!) {
-    valueStreams(filters: { id: { eq: $id } }) {
-      nodes {
-        id
-        name
-        description
-        businessVersion
-        status
-        createdAt
-        updatedAt
-      }
+  query GetValueStreamDetail($spaceId: String!, $id: String!) {
+    valueStreamById(spaceId: $spaceId, id: $id) {
+      id
+      name
+      description
+      businessVersion
+      status
+      createdAt
+      updatedAt
     }
   }
 `
@@ -25,12 +23,13 @@ const GET_VALUE_STREAM_DETAIL = gql`
 export default function ValueStreamDetail() {
   const { id, spaceId } = useParams<{ id: string; spaceId: string }>()
   const { data, loading, error } = useQuery<{
-    valueStreams: { nodes: { id: string; name: string; description: string; businessVersion: string; status: string; createdAt: string; updatedAt: string }[] }
+    valueStreamById: { id: string; name: string; description: string; businessVersion: string; status: string; createdAt: string; updatedAt: string } | null
   }>(GET_VALUE_STREAM_DETAIL, {
-    variables: { id },
+    variables: { spaceId, id },
+    skip: !spaceId || !id,
   })
 
-  const vs = data?.valueStreams?.nodes?.[0]
+  const vs = data?.valueStreamById
   const backPath = spaceId
     ? `/spaces/${spaceId}/architectures/value-streams`
     : '/architectures/value-streams'
