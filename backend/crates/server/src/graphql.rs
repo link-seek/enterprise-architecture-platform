@@ -415,26 +415,7 @@ where
 /// Convert a domain ValueStream back to a SeaORM Model so that
 /// seaography's field resolvers can downcast and resolve all fields.
 fn domain_vs_to_model(vs: &DomainValueStream) -> value_stream::Model {
-    value_stream::Model {
-        id: vs.id,
-        logical_id: vs.logical_id,
-        business_version: vs.business_version.clone(),
-        status: vs.status,
-        name: vs.name.clone(),
-        description: vs.description.clone(),
-        triggering_event: vs.triggering_event.clone(),
-        end_deliverable: vs.end_deliverable.clone(),
-        owner_id: vs.owner_id,
-        importance: vs.importance,
-        stakeholders: vs.stakeholders.clone(),
-        performance_metrics: vs.performance_metrics.clone(),
-        created_by: vs.created_by,
-        updated_by: vs.updated_by,
-        created_at: vs.created_at,
-        updated_at: vs.updated_at,
-        deleted_at: vs.deleted_at,
-        space_id: vs.space_id,
-    }
+    vs.into()
 }
 
 // ============================================================================
@@ -500,6 +481,10 @@ async fn ensure_space_edit_access(
 
 /// Register custom ValueStream mutations that go through the domain model.
 /// These replace seaography's auto-generated CRUD mutations for value_stream.
+///
+/// Custom mutations skip `entity_guard` (it only applies to seaography-generated
+/// resolvers), so each mutation manually calls `check_value_stream_auth` for
+/// role-based authorization and `ensure_space_edit_access` for space-level ACL.
 fn register_value_stream_domain_mutations(builder: &mut Builder) {
     use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, TypeRef};
 

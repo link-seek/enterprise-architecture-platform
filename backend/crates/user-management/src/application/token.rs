@@ -23,7 +23,12 @@ pub struct Claims {
 
 impl Claims {
     pub fn user_role(&self) -> shared_common::enums::UserRole {
-        shared_common::enums::UserRole::from_str(&self.role)
-            .unwrap_or(shared_common::enums::UserRole::Viewer)
+        match shared_common::enums::UserRole::from_str(&self.role) {
+            Some(role) => role,
+            None => {
+                tracing::warn!(role = %self.role, user_id = %self.user_id, "invalid role in JWT, falling back to Viewer");
+                shared_common::enums::UserRole::Viewer
+            }
+        }
     }
 }
