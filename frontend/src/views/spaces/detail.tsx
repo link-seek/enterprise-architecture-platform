@@ -118,7 +118,7 @@ export default function SpaceDetail() {
                     variant="outline"
                     size="sm"
                     disabled={visibilityLoading || archiveLoading}
-                    onClick={() => setPendingVisibility(space.visibility === 'public' ? 'private' : 'public')}
+                    onClick={() => { setVisibilityError(null); setPendingVisibility(space.visibility === 'public' ? 'private' : 'public') }}
                   >
                     {renderVisibilityButtonContent(visibilityLoading, space.visibility)}
                   </Button>

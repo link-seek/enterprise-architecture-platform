@@ -37,7 +37,9 @@ impl MigrationTrait for Migration {
             tracing::warn!(
                 rows_deleted = result.rows_affected(),
                 "migration 000033: deleted duplicate refresh_tokens rows to enforce \
-                 unique token_hash; this is an irreversible data change."
+                 unique token_hash; this is an irreversible data change. \
+                 Users holding tokens from deleted rows will be logged out. \
+                 Back up the refresh_tokens table before running this migration in production."
             );
         }
 
@@ -83,7 +85,9 @@ impl MigrationTrait for Migration {
             tracing::warn!(
                 rows_deleted = result.rows_affected(),
                 "migration 000033: deleted duplicate oauth_codes rows to enforce \
-                 unique code_hash; this is an irreversible data change."
+                 unique code_hash; this is an irreversible data change. \
+                 Authorization codes from deleted rows will be invalidated. \
+                 Back up the oauth_codes table before running this migration in production."
             );
         }
 
@@ -99,30 +103,16 @@ impl MigrationTrait for Migration {
             .await
     }
 
-    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .drop_index(
-                Index::drop()
-                    .name("idx_oauth_codes_code_hash")
-                    .to_owned(),
-            )
-            .await?;
-
-        manager
-            .drop_index(
-                Index::drop()
-                    .name("idx_refresh_tokens_user_id")
-                    .to_owned(),
-            )
-            .await?;
-
-        manager
-            .drop_index(
-                Index::drop()
-                    .name("idx_refresh_tokens_token_hash")
-                    .to_owned(),
-            )
-            .await
+    async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
+        // This migration is irreversible: up() permanently deletes duplicate
+        // rows from refresh_tokens and oauth_codes to enforce uniqueness.
+        // Those rows cannot be restored, so a rollback would leave the data
+        // in an inconsistent state. Refusing the rollback forces the operator
+        // to restore from a backup taken before the migration.
+        Err(DbErr::Custom(
+            "migration 000033 is irreversible: duplicate rows were permanently deleted in up()"
+                .into(),
+        ))
     }
 }
 

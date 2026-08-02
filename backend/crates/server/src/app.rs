@@ -49,7 +49,7 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
             .per_second(rl.per_second)
             .burst_size(rl.burst_size)
             .finish()
-            .expect("governor config must be valid for the configured rate limit"),
+            .expect("governor config must be valid — rate_limit.per_second and burst_size must be > 0; validated in Configuration::ensure_defaults()"),
     );
     let governor_limiter = tower_governor::GovernorLayer::new(governor_config);
 

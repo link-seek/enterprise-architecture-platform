@@ -187,7 +187,7 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
 
     async fn save_batch(&self, vss: &[ValueStream]) -> Result<(), DomainError> {
         let txn = self.db.begin().await?;
-        for vs in vss {
+        for (idx, vs) in vss.iter().enumerate() {
             let existing = value_stream::Entity::find_by_id(vs.id)
                 .one(&txn)
                 .await?;
@@ -207,7 +207,12 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
                 active.updated_by = Set(vs.updated_by);
                 active.updated_at = Set(vs.updated_at);
                 active.deleted_at = Set(vs.deleted_at);
-                active.update(&txn).await?;
+                active.update(&txn).await.map_err(|e| {
+                    DomainError::Database(format!(
+                        "save_batch: failed to update record at index {idx} (id={}): {e}",
+                        vs.id
+                    ))
+                })?;
             } else {
                 let active = value_stream::ActiveModel {
                     id: Set(vs.id),
@@ -229,7 +234,12 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
                     deleted_at: Set(vs.deleted_at),
                     space_id: Set(vs.space_id),
                 };
-                active.insert(&txn).await?;
+                active.insert(&txn).await.map_err(|e| {
+                    DomainError::Database(format!(
+                        "save_batch: failed to insert record at index {idx} (id={}): {e}",
+                        vs.id
+                    ))
+                })?;
             }
         }
         txn.commit().await?;

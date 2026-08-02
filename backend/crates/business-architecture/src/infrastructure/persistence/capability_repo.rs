@@ -172,7 +172,9 @@ impl SeaOrmCapabilityRepo {
                 .ok_or(DomainError::CapabilityNotFound)?;
 
         if capability.status != LifecycleStatus::Active {
-            return Err(DomainError::CannotReferenceArchived);
+            return Err(DomainError::CannotModifyArchived {
+                entity: "capability".to_owned(),
+            });
         }
 
         let active = capability_process::ActiveModel {

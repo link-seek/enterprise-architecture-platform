@@ -45,13 +45,13 @@ impl AuditLogRepository for SeaOrmAuditLogRepo {
         const DEFAULT_LIMIT: u64 = 200;
         const MAX_LIMIT: u64 = 1000;
         let max_limit = limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-        // Load all rows for the space (ordered, paginated) and drop rows whose
-        // `action` cannot be mapped to a known `SpaceAuditAction` in memory.
-        // Filtering in memory (rather than at the DB level) keeps this method
-        // consistent with the trait contract ("list audit logs for a space")
-        // and with the test fake, which both return logs for any known action.
+        // Filter at the DB level by known action values so that pagination
+        // (offset + limit) and filtering happen in the same layer. Without
+        // this, rows with unmappable actions would consume pagination slots
+        // but be dropped in memory, causing gaps in the result set.
         let models = space_audit_log::Entity::find()
             .filter(space_audit_log::Column::SpaceId.eq(space_id))
+            .filter(space_audit_log::Column::Action.is_in(["visibility_changed"]))
             .order_by_desc(space_audit_log::Column::CreatedAt)
             .offset(offset)
             .limit(max_limit)
@@ -59,14 +59,8 @@ impl AuditLogRepository for SeaOrmAuditLogRepo {
             .await?;
         Ok(models
             .into_iter()
-            .filter_map(|m| match SpaceAuditLog::try_from(m) {
-                Ok(log) => Some(log),
-                Err(e) => {
-                    tracing::warn!(error = %e, "skipping audit log with unmappable action");
-                    None
-                }
-            })
-            .collect())
+            .map(SpaceAuditLog::try_from)
+            .collect::<Result<Vec<_>, _>>()?)
     }
 }
 
@@ -75,7 +69,7 @@ impl TryFrom<space_audit_log::Model> for SpaceAuditLog {
 
     fn try_from(m: space_audit_log::Model) -> Result<Self, Self::Error> {
         let action = SpaceAuditAction::try_from(m.action.as_str())?;
-        Ok(SpaceAuditLog::from_db_row(
+        SpaceAuditLog::from_db_row(
             m.id,
             m.space_id,
             m.actor_id,
@@ -83,6 +77,6 @@ impl TryFrom<space_audit_log::Model> for SpaceAuditLog {
             m.from_value,
             m.to_value,
             m.created_at,
-        ))
+        )
     }
 }

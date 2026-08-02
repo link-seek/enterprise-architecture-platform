@@ -88,6 +88,8 @@ impl SpaceAuditLog {
 
     /// Reconstruct a `SpaceAuditLog` from a database row. The `action` is
     /// expected to have already been validated via `SpaceAuditAction::try_from`.
+    /// This method also validates domain invariants: a `visibility_changed`
+    /// action must carry both `from_value` and `to_value`.
     pub(crate) fn from_db_row(
         id: Uuid,
         space_id: Uuid,
@@ -96,8 +98,19 @@ impl SpaceAuditLog {
         from_value: Option<String>,
         to_value: Option<String>,
         created_at: DateTime<Utc>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, DomainError> {
+        if action == SpaceAuditAction::visibility_changed() {
+            match (&from_value, &to_value) {
+                (Some(_), Some(_)) => {}
+                _ => {
+                    return Err(DomainError::Validation(
+                        "visibility_changed audit log must have both from_value and to_value"
+                            .to_owned(),
+                    ))
+                }
+            }
+        }
+        Ok(Self {
             id,
             space_id,
             actor_id,
@@ -105,7 +118,7 @@ impl SpaceAuditLog {
             from_value,
             to_value,
             created_at,
-        }
+        })
     }
 
     pub fn id(&self) -> Uuid {

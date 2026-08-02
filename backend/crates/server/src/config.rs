@@ -107,9 +107,11 @@ impl Configuration {
 
     /// Fill in empty config values with sensible defaults for development.
     ///
-    /// - JWT secret: generate random 32-byte hex if empty
+    /// - JWT secret: in local/dev, generate random 32-byte hex if empty;
+    ///   in all other environments, require an explicit secret (bail if empty)
     /// - SQLite data/ directory: create if it doesn't exist
     /// - LLM api_key: warn if empty (degraded mode, non-blocking)
+    /// - Rate limit: validate per_second > 0 and burst_size > 0 (bail if invalid)
     pub fn ensure_defaults(&mut self) -> anyhow::Result<()> {
         if self.jwt.secret.is_empty() {
             let env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
@@ -132,6 +134,19 @@ impl Configuration {
                  Set a fixed value in production via environment variable APP_JWT__SECRET."
             );
             self.jwt.secret = hex_secret;
+        }
+
+        if self.server.rate_limit.per_second == 0 {
+            anyhow::bail!(
+                "rate_limit.per_second must be greater than 0; \
+                 set APP_SERVER__RATE_LIMIT__PER_SECOND to a positive value."
+            );
+        }
+        if self.server.rate_limit.burst_size == 0 {
+            anyhow::bail!(
+                "rate_limit.burst_size must be greater than 0; \
+                 set APP_SERVER__RATE_LIMIT__BURST_SIZE to a positive value."
+            );
         }
 
         if let Some(data_dir) = self.extract_sqlite_data_dir() {
