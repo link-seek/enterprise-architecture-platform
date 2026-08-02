@@ -239,8 +239,11 @@ impl SpaceRole {
 /// - `Private`: content readable only by space members (owner/editor) and
 ///   platform Admins.
 ///
-/// Defaults to `Public` so existing spaces remain open with zero behavior
-/// change when the column is added.
+/// The database column default is `'public'` (see migration 000031) so existing
+/// spaces remain open with zero behavior change when the column is added. The
+/// Rust `Default` trait, however, returns `Private` to match the least-privilege
+/// default used by `parse_visibility_arg`, preventing accidental public exposure
+/// when visibility is derived via `Default` rather than specified explicitly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
 #[serde(rename_all = "snake_case")]
@@ -253,7 +256,7 @@ pub enum SpaceVisibility {
 
 impl Default for SpaceVisibility {
     fn default() -> Self {
-        SpaceVisibility::Public
+        SpaceVisibility::Private
     }
 }
 
