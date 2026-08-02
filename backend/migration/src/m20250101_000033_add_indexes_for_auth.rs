@@ -1,7 +1,7 @@
 use sea_orm_migration::prelude::*;
 
 /// Adds missing indexes on `refresh_tokens(token_hash)`,
-/// `refresh_tokens(user_id)`, and `oauth_codes(code_hash)`
+/// `refresh_tokens(user_id)`, and `oauth_authorization_codes(code_hash)`
 /// to speed up token lookups and user-token listings.
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -93,7 +93,7 @@ enum OauthCodes {
 impl sea_orm_migration::sea_orm::Iden for OauthCodes {
     fn unquoted(&self) -> &str {
         match self {
-            OauthCodes::Table => "oauth_codes",
+            OauthCodes::Table => "oauth_authorization_codes",
             OauthCodes::CodeHash => "code_hash",
         }
     }
