@@ -266,11 +266,16 @@ impl SpaceVisibility {
             SpaceVisibility::Private => "private",
         }
     }
-    pub fn from_str(s: &str) -> Option<Self> {
+}
+
+impl std::str::FromStr for SpaceVisibility {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "public" => Some(SpaceVisibility::Public),
-            "private" => Some(SpaceVisibility::Private),
-            _ => None,
+            "public" => Ok(SpaceVisibility::Public),
+            "private" => Ok(SpaceVisibility::Private),
+            _ => Err(format!("invalid SpaceVisibility: '{s}'")),
         }
     }
 }
