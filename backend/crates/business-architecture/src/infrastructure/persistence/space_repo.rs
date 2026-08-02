@@ -172,11 +172,20 @@ impl SpaceRepository for SeaOrmSpaceRepo {
         // cumulative (limit 3 including archived): archiving a space does not
         // release the slot, so a user who owned 3 spaces (even if all archived)
         // cannot create another and must ask an Admin to create one for them.
+        //
+        // We join with the space table to guard against orphaned membership
+        // rows (e.g. if a space was hard-deleted but the member row survived
+        // due to disabled foreign keys). Only memberships whose space row
+        // still exists are counted.
         let count = space_member::Entity::find()
             .filter(space_member::Column::UserId.eq(user_id))
             .filter(space_member::Column::Role.eq("owner"))
-            .count(&self.db)
-            .await?;
+            .find_also_related(space::Entity)
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .filter(|(_, s)| s.is_some())
+            .count() as u64;
         Ok(count)
     }
 }

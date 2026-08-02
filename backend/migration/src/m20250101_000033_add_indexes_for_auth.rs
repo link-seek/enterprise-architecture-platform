@@ -15,6 +15,7 @@ impl MigrationTrait for Migration {
                     .name("idx_refresh_tokens_token_hash")
                     .table(RefreshTokens::Table)
                     .col(RefreshTokens::TokenHash)
+                    .unique()
                     .to_owned(),
             )
             .await?;
@@ -35,6 +36,7 @@ impl MigrationTrait for Migration {
                     .name("idx_oauth_codes_code_hash")
                     .table(OauthCodes::Table)
                     .col(OauthCodes::CodeHash)
+                    .unique()
                     .to_owned(),
             )
             .await

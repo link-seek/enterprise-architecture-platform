@@ -24,7 +24,7 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
 
     let auth_service = Arc::new(AuthService::new(
         state.db.clone(),
-        state.config.jwt.secret.clone(),
+        jwt_secret.clone(),
         state.config.jwt.access_token_ttl_minutes * 60,
         state.config.jwt.refresh_token_ttl_days * 24 * 60 * 60,
         state

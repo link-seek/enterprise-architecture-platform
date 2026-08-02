@@ -36,31 +36,6 @@ impl From<value_stream::Model> for ValueStream {
     }
 }
 
-impl From<&ValueStream> for value_stream::Model {
-    fn from(vs: &ValueStream) -> Self {
-        value_stream::Model {
-            id: vs.id,
-            logical_id: vs.logical_id,
-            business_version: vs.business_version.clone(),
-            status: vs.status.clone(),
-            name: vs.name.clone(),
-            description: vs.description.clone(),
-            triggering_event: vs.triggering_event.clone(),
-            end_deliverable: vs.end_deliverable.clone(),
-            owner_id: vs.owner_id,
-            importance: vs.importance.clone(),
-            stakeholders: vs.stakeholders.clone(),
-            performance_metrics: vs.performance_metrics.clone(),
-            created_by: vs.created_by,
-            updated_by: vs.updated_by,
-            created_at: vs.created_at,
-            updated_at: vs.updated_at,
-            deleted_at: vs.deleted_at,
-            space_id: vs.space_id,
-        }
-    }
-}
-
 impl From<value_stream_stage::Model> for ValueStreamStage {
     fn from(m: value_stream_stage::Model) -> Self {
         ValueStreamStage {
@@ -156,6 +131,7 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
             active.performance_metrics = Set(vs.performance_metrics.clone());
             active.updated_by = Set(vs.updated_by);
             active.updated_at = Set(vs.updated_at);
+            active.deleted_at = Set(vs.deleted_at);
             active.update(&self.db).await?
         } else {
             let active = value_stream::ActiveModel {
@@ -175,7 +151,7 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
                 updated_by: Set(vs.updated_by),
                 created_at: Set(vs.created_at),
                 updated_at: Set(vs.updated_at),
-                deleted_at: Set(None),
+                deleted_at: Set(vs.deleted_at),
                 space_id: Set(vs.space_id),
             };
             active.insert(&self.db).await?
@@ -205,6 +181,7 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
                 active.performance_metrics = Set(vs.performance_metrics.clone());
                 active.updated_by = Set(vs.updated_by);
                 active.updated_at = Set(vs.updated_at);
+                active.deleted_at = Set(vs.deleted_at);
                 active.update(&txn).await?;
             } else {
                 let active = value_stream::ActiveModel {
@@ -224,7 +201,7 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
                     updated_by: Set(vs.updated_by),
                     created_at: Set(vs.created_at),
                     updated_at: Set(vs.updated_at),
-                    deleted_at: Set(None),
+                    deleted_at: Set(vs.deleted_at),
                     space_id: Set(vs.space_id),
                 };
                 active.insert(&txn).await?;
@@ -291,6 +268,7 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
             active.input = Set(stage.input.clone());
             active.output = Set(stage.output.clone());
             active.updated_at = Set(stage.updated_at);
+            active.deleted_at = Set(stage.deleted_at);
             active.update(&self.db).await?
         } else {
             let active = value_stream_stage::ActiveModel {
@@ -302,7 +280,7 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
                 value_stream_id: Set(stage.value_stream_id),
                 created_at: Set(stage.created_at),
                 updated_at: Set(stage.updated_at),
-                deleted_at: Set(None),
+                deleted_at: Set(stage.deleted_at),
             };
             active.insert(&self.db).await?
         };

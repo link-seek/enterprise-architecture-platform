@@ -1,3 +1,4 @@
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,7 +82,7 @@ impl Configuration {
         let mut builder = config::Config::builder()
             .add_source(config::File::with_name("config/default").required(false));
 
-        let env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
+        let env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
         builder = builder.add_source(
             config::File::with_name(&format!("config/{env}")).required(false),
         );
@@ -103,13 +104,14 @@ impl Configuration {
     /// - LLM api_key: warn if empty (degraded mode, non-blocking)
     pub fn ensure_defaults(&mut self) -> anyhow::Result<()> {
         if self.jwt.secret.is_empty() {
-            let env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
+            let env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
             if env == "production" {
                 anyhow::bail!(
                     "JWT secret must be set in production. Set it via environment variable APP_JWT__SECRET."
                 );
             }
-            let random_bytes: [u8; 32] = rand::random();
+            let mut random_bytes = [0u8; 32];
+            rand::rngs::OsRng.fill_bytes(&mut random_bytes);
             let hex_secret: String = random_bytes.iter().map(|b| format!("{b:02x}")).collect();
             tracing::warn!(
                 "JWT secret is empty — generated random secret for development. \

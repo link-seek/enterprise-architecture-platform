@@ -475,7 +475,7 @@ mod tests {
             limit: Option<u64>,
             offset: u64,
         ) -> Result<Vec<SpaceAuditLog>, DomainError> {
-            let cap = limit.unwrap_or(200).min(1000);
+            let max_limit = limit.unwrap_or(200).min(1000);
             Ok(self
                 .logs
                 .lock()
@@ -483,7 +483,7 @@ mod tests {
                 .iter()
                 .filter(|l| l.space_id() == space_id)
                 .skip(offset as usize)
-                .take(cap as usize)
+                .take(max_limit as usize)
                 .cloned()
                 .collect())
         }

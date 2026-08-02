@@ -42,18 +42,19 @@ impl AuditLogRepository for SeaOrmAuditLogRepo {
         limit: Option<u64>,
         offset: u64,
     ) -> Result<Vec<SpaceAuditLog>, DomainError> {
-        let cap = limit.unwrap_or(200).clamp(1, 1000);
-        // Filter to rows with the `visibility_changed` action *at the database
-        // level* so that offset/limit apply to the same set the caller
-        // receives. Without this, rows with an unmappable action would consume
-        // offset/limit slots and cause the returned page to be shorter than
-        // `limit` or skip real entries.
+        const DEFAULT_LIMIT: u64 = 200;
+        const MAX_LIMIT: u64 = 1000;
+        let max_limit = limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+        // Load all rows for the space (ordered, paginated) and drop rows whose
+        // `action` cannot be mapped to a known `SpaceAuditAction` in memory.
+        // Filtering in memory (rather than at the DB level) keeps this method
+        // consistent with the trait contract ("list audit logs for a space")
+        // and with the test fake, which both return logs for any known action.
         let models = space_audit_log::Entity::find()
             .filter(space_audit_log::Column::SpaceId.eq(space_id))
-            .filter(space_audit_log::Column::Action.eq(SpaceAuditAction::visibility_changed().as_str()))
             .order_by_desc(space_audit_log::Column::CreatedAt)
             .offset(offset)
-            .limit(cap)
+            .limit(max_limit)
             .all(&self.db)
             .await?;
         Ok(models

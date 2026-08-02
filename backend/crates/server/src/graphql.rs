@@ -768,14 +768,29 @@ fn domain_err_to_graphql(e: DomainError) -> async_graphql::Error {
         | DomainError::CannotReferenceArchived | DomainError::AlreadyMember
         | DomainError::CannotRemoveLastOwner | DomainError::NotOwner => "FORBIDDEN",
     };
-    graphql_err_with_code(&e, code)
+    // Database errors may contain sensitive internal details (SQL fragments,
+    // table/column names, constraint names). Log the full message server-side
+    // but return a generic message to the client.
+    match &e {
+        DomainError::Database(msg) => {
+            tracing::error!("Database error: {msg}");
+            async_graphql::Error::new("Internal server error").extend_with(|_err, extensions| {
+                extensions.set("code", code.to_owned());
+            })
+        }
+        _ => graphql_err_with_code(&e, code),
+    }
 }
 
 /// Map a SeaORM database error to a GraphQL error carrying a semantic
-/// `extensions.code` of `INTERNAL_ERROR`, so the frontend can branch on the
-/// code instead of parsing a free-text message.
+/// `extensions.code` of `INTERNAL_ERROR`. The raw database message is logged
+/// server-side but never sent to the client to avoid leaking SQL fragments,
+/// table/column names, or constraint names.
 fn db_err_to_graphql(e: impl std::fmt::Display) -> async_graphql::Error {
-    domain_err_to_graphql(DomainError::Database(e.to_string()))
+    tracing::error!("Database error: {e}");
+    async_graphql::Error::new("Internal server error").extend_with(|_err, extensions| {
+        extensions.set("code", "INTERNAL_ERROR".to_owned());
+    })
 }
 
 fn register_space_domain_mutations(builder: &mut Builder) {

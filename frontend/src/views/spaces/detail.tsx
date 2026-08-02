@@ -117,7 +117,7 @@ export default function SpaceDetail() {
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={visibilityLoading}
+                    disabled={visibilityLoading || archiveLoading}
                     onClick={() => setPendingVisibility(space.visibility === 'public' ? 'private' : 'public')}
                   >
                     {renderVisibilityButtonContent(visibilityLoading, space.visibility)}
@@ -127,7 +127,7 @@ export default function SpaceDetail() {
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={archiveLoading}
+                    disabled={archiveLoading || visibilityLoading}
                     onClick={() => { setArchiveError(null); setConfirmArchive(true) }}
                   >
                     <Archive className="h-4 w-4 mr-2" />
