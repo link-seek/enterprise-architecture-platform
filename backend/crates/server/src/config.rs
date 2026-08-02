@@ -113,9 +113,15 @@ impl Configuration {
     pub fn ensure_defaults(&mut self) -> anyhow::Result<()> {
         if self.jwt.secret.is_empty() {
             let env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
-            if env.eq_ignore_ascii_case("production") {
+            // Fail-safe / least-privilege: only "local" and "dev" environments may
+            // auto-generate a random JWT secret. Every other environment (including
+            // the unset default "production", "staging", "prod", etc.) is treated as
+            // production and requires an explicit APP_JWT__SECRET.
+            let is_dev = env.eq_ignore_ascii_case("local") || env.eq_ignore_ascii_case("dev");
+            if !is_dev {
                 anyhow::bail!(
-                    "JWT secret must be set in production. Set it via environment variable APP_JWT__SECRET."
+                    "JWT secret must be set in non-development environments. \
+                     Set it via environment variable APP_JWT__SECRET, or set APP_ENV=local for development."
                 );
             }
             let mut random_bytes = [0u8; 32];

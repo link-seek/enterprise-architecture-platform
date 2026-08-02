@@ -17,12 +17,20 @@ impl MigrationTrait for Migration {
         // migration. We keep the row with the smallest id (oldest) per
         // token_hash and delete the rest. SQLite supports this MIN-based
         // subquery; Postgres would use the same pattern.
-        db.execute_unprepared(
-            r#"DELETE FROM "refresh_tokens" WHERE "id" NOT IN (
-                   SELECT MIN("id") FROM "refresh_tokens" GROUP BY "token_hash"
-               )"#,
-        )
-        .await?;
+        let result = db
+            .execute_unprepared(
+                r#"DELETE FROM "refresh_tokens" WHERE "id" NOT IN (
+                       SELECT MIN("id") FROM "refresh_tokens" GROUP BY "token_hash"
+                   )"#,
+            )
+            .await?;
+        if result.rows_affected() > 0 {
+            tracing::warn!(
+                rows_deleted = result.rows_affected(),
+                "migration 000033: deleted duplicate refresh_tokens rows to enforce \
+                 unique token_hash; this is an irreversible data change."
+            );
+        }
 
         manager
             .create_index(
@@ -46,12 +54,20 @@ impl MigrationTrait for Migration {
             .await?;
 
         // Same dedup for oauth_codes.code_hash before the UNIQUE index.
-        db.execute_unprepared(
-            r#"DELETE FROM "oauth_codes" WHERE "id" NOT IN (
-                   SELECT MIN("id") FROM "oauth_codes" GROUP BY "code_hash"
-               )"#,
-        )
-        .await?;
+        let result = db
+            .execute_unprepared(
+                r#"DELETE FROM "oauth_codes" WHERE "id" NOT IN (
+                       SELECT MIN("id") FROM "oauth_codes" GROUP BY "code_hash"
+                   )"#,
+            )
+            .await?;
+        if result.rows_affected() > 0 {
+            tracing::warn!(
+                rows_deleted = result.rows_affected(),
+                "migration 000033: deleted duplicate oauth_codes rows to enforce \
+                 unique code_hash; this is an irreversible data change."
+            );
+        }
 
         manager
             .create_index(
