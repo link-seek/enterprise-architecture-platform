@@ -7,7 +7,7 @@ use crate::domain::error::DomainError;
 /// the value to known variants prevents typos (e.g. `"visibility_chaged"`) from
 /// being persisted while still serializing to a plain string in the database,
 /// so no schema migration is required.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SpaceAuditAction(String);
 
 impl SpaceAuditAction {

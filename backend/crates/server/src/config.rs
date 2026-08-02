@@ -103,7 +103,7 @@ impl Configuration {
     /// - LLM api_key: warn if empty (degraded mode, non-blocking)
     pub fn ensure_defaults(&mut self) -> anyhow::Result<()> {
         if self.jwt.secret.is_empty() {
-            let env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
+            let env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
             if env == "production" {
                 anyhow::bail!(
                     "JWT secret must be set in production. Set it via environment variable APP_JWT__SECRET."

@@ -108,12 +108,12 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
     }
 
     /// Change a space's visibility. Requires owner or admin. Records an audit
-    /// log entry. In strict-audit mode the visibility is persisted *first* and
-    /// the audit log recorded *after*, so a persistence failure leaves no
-    /// orphan audit log claiming a change that did not happen. An audit-log
-    /// failure in strict mode still returns `AuditLogFailed` (the change is
-    /// real but unaudited). In best-effort mode a logging failure is warned
-    /// but does not block the change.
+    /// log entry. The visibility is persisted *first* and the audit log
+    /// recorded *after*, so a persistence failure leaves no orphan audit log
+    /// claiming a change that did not happen. An audit-log failure in strict
+    /// mode still returns `AuditLogFailed` (the change is real but unaudited).
+    /// In best-effort mode a logging failure is warned but does not block the
+    /// change.
     pub async fn set_visibility(
         &self,
         space_id: Uuid,
@@ -123,6 +123,9 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
     ) -> Result<Space, DomainError> {
         self.ensure_can_manage(space_id, actor_id, actor_role).await?;
         let mut space = self.spaces.find_by_id(space_id).await?.ok_or(DomainError::SpaceNotFound)?;
+        if space.deleted_at.is_some() {
+            return Err(DomainError::SpaceNotFound);
+        }
         let from = space.visibility;
         // No-op when the visibility is unchanged: skip the write (and the
         // audit log) to avoid a meaningless database update and an unnecessary
@@ -133,33 +136,32 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
         let now = Utc::now();
         space.set_visibility(visibility, now);
 
+        // Persist the visibility change *before* recording the audit log. If
+        // the save fails, no audit log is written, so there is never an orphan
+        // audit log for a change that did not take effect.
+        let saved = self.spaces.save(&space).await?;
+
         let log = SpaceAuditLog::visibility_changed(
             Uuid::now_v7(),
-            space.id,
+            saved.id,
             actor_id,
             from.as_str(),
             visibility.as_str(),
             now,
         );
 
-        // Record the audit log *before* persisting the change. If the audit
-        // write fails in strict mode, the visibility change is never applied,
-        // so returning Err has correct "operation did not take effect"
-        // semantics. In non-strict mode the audit failure is logged and the
-        // save proceeds (best-effort audit).
         if let Err(e) = self.audit.record(&log).await {
             if self.strict_audit {
                 return Err(DomainError::AuditLogFailed(e.to_string()));
             }
             tracing::warn!(
                 error = %e,
-                space_id = %space.id,
+                space_id = %saved.id,
                 actor_id = %actor_id,
                 "failed to record space visibility audit log (best-effort)"
             );
         }
 
-        let saved = self.spaces.save(&space).await?;
         Ok(saved)
     }
 
@@ -750,18 +752,20 @@ mod tests {
         let s = svc_with_audit(audit).with_strict_audit();
         let owner = Uuid::now_v7();
         let space = create_public(&s, owner, UserRole::Architect, "S").await;
-        // Audit recording is injected to fail. In strict mode the audit log
-        // is written before the visibility change, so the failure surfaces as
-        // an AuditLogFailed error and the change is never applied.
+        // The visibility is persisted *before* the audit log is recorded, so a
+        // save failure leaves no orphan audit log. Here the save succeeds but
+        // the audit write fails; in strict mode the failure still surfaces as
+        // an AuditLogFailed error even though the change is real (but
+        // unaudited).
         let err = s
             .set_visibility(space.id, owner, UserRole::Architect, SpaceVisibility::Private)
             .await
             .unwrap_err();
         assert!(matches!(err, DomainError::AuditLogFailed(_)));
-        // The visibility change was not persisted because the audit write
-        // failed first; the space remains public.
+        // The visibility change was persisted before the audit failure; the
+        // space is now private (real but unaudited).
         let current = s.spaces.find_by_id(space.id).await.unwrap().unwrap();
-        assert!(current.visibility.is_public());
+        assert!(current.visibility.is_private());
     }
 
     #[tokio::test]

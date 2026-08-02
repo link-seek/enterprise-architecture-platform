@@ -5,6 +5,7 @@ use sea_orm::{
     QueryOrder, Set,
 };
 use shared_common::enums::{SpaceRole, SpaceVisibility};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::domain::error::DomainError;
@@ -119,7 +120,13 @@ impl SpaceRepository for SeaOrmSpaceRepo {
                 .await?;
             result.extend(private_member.into_iter().map(Into::into));
         }
-        result.sort_by_key(|s| s.created_at);
+        // Dedup by id: a concurrent visibility flip can cause the same space
+        // to appear in both the public and private-member result sets.
+        let mut seen: HashSet<Uuid> = HashSet::with_capacity(result.len());
+        result.retain(|s| seen.insert(s.id));
+        // Sort by (created_at, id) so ties on created_at still produce a
+        // deterministic order.
+        result.sort_by_key(|s| (s.created_at, s.id));
         Ok(result)
     }
 

@@ -183,7 +183,7 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
 async fn seed_admin(db: &DatabaseConnection) -> anyhow::Result<()> {
     let email = std::env::var("APP_SEED_ADMIN_EMAIL")
         .unwrap_or_else(|_| "admin@test.com".to_string());
-    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
+    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
     let is_production = !(app_env == "local" || app_env == "dev");
     let password = match std::env::var("APP_SEED_ADMIN_PASSWORD") {
         Ok(p) => p,
