@@ -44,10 +44,6 @@ export default function ValueStreams() {
     }
   }
 
-  const detailBase = spaceId
-    ? `/spaces/${spaceId}/architectures/value-streams`
-    : '/architectures/value-streams'
-
   if (!spaceId) {
     return (
       <div className="p-6">
@@ -55,6 +51,8 @@ export default function ValueStreams() {
       </div>
     )
   }
+
+  const detailBase = `/spaces/${spaceId}/architectures/value-streams`
 
   return (
     <div className="p-6 space-y-4">

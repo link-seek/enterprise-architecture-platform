@@ -24,13 +24,13 @@ impl SeaOrmAuditLogRepo {
 impl AuditLogRepository for SeaOrmAuditLogRepo {
     async fn record(&self, log: &SpaceAuditLog) -> Result<(), DomainError> {
         let active = space_audit_log::ActiveModel {
-            id: Set(log.id),
-            space_id: Set(log.space_id),
-            actor_id: Set(log.actor_id),
-            action: Set(log.action.to_string()),
-            from_value: Set(log.from_value.clone()),
-            to_value: Set(log.to_value.clone()),
-            created_at: Set(log.created_at),
+            id: Set(log.id()),
+            space_id: Set(log.space_id()),
+            actor_id: Set(log.actor_id()),
+            action: Set(log.action().to_string()),
+            from_value: Set(log.from_value().map(str::to_owned)),
+            to_value: Set(log.to_value().map(str::to_owned)),
+            created_at: Set(log.created_at()),
         };
         active.insert(&self.db).await?;
         Ok(())
@@ -73,14 +73,15 @@ impl TryFrom<space_audit_log::Model> for SpaceAuditLog {
     type Error = DomainError;
 
     fn try_from(m: space_audit_log::Model) -> Result<Self, Self::Error> {
-        Ok(SpaceAuditLog {
-            id: m.id,
-            space_id: m.space_id,
-            actor_id: m.actor_id,
-            action: SpaceAuditAction::try_from(m.action.as_str())?,
-            from_value: m.from_value,
-            to_value: m.to_value,
-            created_at: m.created_at,
-        })
+        let action = SpaceAuditAction::try_from(m.action.as_str())?;
+        Ok(SpaceAuditLog::from_db_row(
+            m.id,
+            m.space_id,
+            m.actor_id,
+            action,
+            m.from_value,
+            m.to_value,
+            m.created_at,
+        ))
     }
 }

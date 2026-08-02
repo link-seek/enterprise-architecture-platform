@@ -64,7 +64,7 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         let new_vs = current.create_new_version(new_id, new_version, name, description, now)?;
 
         // Persist: save archived current and new version atomically
-        self.repo.save_batch(&[current.clone(), new_vs.clone()]).await?;
+        self.repo.save_batch(&[current, new_vs.clone()]).await?;
         Ok(new_vs)
     }
 

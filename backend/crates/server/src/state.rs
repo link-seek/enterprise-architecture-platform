@@ -80,10 +80,11 @@ impl AppState {
 /// Format a `Uuid` as a SQLite hex blob literal (`X'...'`), matching how
 /// SeaORM stores `Uuid` columns in SQLite (16-byte binary blob).
 fn uuid_to_sqlite_blob(uuid: &Uuid) -> String {
-    let mut s = String::with_capacity(34);
+    use std::fmt::Write;
+    let mut s = String::with_capacity(35);
     s.push_str("X'");
     for b in uuid.as_bytes() {
-        s.push_str(&format!("{b:02x}"));
+        write!(s, "{b:02x}").unwrap();
     }
     s.push('\'');
     s

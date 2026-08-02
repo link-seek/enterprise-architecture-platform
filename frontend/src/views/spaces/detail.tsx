@@ -13,6 +13,13 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { SpaceEditDialog } from './crud'
 import { SpaceMembersDialog } from './members'
 
+function extractFriendlyError(e: { message?: string }): string {
+  const msg = e.message ?? ''
+  if (/network|fetch|timeout/i.test(msg)) return '网络错误，请稍后重试'
+  if (/unauthorized|forbidden|401|403/i.test(msg)) return '权限不足，操作被拒绝'
+  return '操作失败，请稍后重试'
+}
+
 function renderVisibilityButtonContent(loading: boolean, visibility: SpaceVisibility) {
   if (loading) {
     return <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -57,12 +64,12 @@ export default function SpaceDetail() {
   const [archive, { loading: archiveLoading }] = useMutation(ARCHIVE_SPACE, {
     refetchQueries: [{ query: GET_SPACES }],
     onCompleted: () => navigate('/spaces'),
-    onError: (e) => setArchiveError(e.message),
+    onError: (e) => setArchiveError(extractFriendlyError(e)),
   })
 
   const [setVisibility, { loading: visibilityLoading }] = useMutation(SET_SPACE_VISIBILITY, {
     refetchQueries: [{ query: GET_SPACE, variables: { id: spaceId } }],
-    onError: (e) => setVisibilityError(e.message),
+    onError: (e) => setVisibilityError(extractFriendlyError(e)),
     onCompleted: () => {
       setVisibilityError(null)
       setPendingVisibility(null)

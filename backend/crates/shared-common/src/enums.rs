@@ -246,11 +246,15 @@ impl SpaceRole {
 #[serde(rename_all = "snake_case")]
 pub enum SpaceVisibility {
     #[sea_orm(string_value = "public")]
-    #[serde(rename = "public")]
     Public,
     #[sea_orm(string_value = "private")]
-    #[serde(rename = "private")]
     Private,
+}
+
+impl Default for SpaceVisibility {
+    fn default() -> Self {
+        SpaceVisibility::Public
+    }
 }
 
 impl SpaceVisibility {

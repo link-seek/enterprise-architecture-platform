@@ -61,7 +61,8 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={loading}
           >
-            {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />}
+            {loading && <span className="sr-only">加载中</span>}
             {confirmText}
           </Button>
         </DialogFooter>

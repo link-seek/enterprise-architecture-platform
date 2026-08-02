@@ -50,19 +50,20 @@ impl AsRef<str> for SpaceAuditAction {
 /// shape is intentionally generic so future operations can reuse it without a
 /// schema migration.
 ///
-/// Fields are `pub(crate)` so that the persistence layer (same crate) can
-/// reconstruct a log from a database row, while external crates must use the
+/// Fields are private; same-crate persistence code must use
+/// [`from_db_row`](Self::from_db_row) to reconstruct a log from a database row,
+/// which validates the `action` field. External crates must use the
 /// `visibility_changed` factory — which enforces the invariant that a
 /// visibility change always carries both `from_value` and `to_value`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpaceAuditLog {
-    pub(crate) id: Uuid,
-    pub(crate) space_id: Uuid,
-    pub(crate) actor_id: Uuid,
-    pub(crate) action: SpaceAuditAction,
-    pub(crate) from_value: Option<String>,
-    pub(crate) to_value: Option<String>,
-    pub(crate) created_at: DateTime<Utc>,
+    id: Uuid,
+    space_id: Uuid,
+    actor_id: Uuid,
+    action: SpaceAuditAction,
+    from_value: Option<String>,
+    to_value: Option<String>,
+    created_at: DateTime<Utc>,
 }
 
 impl SpaceAuditLog {
@@ -82,6 +83,28 @@ impl SpaceAuditLog {
             from_value: Some(from.to_owned()),
             to_value: Some(to.to_owned()),
             created_at: now,
+        }
+    }
+
+    /// Reconstruct a `SpaceAuditLog` from a database row. The `action` is
+    /// expected to have already been validated via `SpaceAuditAction::try_from`.
+    pub fn from_db_row(
+        id: Uuid,
+        space_id: Uuid,
+        actor_id: Uuid,
+        action: SpaceAuditAction,
+        from_value: Option<String>,
+        to_value: Option<String>,
+        created_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            id,
+            space_id,
+            actor_id,
+            action,
+            from_value,
+            to_value,
+            created_at,
         }
     }
 
