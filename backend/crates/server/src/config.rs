@@ -54,7 +54,6 @@ pub struct JwtConfig {
     pub access_token_ttl_minutes: u64,
     pub refresh_token_ttl_days: u64,
     pub secret: String,
-    pub public_secret: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +103,12 @@ impl Configuration {
     /// - LLM api_key: warn if empty (degraded mode, non-blocking)
     pub fn ensure_defaults(&mut self) -> anyhow::Result<()> {
         if self.jwt.secret.is_empty() {
+            let env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
+            if env == "production" {
+                anyhow::bail!(
+                    "JWT secret must be set in production. Set it via environment variable APP_JWT__SECRET."
+                );
+            }
             let random_bytes: [u8; 32] = rand::random();
             let hex_secret: String = random_bytes.iter().map(|b| format!("{b:02x}")).collect();
             tracing::warn!(
@@ -111,10 +116,6 @@ impl Configuration {
                  Set a fixed value in production via environment variable APP_JWT__SECRET."
             );
             self.jwt.secret = hex_secret;
-        }
-
-        if self.jwt.public_secret.is_empty() {
-            self.jwt.public_secret = self.jwt.secret.clone();
         }
 
         if let Some(data_dir) = self.extract_sqlite_data_dir() {

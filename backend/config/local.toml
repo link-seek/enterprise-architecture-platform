@@ -10,7 +10,6 @@ url = "sqlite://./data/platform.db?mode=rwc"
 access_token_ttl_minutes = 15
 refresh_token_ttl_days = 7
 secret = "dev-secret-key-for-local-testing-32ch"
-public_secret = ""
 
 [oauth]
 clients = []

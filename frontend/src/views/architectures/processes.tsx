@@ -49,7 +49,7 @@ export default function Processes() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Process | null>(null)
   const [deleting, setDeleting] = useState<Process | null>(null)
-  const { data, loading, error } = useQuery<{ businessProcessesBySpace: Process[] }>(GET_PROCESSES, { variables: { spaceId } })
+  const { data, loading, error } = useQuery<{ businessProcessesBySpace: Process[] }>(GET_PROCESSES, { variables: { spaceId }, skip: !spaceId })
 
   return (
     <div className="p-6 space-y-4">

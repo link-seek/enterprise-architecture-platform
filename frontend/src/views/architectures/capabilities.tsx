@@ -49,7 +49,7 @@ export default function Capabilities() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Capability | null>(null)
   const [deleting, setDeleting] = useState<Capability | null>(null)
-  const { data, loading, error } = useQuery<{ businessCapabilitiesBySpace: Capability[] }>(GET_CAPABILITIES, { variables: { spaceId } })
+  const { data, loading, error } = useQuery<{ businessCapabilitiesBySpace: Capability[] }>(GET_CAPABILITIES, { variables: { spaceId }, skip: !spaceId })
 
   return (
     <div className="p-6 space-y-4">
