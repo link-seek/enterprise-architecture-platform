@@ -88,7 +88,7 @@ impl SpaceAuditLog {
 
     /// Reconstruct a `SpaceAuditLog` from a database row. The `action` is
     /// expected to have already been validated via `SpaceAuditAction::try_from`.
-    pub fn from_db_row(
+    pub(crate) fn from_db_row(
         id: Uuid,
         space_id: Uuid,
         actor_id: Uuid,
