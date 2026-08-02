@@ -768,13 +768,20 @@ fn domain_err_to_graphql(e: DomainError) -> async_graphql::Error {
         | DomainError::CannotReferenceArchived | DomainError::AlreadyMember
         | DomainError::CannotRemoveLastOwner | DomainError::NotOwner => "FORBIDDEN",
     };
-    // Database errors may contain sensitive internal details (SQL fragments,
-    // table/column names, constraint names). Log the full message server-side
-    // but return a generic message to the client.
+    // Database and audit-log errors may contain sensitive internal details
+    // (SQL fragments, table/column names, constraint names, repository error
+    // messages). Log the full message server-side but return a generic message
+    // to the client.
     match &e {
         DomainError::Database(msg) => {
             tracing::error!("Database error: {msg}");
             async_graphql::Error::new("Internal server error").extend_with(|_err, extensions| {
+                extensions.set("code", code.to_owned());
+            })
+        }
+        DomainError::AuditLogFailed(msg) => {
+            tracing::error!("Audit log failure: {msg}");
+            async_graphql::Error::new("Audit log failure").extend_with(|_err, extensions| {
                 extensions.set("code", code.to_owned());
             })
         }

@@ -18,10 +18,11 @@ pub struct SpaceService<S: SpaceRepository, M: MembershipRepository, A: AuditLog
     spaces: S,
     members: M,
     audit: A,
-    /// When `true`, a failure to persist the audit log causes the visibility
-    /// change to fail with `DomainError::AuditLogFailed`. When `false`
-    /// (default, best-effort), the failure is logged as a warning and the
-    /// visibility change still succeeds.
+    /// When `true`, a failure to persist the audit log is logged at `error`
+    /// level (for operational alerting). When `false` (default, best-effort),
+    /// the failure is logged at `warn` level. In both cases the visibility
+    /// change still succeeds — it has already been persisted, so returning
+    /// `Err` would mislead the caller into thinking the change did not happen.
     strict_audit: bool,
 }
 
@@ -35,8 +36,9 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
         }
     }
 
-    /// Enable strict audit mode: audit-log persistence failures will cause the
-    /// visibility change to fail rather than being silently swallowed.
+    /// Enable strict audit mode: audit-log persistence failures are logged at
+    /// `error` level for operational alerting (rather than `warn` in
+    /// best-effort mode). The visibility change still succeeds either way.
     pub fn with_strict_audit(mut self) -> Self {
         self.strict_audit = true;
         self
@@ -110,10 +112,11 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
     /// Change a space's visibility. Requires owner or admin. Records an audit
     /// log entry. The visibility is persisted *first* and the audit log
     /// recorded *after*, so a persistence failure leaves no orphan audit log
-    /// claiming a change that did not happen. An audit-log failure in strict
-    /// mode still returns `AuditLogFailed` (the change is real but unaudited).
-    /// In best-effort mode a logging failure is warned but does not block the
-    /// change.
+    /// claiming a change that did not happen. An audit-log failure is always
+    /// logged (at `error` level in strict mode, `warn` in best-effort mode)
+    /// but does **not** cause the method to return `Err` — the change has
+    /// already been persisted, so returning `Err` would violate the `Result`
+    /// contract by implying the change did not happen.
     pub async fn set_visibility(
         &self,
         space_id: Uuid,
@@ -152,14 +155,20 @@ impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceSe
 
         if let Err(e) = self.audit.record(&log).await {
             if self.strict_audit {
-                return Err(DomainError::AuditLogFailed(e.to_string()));
+                tracing::error!(
+                    error = %e,
+                    space_id = %saved.id,
+                    actor_id = %actor_id,
+                    "failed to record space visibility audit log"
+                );
+            } else {
+                tracing::warn!(
+                    error = %e,
+                    space_id = %saved.id,
+                    actor_id = %actor_id,
+                    "failed to record space visibility audit log"
+                );
             }
-            tracing::warn!(
-                error = %e,
-                space_id = %saved.id,
-                actor_id = %actor_id,
-                "failed to record space visibility audit log (best-effort)"
-            );
         }
 
         Ok(saved)
@@ -747,25 +756,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn strict_audit_failure_returns_error() {
+    async fn strict_audit_failure_succeeds_with_error_log() {
         let audit = FakeAuditRepo::failing();
         let s = svc_with_audit(audit).with_strict_audit();
         let owner = Uuid::now_v7();
         let space = create_public(&s, owner, UserRole::Architect, "S").await;
         // The visibility is persisted *before* the audit log is recorded, so a
         // save failure leaves no orphan audit log. Here the save succeeds but
-        // the audit write fails; in strict mode the failure still surfaces as
-        // an AuditLogFailed error even though the change is real (but
-        // unaudited).
-        let err = s
+        // the audit write fails; in strict mode the failure is logged at error
+        // level but the change still succeeds (returning Err would imply the
+        // change did not happen, violating the Result contract).
+        let result = s
             .set_visibility(space.id, owner, UserRole::Architect, SpaceVisibility::Private)
             .await
-            .unwrap_err();
-        assert!(matches!(err, DomainError::AuditLogFailed(_)));
-        // The visibility change was persisted before the audit failure; the
-        // space is now private (real but unaudited).
-        let current = s.spaces.find_by_id(space.id).await.unwrap().unwrap();
-        assert!(current.visibility.is_private());
+            .unwrap();
+        assert!(result.visibility.is_private());
+        // No audit log was recorded (recording always fails).
+        assert_eq!(s.audit.count().await, 0);
     }
 
     #[tokio::test]

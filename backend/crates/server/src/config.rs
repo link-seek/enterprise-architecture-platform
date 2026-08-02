@@ -82,6 +82,14 @@ impl Configuration {
         let mut builder = config::Config::builder()
             .add_source(config::File::with_name("config/default").required(false));
 
+        // When APP_ENV is unset, default to "production" (fail-safe / least-privilege).
+        // This is an intentional breaking change from the previous "local" default:
+        // deployments that forget to set APP_ENV now run in production mode, which
+        // requires an explicit JWT secret (APP_JWT__SECRET) and will refuse to
+        // start if it is empty. Operators upgrading to this version must either
+        // set APP_ENV=local for development or provide APP_JWT__SECRET in
+        // production. Comparison is case-insensitive so "Production" / "PRODUCTION"
+        // are treated as production.
         let env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
         builder = builder.add_source(
             config::File::with_name(&format!("config/{env}")).required(false),
