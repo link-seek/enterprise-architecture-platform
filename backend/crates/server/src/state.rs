@@ -50,7 +50,7 @@ impl AppState {
             Some(_) => {
                 seed_admin(&db).await?;
             }
-            None if app_env == "local" || app_env == "dev" => {
+            None if app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev") => {
                 seed_admin(&db).await?;
             }
             None => {
@@ -141,7 +141,7 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
     // only seeded in local/dev environments to avoid leaking test accounts into
     // production.
     let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
-    if app_env == "local" || app_env == "dev" {
+    if app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev") {
         let test_users = [
             ("test@example.com", "测试用户", "testpassword123"),
             ("e2e3@test.com", "E2E Test 3", "e2e123456"),
@@ -185,7 +185,7 @@ async fn seed_admin(db: &DatabaseConnection) -> anyhow::Result<()> {
     let email = std::env::var("APP_SEED_ADMIN_EMAIL")
         .unwrap_or_else(|_| "admin@test.com".to_string());
     let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
-    let is_production = !(app_env == "local" || app_env == "dev");
+    let is_production = !(app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev"));
     let password = match std::env::var("APP_SEED_ADMIN_PASSWORD") {
         Ok(p) => p,
         Err(_) if is_production => {

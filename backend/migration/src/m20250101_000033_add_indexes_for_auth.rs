@@ -14,13 +14,22 @@ impl MigrationTrait for Migration {
         // Remove duplicate token_hash rows before adding a UNIQUE index. If
         // pre-existing data contains duplicates (e.g. from before the uniqueness
         // constraint existed), CREATE UNIQUE INDEX would fail and block the
-        // migration. We keep the row with the smallest id (oldest) per
-        // token_hash and delete the rest. SQLite supports this MIN-based
-        // subquery; Postgres would use the same pattern.
+        // migration. We keep the oldest row (smallest created_at) per
+        // token_hash and delete the rest. The `id` column is a UUID, so
+        // MIN("id") would only yield the lexicographically smallest UUID —
+        // not the oldest record — hence we order by created_at instead.
+        // SQLite (>= 3.25) and Postgres both support this window-function form.
         let result = db
             .execute_unprepared(
-                r#"DELETE FROM "refresh_tokens" WHERE "id" NOT IN (
-                       SELECT MIN("id") FROM "refresh_tokens" GROUP BY "token_hash"
+                r#"DELETE FROM "refresh_tokens" WHERE "id" IN (
+                       SELECT "id" FROM (
+                           SELECT "id",
+                                  ROW_NUMBER() OVER (
+                                      PARTITION BY "token_hash"
+                                      ORDER BY "created_at" ASC, "id" ASC
+                                  ) AS rn
+                           FROM "refresh_tokens"
+                       ) WHERE rn > 1
                    )"#,
             )
             .await?;
@@ -53,11 +62,20 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Same dedup for oauth_codes.code_hash before the UNIQUE index.
+        // Same dedup for oauth_codes.code_hash before the UNIQUE index. As above,
+        // we keep the oldest row (smallest created_at) per code_hash rather than
+        // MIN("id"), because id is a UUID and lexicographic min is not the oldest.
         let result = db
             .execute_unprepared(
-                r#"DELETE FROM "oauth_codes" WHERE "id" NOT IN (
-                       SELECT MIN("id") FROM "oauth_codes" GROUP BY "code_hash"
+                r#"DELETE FROM "oauth_codes" WHERE "id" IN (
+                       SELECT "id" FROM (
+                           SELECT "id",
+                                  ROW_NUMBER() OVER (
+                                      PARTITION BY "code_hash"
+                                      ORDER BY "created_at" ASC, "id" ASC
+                                  ) AS rn
+                           FROM "oauth_codes"
+                       ) WHERE rn > 1
                    )"#,
             )
             .await?;
