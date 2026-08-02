@@ -105,7 +105,7 @@ impl Configuration {
     pub fn ensure_defaults(&mut self) -> anyhow::Result<()> {
         if self.jwt.secret.is_empty() {
             let env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
-            if env == "production" {
+            if env.eq_ignore_ascii_case("production") {
                 anyhow::bail!(
                     "JWT secret must be set in production. Set it via environment variable APP_JWT__SECRET."
                 );

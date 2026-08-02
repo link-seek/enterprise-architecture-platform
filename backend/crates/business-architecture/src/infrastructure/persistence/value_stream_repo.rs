@@ -36,6 +36,31 @@ impl From<value_stream::Model> for ValueStream {
     }
 }
 
+impl From<&ValueStream> for value_stream::Model {
+    fn from(vs: &ValueStream) -> Self {
+        value_stream::Model {
+            id: vs.id,
+            logical_id: vs.logical_id,
+            business_version: vs.business_version.clone(),
+            status: vs.status,
+            name: vs.name.clone(),
+            description: vs.description.clone(),
+            triggering_event: vs.triggering_event.clone(),
+            end_deliverable: vs.end_deliverable.clone(),
+            owner_id: vs.owner_id,
+            importance: vs.importance,
+            stakeholders: vs.stakeholders.clone(),
+            performance_metrics: vs.performance_metrics.clone(),
+            created_by: vs.created_by,
+            updated_by: vs.updated_by,
+            created_at: vs.created_at,
+            updated_at: vs.updated_at,
+            deleted_at: vs.deleted_at,
+            space_id: vs.space_id,
+        }
+    }
+}
+
 impl From<value_stream_stage::Model> for ValueStreamStage {
     fn from(m: value_stream_stage::Model) -> Self {
         ValueStreamStage {
