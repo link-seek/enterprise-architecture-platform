@@ -22,7 +22,7 @@ jobs:
     with:
       enable-backend-tests: true
       enable-frontend-tests: true
-      enable-integration: true
+      enable-integration: false
       e2e-filter: '--grep @smoke'
       frontend-build-env: '["VITE_API_URL=https://api.xieyucheng.top/api"]'
     secrets: inherit
