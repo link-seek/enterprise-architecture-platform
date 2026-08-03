@@ -14,14 +14,23 @@ export const SPACE_BASE = `/spaces/${TEST_SPACE_ID}/architectures`;
 /**
  * Login via the UI. Uses form submit (Enter key) which is more reliable than button click.
  * After login, verifies redirect to the space-scoped value-streams page.
+ * Retries on failure (e.g. backend rate-limit 429) to keep E2E suites stable.
  */
 export async function login(page: Page) {
-  await page.goto('/login');
-  await page.fill('input[type="email"]', TEST_EMAIL);
-  await page.fill('input[type="password"]', TEST_PASSWORD);
-  await page.press('input[type="password"]', 'Enter');
-  // Login success: sidebar visible (environment-agnostic)
-  await expect(page.getByRole('link', { name: '价值流' })).toBeVisible({ timeout: 10000 });
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await page.goto('/login');
+    await page.fill('input[type="email"]', TEST_EMAIL);
+    await page.fill('input[type="password"]', TEST_PASSWORD);
+    await page.press('input[type="password"]', 'Enter');
+    try {
+      await expect(page).toHaveURL(`${SPACE_BASE}/value-streams`, { timeout: 10000 });
+      return;
+    } catch {
+      if (attempt < maxAttempts) await page.waitForTimeout(1000);
+    }
+  }
+  await expect(page).toHaveURL(`${SPACE_BASE}/value-streams`, { timeout: 10000 });
 }
 
 /**

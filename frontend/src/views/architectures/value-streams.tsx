@@ -46,7 +46,7 @@ export default function ValueStreams() {
 
   if (!spaceId) {
     return (
-      <div className="p-6">
+      <div className="p-4 md:p-6">
         <div className="text-center py-8 text-destructive">缺少空间标识，无法加载价值流。</div>
       </div>
     )
@@ -55,7 +55,7 @@ export default function ValueStreams() {
   const detailBase = `/spaces/${spaceId}/architectures/value-streams`
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-4 md:p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">价值流</h1>
         {canEdit && (
