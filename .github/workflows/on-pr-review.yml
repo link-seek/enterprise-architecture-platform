@@ -7,7 +7,7 @@ on:
     types: [created]
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
   issues: write
   actions: write
@@ -27,9 +27,6 @@ jobs:
       needs.pr-review.result == 'success' &&
       github.event.pull_request.user.login == 'app/link-seek-bot' &&
       github.event.pull_request.draft == false
-    permissions:
-      contents: write
-      pull-requests: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/create-github-app-token@v1
