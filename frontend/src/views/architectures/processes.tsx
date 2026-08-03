@@ -52,7 +52,7 @@ export default function Processes() {
   const { data, loading, error } = useQuery<{ businessProcessesBySpace: Process[] }>(GET_PROCESSES, { variables: { spaceId }, skip: !spaceId })
 
   return (
-    <div className="p-4 md:p-6 space-y-4">
+    <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">业务流程</h1>
         {canEdit && (
@@ -171,7 +171,7 @@ function ProcessCrudDialog({ open, onOpenChange, editing, spaceId }: {
           {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
           <div className="space-y-2"><Label>名称</Label><Input value={name} onChange={e => setName(e.target.value)} /></div>
           <div className="space-y-2"><Label>描述</Label><Input value={description} onChange={e => setDescription(e.target.value)} /></div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2"><Label>SLA</Label><Input value={sla} onChange={e => setSla(e.target.value)} placeholder="2天" /></div>
             <div className="space-y-2"><Label>周期(天)</Label><Input type="number" value={cycleTime} onChange={e => setCycleTime(e.target.value)} /></div>
             <div className="space-y-2"><Label>单次成本</Label><Input type="number" value={cost} onChange={e => setCost(e.target.value)} /></div>

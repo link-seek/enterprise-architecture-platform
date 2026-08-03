@@ -31,7 +31,7 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-secondary">
-      <Card className="w-full max-w-[400px] mx-4">
+      <Card className="w-[400px]">
         <CardHeader>
           <CardTitle>企业架构平台</CardTitle>
           <CardDescription>登录以继续</CardDescription>
