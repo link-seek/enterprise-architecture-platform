@@ -7,7 +7,7 @@ on:
     types: [created]
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
   issues: write
   actions: write
@@ -20,3 +20,30 @@ jobs:
       coverage-mappings: '[{"src_pattern":"frontend/src/(views/spaces|api/spaces)","test_dir":"spaces","label":"spaces"},{"src_pattern":"frontend/src/(views/login|api/auth|stores/auth)","test_dir":"auth","label":"auth"},{"src_pattern":"frontend/src/lib/apollo","test_dir":"spaces","label":"apollo"},{"src_pattern":"frontend/src/views/architectures/value-stream","test_dir":"value-stream","label":"value-stream"},{"src_pattern":"frontend/src/views/architectures/capabilities","test_dir":"business-capabilities","label":"capabilities"},{"src_pattern":"frontend/src/views/architectures/processes","test_dir":"business-processes","label":"processes"},{"src_pattern":"frontend/src/views/architectures/(crud|layout|users|version-control)","test_dir":"spaces","label":"architecture"}]'
       human-review-paths: '["backend/migration/**","backend/migrations/**"]'
     secrets: inherit
+
+  auto-merge:
+    needs: pr-review
+    if: |
+      needs.pr-review.result == 'success' &&
+      github.event.pull_request.user.login == 'app/link-seek-bot' &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          echo "Enabling auto-merge for PR #$PR_NUMBER"
+          gh pr merge "$PR_NUMBER" \
+            --repo ${{ github.repository }} \
+            --squash \
+            --auto \
+            --delete-branch
