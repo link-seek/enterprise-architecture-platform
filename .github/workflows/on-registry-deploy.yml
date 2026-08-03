@@ -67,6 +67,7 @@ jobs:
       ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
       APP_SEED_ADMIN_EMAIL: ${{ secrets.APP_SEED_ADMIN_EMAIL }}
       APP_SEED_ADMIN_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
+      APP_JWT__SECRET: ${{ secrets.APP_JWT__SECRET }}
       SMOKE_TEST_EMAIL: ${{ secrets.APP_SEED_ADMIN_EMAIL }}
       SMOKE_TEST_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
       PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
