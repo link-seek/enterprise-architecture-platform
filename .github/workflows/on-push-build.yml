@@ -10,6 +10,8 @@ permissions:
   packages: write
   actions: write
   issues: write
+  pull-requests: write
+  checks: write
 
 jobs:
   ci-cd:
