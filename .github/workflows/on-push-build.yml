@@ -8,6 +8,7 @@ permissions:
   contents: read
   packages: write
   actions: write
+  issues: write
 
 jobs:
   ci-cd:
