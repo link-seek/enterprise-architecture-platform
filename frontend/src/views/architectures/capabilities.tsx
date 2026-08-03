@@ -13,10 +13,9 @@ import { useParams } from 'react-router-dom'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 
 const GET_CAPABILITIES = gql`
-  query GetCapabilities($spaceId: String) {
-    businessCapabilities(filters: { spaceId: { eq: $spaceId } }) {
-      nodes { id name description level maturity businessValue status }
-      paginationInfo { total }
+  query GetCapabilities($spaceId: String!) {
+    businessCapabilitiesBySpace(spaceId: $spaceId) {
+      id name description level maturity businessValue status
     }
   }
 `
@@ -50,7 +49,7 @@ export default function Capabilities() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Capability | null>(null)
   const [deleting, setDeleting] = useState<Capability | null>(null)
-  const { data, loading, error } = useQuery(GET_CAPABILITIES, { variables: { spaceId } })
+  const { data, loading, error } = useQuery<{ businessCapabilitiesBySpace: Capability[] }>(GET_CAPABILITIES, { variables: { spaceId }, skip: !spaceId })
 
   return (
     <div className="p-6 space-y-4">
@@ -66,7 +65,7 @@ export default function Capabilities() {
         <CardHeader><CardTitle>能力列表</CardTitle></CardHeader>
         <CardContent>
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
-          {error && <div className="text-center py-8 text-destructive">加载失败</div>}
+          {Boolean(error) && <div className="text-center py-8 text-destructive">加载失败</div>}
           {data && (
             <Table>
               <TableHeader>
@@ -80,7 +79,7 @@ export default function Capabilities() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.businessCapabilities.nodes.map((cap: Capability) => (
+                {(data?.businessCapabilitiesBySpace ?? []).map((cap: Capability) => (
                   <TableRow key={cap.id}>
                     <TableCell className="font-medium">{cap.name}</TableCell>
                     <TableCell>{cap.level}</TableCell>

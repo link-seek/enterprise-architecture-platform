@@ -4,13 +4,41 @@ import { useQuery, useMutation } from '@apollo/client/react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Pencil, Archive, LogIn, ArrowLeft, Users } from 'lucide-react'
-import { GET_SPACE, ARCHIVE_SPACE, GET_SPACES, GET_SPACE_STATS } from '@/api/spaces'
-import type { Space, SpaceStats } from '@/api/spaces'
+import { Pencil, Archive, LogIn, ArrowLeft, Users, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { GET_SPACE, ARCHIVE_SPACE, GET_SPACES, GET_SPACE_STATS, SET_SPACE_VISIBILITY } from '@/api/spaces'
+import type { Space, SpaceStats, SpaceVisibility } from '@/api/spaces'
 import { useAuthStore } from '@/stores/auth'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { SpaceEditDialog } from './crud'
 import { SpaceMembersDialog } from './members'
+
+function extractFriendlyError(e: { message?: string }): string {
+  const msg = e.message ?? ''
+  if (/network|fetch|timeout/i.test(msg)) return '网络错误，请稍后重试'
+  if (/unauthorized|forbidden|401|403/i.test(msg)) return '权限不足，操作被拒绝'
+  return '操作失败，请稍后重试'
+}
+
+function renderVisibilityButtonContent(loading: boolean, visibility: SpaceVisibility) {
+  if (loading) {
+    return <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+  }
+  if (visibility === 'public') {
+    return (
+      <>
+        <EyeOff className="h-4 w-4 mr-2" />
+        设为私有
+      </>
+    )
+  }
+  return (
+    <>
+      <Eye className="h-4 w-4 mr-2" />
+      设为公开
+    </>
+  )
+}
 
 export default function SpaceDetail() {
   const { spaceId } = useParams<{ spaceId: string }>()
@@ -19,8 +47,12 @@ export default function SpaceDetail() {
   const { canEdit, role } = useSpaceMembership(spaceId)
   const [editOpen, setEditOpen] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
+  const [visibilityError, setVisibilityError] = useState<string | null>(null)
+  const [pendingVisibility, setPendingVisibility] = useState<SpaceVisibility | null>(null)
+  const [confirmArchive, setConfirmArchive] = useState(false)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
 
-  const { data, loading, error } = useQuery<{ organizations: { nodes: Space[] } }>(GET_SPACE, {
+  const { data, loading, error } = useQuery<{ spaceById: Space | null }>(GET_SPACE, {
     variables: { id: spaceId },
     skip: !spaceId,
   })
@@ -29,21 +61,31 @@ export default function SpaceDetail() {
     skip: !spaceId,
   })
 
-  const [archive] = useMutation(ARCHIVE_SPACE, {
+  const [archive, { loading: archiveLoading }] = useMutation(ARCHIVE_SPACE, {
     refetchQueries: [{ query: GET_SPACES }],
     onCompleted: () => navigate('/spaces'),
+    onError: (e) => setArchiveError(extractFriendlyError(e)),
   })
 
-  const space = data?.organizations?.nodes?.[0]
+  const [setVisibility, { loading: visibilityLoading }] = useMutation(SET_SPACE_VISIBILITY, {
+    refetchQueries: [{ query: GET_SPACE, variables: { id: spaceId } }],
+    onError: (e) => setVisibilityError(extractFriendlyError(e)),
+    onCompleted: () => {
+      setVisibilityError(null)
+      setPendingVisibility(null)
+    },
+  })
+
+  const space = data?.spaceById
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">加载中...</div>
   if (error) return <div className="min-h-screen flex items-center justify-center text-destructive">加载失败: {error.message}</div>
   if (!space) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">空间不存在</div>
 
   const statsItems = [
-    { label: '价值流', value: stats?.valueStreams?.paginationInfo?.total ?? 0, to: 'value-streams' },
-    { label: '业务能力', value: stats?.businessCapabilities?.paginationInfo?.total ?? 0, to: 'capabilities' },
-    { label: '业务流程', value: stats?.businessProcesses?.paginationInfo?.total ?? 0, to: 'processes' },
+    { label: '价值流', value: stats?.valueStreamCountBySpace ?? 0, to: 'value-streams' },
+    { label: '业务能力', value: stats?.businessCapabilityCountBySpace ?? 0, to: 'capabilities' },
+    { label: '业务流程', value: stats?.businessProcessCountBySpace ?? 0, to: 'processes' },
   ]
 
   return (
@@ -75,9 +117,18 @@ export default function SpaceDetail() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => {
-                      if (confirm('确定归档此空间？')) archive({ variables: { id: space.id } })
-                    }}
+                    disabled={visibilityLoading || archiveLoading}
+                    onClick={() => { setVisibilityError(null); setPendingVisibility(space.visibility === 'public' ? 'private' : 'public') }}
+                  >
+                    {renderVisibilityButtonContent(visibilityLoading, space.visibility)}
+                  </Button>
+                )}
+                {role === 'owner' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={archiveLoading || visibilityLoading}
+                    onClick={() => { setArchiveError(null); setConfirmArchive(true) }}
                   >
                     <Archive className="h-4 w-4 mr-2" />
                     归档
@@ -117,6 +168,47 @@ export default function SpaceDetail() {
 
       <SpaceEditDialog space={space} open={editOpen} onOpenChange={setEditOpen} />
       <SpaceMembersDialog spaceId={space.id} open={membersOpen} onOpenChange={setMembersOpen} />
+
+      <ConfirmDialog
+        open={pendingVisibility !== null}
+        onOpenChange={(v) => {
+          if (!v) {
+            setPendingVisibility(null)
+            setVisibilityError(null)
+          }
+        }}
+        title={`设为${pendingVisibility === 'public' ? '公开' : '私有'}`}
+        description={`确定将此空间设为${pendingVisibility === 'public' ? '公开' : '私有'}？`}
+        confirmText="确定"
+        loading={visibilityLoading}
+        error={visibilityError}
+        onConfirm={() => {
+          if (pendingVisibility) {
+            setVisibilityError(null)
+            setVisibility({ variables: { id: space.id, visibility: pendingVisibility } })
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmArchive}
+        onOpenChange={(v) => {
+          if (!v) {
+            setConfirmArchive(false)
+            setArchiveError(null)
+          }
+        }}
+        title="确认归档"
+        description="确定归档此空间？"
+        confirmText="归档"
+        destructive
+        loading={archiveLoading}
+        error={archiveError}
+        onConfirm={() => {
+          setArchiveError(null)
+          archive({ variables: { id: space.id } })
+        }}
+      />
     </div>
   )
 }

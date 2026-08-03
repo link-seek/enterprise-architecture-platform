@@ -7,16 +7,16 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { History, Loader2, Archive } from 'lucide-react'
+import { Loader2, Archive } from 'lucide-react'
 
 // ============================================================================
 // Version Control Queries & Mutations
 // ============================================================================
 
 const GET_VALUE_STREAM_VERSIONS = gql`
-  query GetValueStreamVersions($logicalId: String!) {
-    valueStreams(filters: { logicalId: { eq: $logicalId } }) {
-      nodes { id name description businessVersion status createdAt updatedAt }
+  query GetValueStreamVersions($spaceId: String!, $logicalId: String!) {
+    valueStreamsBySpaceAndLogicalId(spaceId: $spaceId, logicalId: $logicalId) {
+      id name description businessVersion status createdAt updatedAt
     }
   }
 `
@@ -36,10 +36,9 @@ const CREATE_VERSION = gql`
 `
 
 const GET_VALUE_STREAMS = gql`
-  query GetValueStreamsForVersion($spaceId: String) {
-    valueStreams(filters: { spaceId: { eq: $spaceId } }) {
-      nodes { id name description businessVersion status importance logicalId spaceId }
-      paginationInfo { total }
+  query GetValueStreamsForVersion($spaceId: String!) {
+    valueStreamsBySpace(spaceId: $spaceId) {
+      id name description businessVersion status importance logicalId spaceId
     }
   }
 `
@@ -48,17 +47,18 @@ const GET_VALUE_STREAMS = gql`
 // Version History Dialog
 // ============================================================================
 
-export function VersionHistoryDialog({ open, onOpenChange, logicalId }: {
+export function VersionHistoryDialog({ open, onOpenChange, spaceId, logicalId }: {
   open: boolean
   onOpenChange: (v: boolean) => void
+  spaceId: string
   logicalId: string | null
 }) {
-  const { data, loading } = useQuery(GET_VALUE_STREAM_VERSIONS, {
-    variables: { logicalId },
-    skip: !logicalId,
+  const { data, loading } = useQuery<{ valueStreamsBySpaceAndLogicalId: { id: string; name: string; description: string; businessVersion: string; status: string; createdAt: string; updatedAt: string }[] }>(GET_VALUE_STREAM_VERSIONS, {
+    variables: { spaceId, logicalId },
+    skip: !logicalId || !spaceId,
   })
 
-  const versions = data?.valueStreams?.nodes || []
+  const versions = data?.valueStreamsBySpaceAndLogicalId || []
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -113,7 +113,7 @@ export function CreateVersionDialog({ open, onOpenChange, currentItem, spaceId }
   open: boolean
   onOpenChange: (v: boolean) => void
   currentItem: { id: string; logicalId: string; name: string; description: string; businessVersion: string; importance: string } | null
-  spaceId?: string
+  spaceId: string
 }) {
   const [newVersion, setNewVersion] = useState('')
   const [loading, setLoading] = useState(false)
@@ -188,7 +188,7 @@ export function CreateVersionDialog({ open, onOpenChange, currentItem, spaceId }
 // Archive Button (inline)
 // ============================================================================
 
-export function ArchiveButton({ id, onArchived, spaceId }: { id: string; onArchived?: () => void; spaceId?: string }) {
+export function ArchiveButton({ id, onArchived, spaceId }: { id: string; onArchived?: () => void; spaceId: string }) {
   const [archiveMut] = useMutation(ARCHIVE_VALUE_STREAM, {
     refetchQueries: [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
   })

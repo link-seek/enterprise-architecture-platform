@@ -8,3 +8,4 @@ pub mod stage_capability;
 pub mod space;
 pub mod space_member;
 pub mod space_invitation;
+pub mod space_audit_log;

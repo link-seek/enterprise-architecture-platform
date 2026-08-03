@@ -79,18 +79,18 @@ export default function Home() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
 
   const { data: spacesData, loading: spacesLoading, error: spacesError } = useQuery<{
-    organizations: { nodes: Space[] }
+    spaces: Space[]
   }>(GET_SPACES)
   const { data: statsData } = useQuery<SpaceStats>(GET_SPACE_STATS, {
     variables: { spaceId: TEST_SPACE_ID },
   })
 
-  const spaces = spacesData?.organizations?.nodes ?? []
+  const spaces = spacesData?.spaces ?? []
   const stats = [
     { label: '空间', value: spaces.length },
-    { label: '价值流', value: statsData?.valueStreams?.paginationInfo?.total ?? 0 },
-    { label: '业务能力', value: statsData?.businessCapabilities?.paginationInfo?.total ?? 0 },
-    { label: '业务流程', value: statsData?.businessProcesses?.paginationInfo?.total ?? 0 },
+    { label: '价值流', value: statsData?.valueStreamCountBySpace ?? 0 },
+    { label: '业务能力', value: statsData?.businessCapabilityCountBySpace ?? 0 },
+    { label: '业务流程', value: statsData?.businessProcessCountBySpace ?? 0 },
   ]
 
   return (

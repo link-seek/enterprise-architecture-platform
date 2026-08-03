@@ -18,6 +18,7 @@ export const test = base.extend({
       }
     });
 
+    // eslint-disable-next-line react-hooks/rules-of-hooks -- Playwright fixture use, not a React hook
     await use(page);
 
     if (graphqlErrors.length > 0) {

@@ -5,8 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { GET_VALUE_STREAMS } from './version-control'
 
 // ============================================================================

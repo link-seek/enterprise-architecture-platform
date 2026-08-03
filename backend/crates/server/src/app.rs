@@ -20,11 +20,11 @@ static START_TIME: OnceLock<Instant> = OnceLock::new();
 
 pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
     START_TIME.get_or_init(Instant::now);
-    let jwt_secret = state.config.jwt.rsa_private_key_pem.clone();
+    let jwt_secret = state.config.jwt.secret.clone();
 
     let auth_service = Arc::new(AuthService::new(
         state.db.clone(),
-        state.config.jwt.rsa_private_key_pem.clone(),
+        jwt_secret.clone(),
         state.config.jwt.access_token_ttl_minutes * 60,
         state.config.jwt.refresh_token_ttl_days * 24 * 60 * 60,
         state
@@ -40,13 +40,16 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
         state.config.server.allow_public_register,
     ));
 
-    // Rate limiter: generous for GraphQL + REST
+    // Rate limiter: configurable per environment.
+    // Production defaults: per_second(4) / burst_size(25) (see config.rs).
+    // CI/E2E overrides via APP_SERVER__RATE_LIMIT__PER_SECOND etc.
+    let rl = &state.config.server.rate_limit;
     let governor_config = std::sync::Arc::new(
         tower_governor::governor::GovernorConfigBuilder::default()
-            .per_second(4)
-            .burst_size(25)
+            .per_second(rl.per_second)
+            .burst_size(rl.burst_size)
             .finish()
-            .unwrap(),
+            .expect("governor config must be valid — rate_limit.per_second and burst_size must be > 0; validated in Configuration::ensure_defaults()"),
     );
     let governor_limiter = tower_governor::GovernorLayer::new(governor_config);
 

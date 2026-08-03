@@ -49,7 +49,7 @@ interface User {
 const ROLE_OPTIONS = ['admin', 'architect', 'viewer'] as const
 
 export default function UsersPage() {
-  const { data, loading, refetch } = useQuery(GET_USERS)
+  const { data, loading, refetch } = useQuery<{ users: { nodes: User[] } }>(GET_USERS)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState({ email: '', name: '', password: '', role: 'viewer' })
   const [submitting, setSubmitting] = useState(false)

@@ -23,11 +23,11 @@ export default function ArchLayout() {
   const { spaceId } = useParams<{ spaceId: string }>()
   const { canEdit } = useSpaceMembership(spaceId)
 
-  const { data: spaceData } = useQuery<{ organizations: { nodes: Space[] } }>(GET_SPACE, {
+  const { data: spaceData } = useQuery<{ spaceById: Space | null }>(GET_SPACE, {
     variables: { id: spaceId },
     skip: !spaceId,
   })
-  const spaceName = spaceData?.organizations?.nodes?.[0]?.name ?? '空间'
+  const spaceName = spaceData?.spaceById?.name ?? '空间'
 
   const base = spaceId ? `/spaces/${spaceId}/architectures` : '/architectures'
   const menuItems = [

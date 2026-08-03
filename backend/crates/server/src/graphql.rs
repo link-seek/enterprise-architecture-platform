@@ -2,23 +2,26 @@ use axum::response::IntoResponse;
 use sea_orm::DatabaseConnection;
 use seaography::{Builder, BuilderContext, GuardAction, LifecycleHooks, LifecycleHooksInterface, OperationType, RelatedEntityFilter, RelationBuilder, TimeLibrary, TypesMapConfig};
 use uuid::Uuid;
+use async_graphql::ErrorExtensions;
 
 use user_management::infrastructure::persistence::entities::{
     oauth_authorization_code, refresh_token, user,
 };
 use business_architecture::infrastructure::persistence::entities::{
     business_capability, business_process, capability_process, process_step, stage_capability,
-    value_stream, value_stream_stage, space, space_member, space_invitation,
+    value_stream, value_stream_stage, space, space_member,
 };
 use business_architecture::application::value_stream_service::ValueStreamService;
 use business_architecture::application::space_service::SpaceService;
 use business_architecture::domain::value_stream::entity::ValueStream as DomainValueStream;
 use business_architecture::domain::value_stream::repository::ValueStreamRepository;
 use business_architecture::domain::space::entity::{Space as DomainSpace, SpaceMember as DomainSpaceMember};
+use business_architecture::domain::error::DomainError;
 use business_architecture::infrastructure::persistence::value_stream_repo::SeaOrmValueStreamRepo;
 use business_architecture::infrastructure::persistence::space_repo::{SeaOrmSpaceRepo, SeaOrmMembershipRepo};
+use business_architecture::infrastructure::persistence::space_audit_repo::SeaOrmAuditLogRepo;
 use shared_common::enums::ValueStreamImportance;
-use shared_common::enums::SpaceRole;
+use shared_common::enums::{SpaceRole, SpaceVisibility};
 use shared_common::enums::{
     BusinessValueRating, CapabilityLevel, CapabilityStatus, CostRating,
     LifecycleStatus, MaturityLevel,
@@ -30,13 +33,6 @@ pub type GraphqlSchema = async_graphql::dynamic::Schema;
 // GraphQL Auth Guard (seaography LifecycleHooks)
 // ============================================================================
 
-/// Entities that support ownership (have `created_by` field).
-const OWNED_ENTITIES: &[&str] = &[
-    "business_capabilities",
-    "business_processes",
-    "value_streams",
-];
-
 /// User-management entities: only Admin can manage users.
 const USER_ENTITIES: &[&str] = &[
     "users",
@@ -46,29 +42,40 @@ const USER_ENTITIES: &[&str] = &[
 
 /// Entities whose membership/identity data should not be exposed to anonymous
 /// readers. Reading these requires an authenticated session; user records and
-/// space membership/invitation records additionally require admin (cross-tenant
+/// space membership records additionally require admin (cross-tenant
 /// enumeration is prevented; space-scoped reads go through custom queries that
-/// enforce membership).
+/// enforce membership/visibility).
 const PRIVATE_READ_ENTITIES: &[&str] = &[
     "users",
     "refresh_tokens",
     "oauth_authorization_codes",
     "space_members",
-    "space_invitations",
 ];
 
-/// Entities that require admin to read even when authenticated (prevents
-/// cross-tenant enumeration of membership and invitations via the
-/// auto-generated query; space-scoped reads use custom queries instead).
+/// Entities that require admin to read even when authenticated via the
+/// seaography auto-generated query. This prevents cross-tenant enumeration of
+/// membership and bypass of private-space row-level ACL: business content is
+/// read through custom space-scoped queries (`spaces`/`spaceById`/`*BySpace`)
+/// that enforce visibility + membership instead. `space_members` is admin-only
+/// via auto-query; the membership-scoped `spaceMembersBySpace` custom query
+/// enforces its own access.
 const ADMIN_READ_ENTITIES: &[&str] = &[
     "space_members",
-    "space_invitations",
+    "organizations",
+    "value_streams",
+    "business_capabilities",
+    "business_processes",
+    "process_steps",
+    "value_stream_stages",
+    "capability_processes",
+    "stage_capabilities",
 ];
 
 /// Fields hidden from all users (including Admin) in queries.
 const HIDDEN_FIELDS: &[(&str, &str)] = &[
     ("users", "password_hash"),
-    ("space_invitations", "token_hash"),
+    ("refresh_tokens", "token_hash"),
+    ("oauth_authorization_codes", "code_hash"),
 ];
 
 /// Fields restricted to Admin only.
@@ -93,9 +100,11 @@ impl LifecycleHooksInterface for GraphqlAuthGuard {
 
         match action {
             OperationType::Read => {
-                // Anonymous users may read spaces and business architecture entities
-                // (case-showcase / public read). Membership and user entities require
-                // an authenticated session; user records additionally require admin.
+                // Anonymous users may read only entities that are neither
+                // private-read nor admin-read. Business content and spaces are
+                // admin-only via the auto-generated query (cross-tenant / private
+                // row-level ACL); space-scoped custom queries enforce visibility +
+                // membership and are the intended read path for non-admins.
                 if PRIVATE_READ_ENTITIES.contains(&entity) {
                     let Some(claims) = claims else {
                         return GuardAction::Block(Some("Authentication required.".to_string()));
@@ -107,6 +116,19 @@ impl LifecycleHooksInterface for GraphqlAuthGuard {
                         ));
                     }
                     if ADMIN_READ_ENTITIES.contains(&entity) && !role.is_admin() {
+                        return GuardAction::Block(Some(
+                            "Only admins can read this resource directly.".to_string(),
+                        ));
+                    }
+                } else if ADMIN_READ_ENTITIES.contains(&entity) {
+                    // Admin-only entities that are not in PRIVATE_READ_ENTITIES
+                    // (business content / spaces): block anonymous and non-admin.
+                    let Some(claims) = claims else {
+                        return GuardAction::Block(Some(
+                            "Only admins can read this resource directly.".to_string(),
+                        ));
+                    };
+                    if !claims.user_role().is_admin() {
                         return GuardAction::Block(Some(
                             "Only admins can read this resource directly.".to_string(),
                         ));
@@ -324,21 +346,11 @@ impl tower::Service<axum::extract::Request> for GraphQLService {
                             }
                         };
 
-                    // Inject Claims into GraphQL context if JWT was valid
+                    // Inject Claims into GraphQL context if JWT was valid.
+                    // entity_guard handles auth for seaography mutations;
+                    // custom ValueStream mutations check Claims explicitly.
                     if let Some(claims) = has_jwt {
                         request = request.data(claims);
-                    } else {
-                        // Fallback: reject mutation requests without JWT
-                        let body_str = String::from_utf8_lossy(&bytes);
-                        if body_str.contains("mutation") {
-                            return Ok((
-                                axum::http::StatusCode::UNAUTHORIZED,
-                                axum::Json(serde_json::json!({
-                                    "errors": [{"message": "Authentication required for mutations. Provide a valid JWT via Authorization header."}]
-                                })),
-                            )
-                                .into_response());
-                        }
                     }
 
                     let response = schema.execute(request).await;
@@ -403,26 +415,7 @@ where
 /// Convert a domain ValueStream back to a SeaORM Model so that
 /// seaography's field resolvers can downcast and resolve all fields.
 fn domain_vs_to_model(vs: &DomainValueStream) -> value_stream::Model {
-    value_stream::Model {
-        id: vs.id,
-        logical_id: vs.logical_id,
-        business_version: vs.business_version.clone(),
-        status: vs.status,
-        name: vs.name.clone(),
-        description: vs.description.clone(),
-        triggering_event: vs.triggering_event.clone(),
-        end_deliverable: vs.end_deliverable.clone(),
-        owner_id: vs.owner_id,
-        importance: vs.importance,
-        stakeholders: vs.stakeholders.clone(),
-        performance_metrics: vs.performance_metrics.clone(),
-        created_by: vs.created_by,
-        updated_by: vs.updated_by,
-        created_at: vs.created_at,
-        updated_at: vs.updated_at,
-        deleted_at: vs.deleted_at,
-        space_id: vs.space_id,
-    }
+    vs.into()
 }
 
 // ============================================================================
@@ -479,18 +472,19 @@ async fn ensure_space_edit_access(
     space_id: Uuid,
 ) -> async_graphql::Result<()> {
     let claims = require_claims(ctx)?;
-    let service = SpaceService::new(
-        SeaOrmSpaceRepo::new(db.clone()),
-        SeaOrmMembershipRepo::new(db.clone()),
-    );
+    let service = space_service(db);
     service
         .ensure_can_edit(space_id, claims.user_id, claims.user_role())
         .await
-        .map_err(|e| async_graphql::Error::new(e.to_string()))
+        .map_err(domain_err_to_graphql)
 }
 
 /// Register custom ValueStream mutations that go through the domain model.
 /// These replace seaography's auto-generated CRUD mutations for value_stream.
+///
+/// Custom mutations skip `entity_guard` (it only applies to seaography-generated
+/// resolvers), so each mutation manually calls `check_value_stream_auth` for
+/// role-based authorization and `ensure_space_edit_access` for space-level ACL.
 fn register_value_stream_domain_mutations(builder: &mut Builder) {
     use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, TypeRef};
 
@@ -678,6 +672,7 @@ fn domain_space_to_model(s: &DomainSpace) -> space::Model {
         id: s.id,
         name: s.name.clone(),
         description: s.description.clone(),
+        visibility: s.visibility,
         created_at: s.created_at,
         updated_at: s.updated_at,
         deleted_at: s.deleted_at,
@@ -713,6 +708,98 @@ fn parse_uuid_arg<'a>(ctx: &'a async_graphql::dynamic::ResolverContext<'a>, name
     Uuid::parse_str(s).map_err(|e| async_graphql::Error::new(format!("Invalid UUID for {name}: {e}")))
 }
 
+/// Parse a `visibility` argument into `SpaceVisibility`. Returns an error for
+/// unrecognized values so a typo (e.g. `"Private"`, `"PRIVATE"`, `"internal"`)
+/// surfaces as a GraphQL error rather than silently widening a private space to
+/// public. When the argument is omitted, defaults to `Private` (least
+/// privilege) so a caller bug that drops the argument cannot accidentally
+/// expose a space publicly.
+fn parse_visibility_arg(
+    ctx: &async_graphql::dynamic::ResolverContext<'_>,
+    name: &str,
+) -> Result<SpaceVisibility, async_graphql::Error> {
+    match ctx.args.get(name).and_then(|v| v.string().ok()) {
+        Some("public") => Ok(SpaceVisibility::Public),
+        Some("private") => Ok(SpaceVisibility::Private),
+        Some(other) => Err(async_graphql::Error::new(format!(
+            "Invalid visibility value '{other}': expected 'public' or 'private'"
+        ))),
+        // When the argument is omitted, default to the least-privileged
+        // visibility (Private) rather than Public. This prevents a caller bug
+        // that omits the argument from accidentally exposing a space publicly.
+        None => Ok(SpaceVisibility::Private),
+    }
+}
+
+/// Build a `SpaceService` wired to the SeaORM repos (space, membership, audit).
+fn space_service(db: &DatabaseConnection) -> SpaceService<SeaOrmSpaceRepo, SeaOrmMembershipRepo, SeaOrmAuditLogRepo> {
+    SpaceService::new(
+        SeaOrmSpaceRepo::new(db.clone()),
+        SeaOrmMembershipRepo::new(db.clone()),
+        SeaOrmAuditLogRepo::new(db.clone()),
+    )
+    .with_strict_audit()
+}
+
+/// Wrap a `DomainError` as a GraphQL error with a semantic `extensions.code`.
+fn graphql_err_with_code(e: &DomainError, code: &str) -> async_graphql::Error {
+    async_graphql::Error::new(e.to_string()).extend_with(|_err, extensions| {
+        extensions.set("code", code.to_owned());
+    })
+}
+
+/// Map a domain access error to a GraphQL error carrying a semantic code.
+/// Used by the read/edit guards so the frontend can branch on `extensions.code`.
+fn domain_err_to_graphql(e: DomainError) -> async_graphql::Error {
+    let code = match &e {
+        DomainError::NotSpaceMember => "FORBIDDEN_SPACE_NOT_MEMBER",
+        DomainError::NotSpaceEditor => "FORBIDDEN_SPACE_NOT_EDITOR",
+        DomainError::NotSpaceOwner => "FORBIDDEN_SPACE_NOT_OWNER",
+        DomainError::SpaceQuotaExceeded => "SPACE_QUOTA_EXCEEDED",
+        DomainError::SpaceNotFound => "SPACE_NOT_FOUND",
+        DomainError::ProcessNotFound | DomainError::ValueStreamNotFound
+        | DomainError::ProcessVersionNotFound | DomainError::CapabilityNotFound
+        | DomainError::InvitationNotFound => "NOT_FOUND",
+        DomainError::SpaceNameEmpty | DomainError::Validation(_) => "VALIDATION_ERROR",
+        DomainError::Semver(_) => "SEMVER_ERROR",
+        DomainError::Database(_) => "INTERNAL_ERROR",
+        DomainError::AuditLogFailed(_) => "AUDIT_LOG_FAILED",
+        DomainError::InvalidTransition { .. } | DomainError::CannotModifyArchived { .. }
+        | DomainError::CannotReferenceArchived | DomainError::AlreadyMember
+        | DomainError::CannotRemoveLastOwner | DomainError::NotOwner => "FORBIDDEN",
+    };
+    // Database and audit-log errors may contain sensitive internal details
+    // (SQL fragments, table/column names, constraint names, repository error
+    // messages). Log the full message server-side but return a generic message
+    // to the client.
+    match &e {
+        DomainError::Database(msg) => {
+            tracing::error!("Database error: {msg}");
+            async_graphql::Error::new("Internal server error").extend_with(|_err, extensions| {
+                extensions.set("code", code.to_owned());
+            })
+        }
+        DomainError::AuditLogFailed(msg) => {
+            tracing::error!("Audit log failure: {msg}");
+            async_graphql::Error::new("Audit log failure").extend_with(|_err, extensions| {
+                extensions.set("code", code.to_owned());
+            })
+        }
+        _ => graphql_err_with_code(&e, code),
+    }
+}
+
+/// Map a SeaORM database error to a GraphQL error carrying a semantic
+/// `extensions.code` of `INTERNAL_ERROR`. The raw database message is logged
+/// server-side but never sent to the client to avoid leaking SQL fragments,
+/// table/column names, or constraint names.
+fn db_err_to_graphql(e: impl std::fmt::Display) -> async_graphql::Error {
+    tracing::error!("Database error: {e}");
+    async_graphql::Error::new("Internal server error").extend_with(|_err, extensions| {
+        extensions.set("code", "INTERNAL_ERROR".to_owned());
+    })
+}
+
 fn register_space_domain_mutations(builder: &mut Builder) {
     use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, TypeRef};
 
@@ -726,24 +813,24 @@ fn register_space_domain_mutations(builder: &mut Builder) {
                 let db = ctx.data::<DatabaseConnection>()?;
                 let name = ctx.args.try_get("name")?.string()?.to_owned();
                 let description = ctx.args.get("description").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+                let visibility = parse_visibility_arg(&ctx, "visibility")?;
 
-                let service = SpaceService::new(
-                    SeaOrmSpaceRepo::new(db.clone()),
-                    SeaOrmMembershipRepo::new(db.clone()),
-                );
+                let service = space_service(db);
                 let space_obj = service
-                    .create_space(claims.user_id, claims.user_role(), name, description)
+                    .create_space(claims.user_id, claims.user_role(), name, description, visibility)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(domain_err_to_graphql)?;
                 Ok(Some(FieldValue::owned_any(domain_space_to_model(&space_obj))))
             })
         },
     )
     .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
-    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)));
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("visibility", TypeRef::named(TypeRef::STRING)));
     builder.mutations.push(create);
 
     // ── spaceUpdate ────────────────────────────────────────────────────
+    // Visibility is intentionally NOT mutable here — use `spaceSetVisibility`.
     let update = Field::new(
         "spaceUpdate",
         TypeRef::named_nn("Organizations"),
@@ -759,14 +846,11 @@ fn register_space_domain_mutations(builder: &mut Builder) {
                     None => None,
                 };
 
-                let service = SpaceService::new(
-                    SeaOrmSpaceRepo::new(db.clone()),
-                    SeaOrmMembershipRepo::new(db.clone()),
-                );
+                let service = space_service(db);
                 let space_obj = service
                     .update_space(space_id, claims.user_id, claims.user_role(), name, description)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(domain_err_to_graphql)?;
                 Ok(Some(FieldValue::owned_any(domain_space_to_model(&space_obj))))
             })
         },
@@ -775,6 +859,31 @@ fn register_space_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)));
     builder.mutations.push(update);
+
+    // ── spaceSetVisibility ─────────────────────────────────────────────
+    // Independent mutation (R4): only owner or Admin may change visibility.
+    // Records an audit log entry (best-effort) inside the service.
+    let set_visibility = Field::new(
+        "spaceSetVisibility",
+        TypeRef::named_nn("Organizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let claims = require_claims(&ctx)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "id")?;
+                let visibility = parse_visibility_arg(&ctx, "visibility")?;
+                let service = space_service(db);
+                let space_obj = service
+                    .set_visibility(space_id, claims.user_id, claims.user_role(), visibility)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                Ok(Some(FieldValue::owned_any(domain_space_to_model(&space_obj))))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("visibility", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(set_visibility);
 
     // ── spaceArchive ───────────────────────────────────────────────────
     let archive = Field::new(
@@ -785,14 +894,11 @@ fn register_space_domain_mutations(builder: &mut Builder) {
                 let claims = require_claims(&ctx)?;
                 let db = ctx.data::<DatabaseConnection>()?;
                 let space_id = parse_uuid_arg(&ctx, "id")?;
-                let service = SpaceService::new(
-                    SeaOrmSpaceRepo::new(db.clone()),
-                    SeaOrmMembershipRepo::new(db.clone()),
-                );
+                let service = space_service(db);
                 service
                     .archive_space(space_id, claims.user_id, claims.user_role())
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(domain_err_to_graphql)?;
                 Ok(Some(async_graphql::Value::Boolean(true)))
             })
         },
@@ -812,14 +918,11 @@ fn register_space_domain_mutations(builder: &mut Builder) {
                 let user_id = parse_uuid_arg(&ctx, "userId")?;
                 let role = parse_space_role(ctx.args.try_get("role")?.enum_name()?)?;
 
-                let service = SpaceService::new(
-                    SeaOrmSpaceRepo::new(db.clone()),
-                    SeaOrmMembershipRepo::new(db.clone()),
-                );
+                let service = space_service(db);
                 let member = service
                     .add_member(space_id, claims.user_id, claims.user_role(), user_id, role)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(domain_err_to_graphql)?;
                 Ok(Some(FieldValue::owned_any(domain_member_to_model(&member))))
             })
         },
@@ -839,14 +942,11 @@ fn register_space_domain_mutations(builder: &mut Builder) {
                 let db = ctx.data::<DatabaseConnection>()?;
                 let space_id = parse_uuid_arg(&ctx, "spaceId")?;
                 let user_id = parse_uuid_arg(&ctx, "userId")?;
-                let service = SpaceService::new(
-                    SeaOrmSpaceRepo::new(db.clone()),
-                    SeaOrmMembershipRepo::new(db.clone()),
-                );
+                let service = space_service(db);
                 service
                     .remove_member(space_id, claims.user_id, claims.user_role(), user_id)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(domain_err_to_graphql)?;
                 Ok(Some(async_graphql::Value::Boolean(true)))
             })
         },
@@ -1676,16 +1776,13 @@ async fn ensure_space_read_access(
     if claims.user_role().is_admin() {
         return Ok(());
     }
-    let service = SpaceService::new(
-        SeaOrmSpaceRepo::new(db.clone()),
-        SeaOrmMembershipRepo::new(db.clone()),
-    );
+    let service = space_service(db);
     let membership = service
         .my_membership(space_id, claims.user_id)
         .await
-        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        .map_err(domain_err_to_graphql)?;
     if membership.is_none() {
-        return Err(async_graphql::Error::new("Not a member of this space."));
+        return Err(graphql_err_with_code(&DomainError::NotSpaceMember, "FORBIDDEN_SPACE_NOT_MEMBER"));
     }
     Ok(())
 }
@@ -1727,7 +1824,7 @@ struct SpaceMemberWithUser {
 
 fn register_space_scoped_queries(builder: &mut Builder) {
     use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, Object, TypeRef};
-    use sea_orm::{EntityTrait, ColumnTrait, QueryFilter};
+    use sea_orm::{EntityTrait, ColumnTrait, QueryFilter, PaginatorTrait};
 
     // ── SpaceUserLookup output type ───────────────────────────────────
     let space_user_type = Object::new("SpaceUserLookup")
@@ -1790,14 +1887,11 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                 let db = ctx.data::<DatabaseConnection>()?;
                 let claims = require_claims(&ctx)?;
                 let space_id = parse_uuid_arg(&ctx, "spaceId")?;
-                let service = SpaceService::new(
-                    SeaOrmSpaceRepo::new(db.clone()),
-                    SeaOrmMembershipRepo::new(db.clone()),
-                );
+                let service = space_service(db);
                 let membership = service
                     .my_membership(space_id, claims.user_id)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(domain_err_to_graphql)?;
                 Ok(membership.map(|m| FieldValue::owned_any(MyMembership {
                     role: match m.role {
                         SpaceRole::Owner => "owner".to_owned(),
@@ -1862,32 +1956,6 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
     builder.queries.push(members_query);
 
-    // ── spaceInvitationsBySpace ──────────────────────────────────────
-    let invitations_query = Field::new(
-        "spaceInvitationsBySpace",
-        TypeRef::named_nn_list_nn("SpaceInvitations"),
-        |ctx| {
-            FieldFuture::new(async move {
-                let db = ctx.data::<DatabaseConnection>()?;
-                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
-                ensure_space_read_access(&ctx, db, space_id).await?;
-
-                let models = space_invitation::Entity::find()
-                    .filter(space_invitation::Column::SpaceId.eq(space_id))
-                    .all(db)
-                    .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
-                let list: Vec<FieldValue> = models
-                    .into_iter()
-                    .map(FieldValue::owned_any)
-                    .collect();
-                Ok(Some(FieldValue::list(list)))
-            })
-        },
-    )
-    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
-    builder.queries.push(invitations_query);
-
     // ── spaceUserByEmail ─────────────────────────────────────────────
     // Allows a space owner/editor to look up a user by email for the purpose
     // of adding them as a member, without requiring global admin. Authorization
@@ -1920,6 +1988,443 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("email", TypeRef::named_nn(TypeRef::STRING)));
     builder.queries.push(user_lookup);
+
+    // ========================================================================
+    // Visibility-aware space-scoped read queries (R2).
+    //
+    // The seaography auto-generated query for `organizations`/`value_streams`/
+    // `business_capabilities`/`business_processes` and their children is
+    // admin-only (see ADMIN_READ_ENTITIES). Non-admin / anonymous callers must
+    // use these custom queries, which enforce visibility + membership before
+    // returning any row. Public spaces are readable by anyone (including
+    // anonymous); private spaces require membership (Admin bypasses).
+    // ========================================================================
+
+    /// Resolve the caller's `(user_id, role)` for visibility checks. Anonymous
+    /// callers get `(None, UserRole::Viewer)` — Viewer has no global bypass, so
+    /// the visibility branch correctly falls through to "public only".
+    fn caller_identity(ctx: &async_graphql::dynamic::ResolverContext<'_>) -> (Option<Uuid>, shared_common::enums::UserRole) {
+        match ctx.data_opt::<crate::middleware::Claims>() {
+            Some(c) => (Some(c.user_id), c.user_role()),
+            None => (None, shared_common::enums::UserRole::Viewer),
+        }
+    }
+
+    // ── spaces ─────────────────────────────────────────────────────────
+    // Anonymous: public non-deleted spaces. Authenticated: public + private
+    // spaces they are a member of. Admin: all non-deleted spaces.
+    let spaces_query = Field::new(
+        "spaces",
+        TypeRef::named_nn_list_nn("Organizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                let list = if let Some(uid) = actor_id {
+                    service.list_visible(uid, actor_role).await
+                } else {
+                    service.list_public().await
+                }
+                .map_err(domain_err_to_graphql)?;
+                let values: Vec<FieldValue> = list
+                    .into_iter()
+                    .map(|s| FieldValue::owned_any(domain_space_to_model(&s)))
+                    .collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    );
+    builder.queries.push(spaces_query);
+
+    // ── spaceById ──────────────────────────────────────────────────────
+    let space_by_id = Field::new(
+        "spaceById",
+        TypeRef::named("Organizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "id")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let space = service
+                    .find_space(space_id)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                Ok(space.map(|s| FieldValue::owned_any(domain_space_to_model(&s))))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(space_by_id);
+
+    // Helper macro-like closures are awkward in Rust closures; inline the
+    // visibility check per query for clarity (mirrors `spaceById`).
+
+    // ── valueStreamsBySpace ────────────────────────────────────────────
+    let vs_by_space = Field::new(
+        "valueStreamsBySpace",
+        TypeRef::named_nn_list_nn("ValueStreams"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = value_stream::Entity::find()
+                    .filter(value_stream::Column::SpaceId.eq(space_id))
+                    .filter(value_stream::Column::DeletedAt.is_null())
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(vs_by_space);
+
+    // ── businessCapabilitiesBySpace ───────────────────────────────────
+    let cap_by_space = Field::new(
+        "businessCapabilitiesBySpace",
+        TypeRef::named_nn_list_nn("BusinessCapabilities"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = business_capability::Entity::find()
+                    .filter(business_capability::Column::SpaceId.eq(space_id))
+                    .filter(business_capability::Column::DeletedAt.is_null())
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(cap_by_space);
+
+    // ── businessProcessesBySpace ──────────────────────────────────────
+    let proc_by_space = Field::new(
+        "businessProcessesBySpace",
+        TypeRef::named_nn_list_nn("BusinessProcesses"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = business_process::Entity::find()
+                    .filter(business_process::Column::SpaceId.eq(space_id))
+                    .filter(business_process::Column::DeletedAt.is_null())
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(proc_by_space);
+
+    // ── valueStreamCountBySpace ───────────────────────────────────────
+    // Lightweight count query for dashboard stats; avoids loading full rows.
+    let vs_count = Field::new(
+        "valueStreamCountBySpace",
+        TypeRef::named_nn(TypeRef::INT),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let count = value_stream::Entity::find()
+                    .filter(value_stream::Column::SpaceId.eq(space_id))
+                    .filter(value_stream::Column::DeletedAt.is_null())
+                    .count(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                Ok(Some(FieldValue::value(count as i64)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(vs_count);
+
+    // ── businessCapabilityCountBySpace ────────────────────────────────
+    let cap_count = Field::new(
+        "businessCapabilityCountBySpace",
+        TypeRef::named_nn(TypeRef::INT),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let count = business_capability::Entity::find()
+                    .filter(business_capability::Column::SpaceId.eq(space_id))
+                    .filter(business_capability::Column::DeletedAt.is_null())
+                    .count(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                Ok(Some(FieldValue::value(count as i64)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(cap_count);
+
+    // ── businessProcessCountBySpace ───────────────────────────────────
+    let proc_count = Field::new(
+        "businessProcessCountBySpace",
+        TypeRef::named_nn(TypeRef::INT),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let count = business_process::Entity::find()
+                    .filter(business_process::Column::SpaceId.eq(space_id))
+                    .filter(business_process::Column::DeletedAt.is_null())
+                    .count(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                Ok(Some(FieldValue::value(count as i64)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(proc_count);
+
+    // ── valueStreamById ───────────────────────────────────────────────
+    // Resolves the owning space from the value stream, then enforces
+    // visibility. Used by value-stream-detail.tsx.
+    let vs_by_id = Field::new(
+        "valueStreamById",
+        TypeRef::named("ValueStreams"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                // Filter by both id and SpaceId so a caller with read access to
+                // one space cannot fetch a value stream belonging to a different
+                // space by guessing its id.
+                let row = value_stream::Entity::find()
+                    .filter(value_stream::Column::Id.eq(id))
+                    .filter(value_stream::Column::SpaceId.eq(space_id))
+                    .filter(value_stream::Column::DeletedAt.is_null())
+                    .one(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                Ok(row.map(FieldValue::owned_any))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(vs_by_id);
+
+    // ── valueStreamsBySpaceAndLogicalId ───────────────────────────────
+    // Used by version-control.tsx to fetch all versions of a value stream.
+    let vs_by_logical = Field::new(
+        "valueStreamsBySpaceAndLogicalId",
+        TypeRef::named_nn_list_nn("ValueStreams"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let logical_id = parse_uuid_arg(&ctx, "logicalId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = value_stream::Entity::find()
+                    .filter(value_stream::Column::SpaceId.eq(space_id))
+                    .filter(value_stream::Column::LogicalId.eq(logical_id))
+                    .filter(value_stream::Column::DeletedAt.is_null())
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("logicalId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(vs_by_logical);
+
+    // ── Child-entity by-parent queries ────────────────────────────────
+    // These close the cross-tenant read gap: the auto-query for child
+    // entities is admin-only, so non-admins must use these. Each resolves the
+    // owning space from the parent and enforces visibility before filtering by
+    // the parent id.
+
+    // processStepsByProcess
+    let steps_by_process = Field::new(
+        "processStepsByProcess",
+        TypeRef::named_nn_list_nn("ProcessSteps"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let process_id = parse_uuid_arg(&ctx, "processId")?;
+                let space_id = space_of_process(db, process_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = process_step::Entity::find()
+                    .filter(process_step::Column::ProcessId.eq(process_id))
+                    .filter(process_step::Column::DeletedAt.is_null())
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("processId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(steps_by_process);
+
+    // valueStreamStagesByValueStream
+    let stages_by_vs = Field::new(
+        "valueStreamStagesByValueStream",
+        TypeRef::named_nn_list_nn("ValueStreamStages"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let vs_id = parse_uuid_arg(&ctx, "valueStreamId")?;
+                let space_id = space_of_value_stream(db, vs_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = value_stream_stage::Entity::find()
+                    .filter(value_stream_stage::Column::ValueStreamId.eq(vs_id))
+                    .filter(value_stream_stage::Column::DeletedAt.is_null())
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("valueStreamId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(stages_by_vs);
+
+    // capabilityProcessesByCapability
+    let cp_by_cap = Field::new(
+        "capabilityProcessesByCapability",
+        TypeRef::named_nn_list_nn("BusinessCapabilityProcesses"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let cap_id = parse_uuid_arg(&ctx, "capabilityId")?;
+                let space_id = space_of_capability(db, cap_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = capability_process::Entity::find()
+                    .filter(capability_process::Column::CapabilityId.eq(cap_id))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(cp_by_cap);
+
+    // stageCapabilitiesByStage
+    let sc_by_stage = Field::new(
+        "stageCapabilitiesByStage",
+        TypeRef::named_nn_list_nn("ValueStreamStageCapabilities"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let stage_id = parse_uuid_arg(&ctx, "stageId")?;
+                let space_id = space_of_stage(db, stage_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = stage_capability::Entity::find()
+                    .filter(stage_capability::Column::StageId.eq(stage_id))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("stageId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(sc_by_stage);
 }
 
 // ============================================================================
@@ -1959,12 +2464,15 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     register_entity::<capability_process::Entity>(&mut builder);   // queries only
     register_entity::<stage_capability::Entity>(&mut builder);     // queries only
 
-    // ── Spaces (reuses `organizations` table) + membership/invitations ──
-    // Queries are public (anonymous case-showcase); writes go through custom
-    // domain mutations registered below.
+    // ── Spaces (reuses `organizations` table) + membership ─────────────
+    // Queries are admin-only via the auto-generated query (see ADMIN_READ_ENTITIES);
+    // non-admin / anonymous reads go through the custom space-scoped queries
+    // registered below (`spaces`/`spaceById`/`*BySpace`). Writes go through
+    // custom domain mutations registered below.
+    // `space_invitations` is intentionally NOT registered (R7 dead-code cleanup):
+    // the table exists but has no create/accept mutation and no consumers.
     register_entity::<space::Entity>(&mut builder);
     register_entity::<space_member::Entity>(&mut builder);
-    register_entity::<space_invitation::Entity>(&mut builder);
 
     // ── Custom domain mutations for ValueStream ───────────────────────
     register_value_stream_domain_mutations(&mut builder);
@@ -2007,9 +2515,7 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
         .register_entity_dataloader_one_to_one(space::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_many(space::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_one(space_member::Entity, tokio::spawn)
-        .register_entity_dataloader_one_to_many(space_member::Entity, tokio::spawn)
-        .register_entity_dataloader_one_to_one(space_invitation::Entity, tokio::spawn)
-        .register_entity_dataloader_one_to_many(space_invitation::Entity, tokio::spawn);
+        .register_entity_dataloader_one_to_many(space_member::Entity, tokio::spawn);
 
     // ── Explicitly register enum types used in custom mutations ───────
     // seaography auto-registers enums for entity query fields, but custom
@@ -2020,6 +2526,12 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     builder.register_enumeration::<CostRating>();
     builder.register_enumeration::<CapabilityStatus>();
     builder.register_enumeration::<LifecycleStatus>();
+
+    // SpaceVisibility is used as a field type on the `Organizations` entity
+    // (the `visibility` column). If the enum is not registered, seaography
+    // silently skips the field, causing `Unknown field "visibility" on type
+    // "Organizations"` at query time.
+    builder.register_enumeration::<SpaceVisibility>();
 
     let schema = builder.schema_builder()
         .data(db.clone())

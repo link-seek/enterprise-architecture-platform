@@ -232,3 +232,57 @@ impl SpaceRole {
         }
     }
 }
+
+/// Visibility of a Space (multi-tenant access scope).
+///
+/// - `Public`: content readable by anonymous users and any logged-in user.
+/// - `Private`: content readable only by space members (owner/editor) and
+///   platform Admins.
+///
+/// The database column default is `'public'` (see migration 000031) so existing
+/// spaces remain open with zero behavior change when the column is added. The
+/// Rust `Default` trait, however, returns `Private` to match the least-privilege
+/// default used by `parse_visibility_arg`, preventing accidental public exposure
+/// when visibility is derived via `Default` rather than specified explicitly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum SpaceVisibility {
+    #[sea_orm(string_value = "public")]
+    Public,
+    #[sea_orm(string_value = "private")]
+    Private,
+}
+
+impl Default for SpaceVisibility {
+    fn default() -> Self {
+        SpaceVisibility::Private
+    }
+}
+
+impl SpaceVisibility {
+    pub fn is_private(&self) -> bool {
+        matches!(self, SpaceVisibility::Private)
+    }
+    pub fn is_public(&self) -> bool {
+        matches!(self, SpaceVisibility::Public)
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SpaceVisibility::Public => "public",
+            SpaceVisibility::Private => "private",
+        }
+    }
+}
+
+impl std::str::FromStr for SpaceVisibility {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "public" => Ok(SpaceVisibility::Public),
+            "private" => Ok(SpaceVisibility::Private),
+            _ => Err(format!("invalid SpaceVisibility: '{s}'")),
+        }
+    }
+}

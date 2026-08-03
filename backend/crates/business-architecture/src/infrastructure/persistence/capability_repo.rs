@@ -163,6 +163,20 @@ impl SeaOrmCapabilityRepo {
             return Err(DomainError::CannotReferenceArchived);
         }
 
+        let capability =
+            crate::infrastructure::persistence::entities::business_capability::Entity::find()
+                .filter(crate::infrastructure::persistence::entities::business_capability::Column::Id.eq(capability_id))
+                .filter(crate::infrastructure::persistence::entities::business_capability::Column::DeletedAt.is_null())
+                .one(&self.db)
+                .await?
+                .ok_or(DomainError::CapabilityNotFound)?;
+
+        if capability.status != LifecycleStatus::Active {
+            return Err(DomainError::CannotModifyArchived {
+                entity: "capability".to_owned(),
+            });
+        }
+
         let active = capability_process::ActiveModel {
             capability_id: Set(capability_id),
             process_id: Set(process_id),

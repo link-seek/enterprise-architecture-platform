@@ -1,22 +1,32 @@
 use chrono::{DateTime, Utc};
+use shared_common::enums::SpaceVisibility;
 use uuid::Uuid;
 
 use crate::domain::error::DomainError;
 
 /// A Space is the multi-tenant container for one enterprise's architecture.
 /// Reuses the `organizations` table; soft-deleted via `deleted_at`.
+/// `visibility` controls whether content is readable by anonymous/any user
+/// (`Public`) or only by members/Admins (`Private`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Space {
     pub id: Uuid,
     pub name: String,
     pub description: Option<String>,
+    pub visibility: SpaceVisibility,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
 impl Space {
-    pub fn create(id: Uuid, name: String, description: Option<String>, now: DateTime<Utc>) -> Result<Self, DomainError> {
+    pub fn create(
+        id: Uuid,
+        name: String,
+        description: Option<String>,
+        visibility: SpaceVisibility,
+        now: DateTime<Utc>,
+    ) -> Result<Self, DomainError> {
         if name.trim().is_empty() {
             return Err(DomainError::SpaceNameEmpty);
         }
@@ -24,6 +34,7 @@ impl Space {
             id,
             name: name.trim().to_owned(),
             description,
+            visibility,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -41,6 +52,11 @@ impl Space {
 
     pub fn set_description(&mut self, description: Option<String>, now: DateTime<Utc>) {
         self.description = description;
+        self.updated_at = now;
+    }
+
+    pub fn set_visibility(&mut self, visibility: SpaceVisibility, now: DateTime<Utc>) {
+        self.visibility = visibility;
         self.updated_at = now;
     }
 

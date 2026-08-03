@@ -1,5 +1,4 @@
 import { useQuery } from '@apollo/client/react'
-import { gql } from '@apollo/client'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -32,8 +31,9 @@ export default function ValueStreams() {
   const [versionOpen, setVersionOpen] = useState(false)
   const [versionItem, setVersionItem] = useState<ValueStream | null>(null)
 
-  const { data, loading, error } = useQuery(GET_VALUE_STREAMS, {
+  const { data, loading, error } = useQuery<{ valueStreamsBySpace: ValueStream[] }>(GET_VALUE_STREAMS, {
     variables: { spaceId },
+    skip: !spaceId,
   })
 
   const statusColor = (status: string) => {
@@ -44,9 +44,15 @@ export default function ValueStreams() {
     }
   }
 
-  const detailBase = spaceId
-    ? `/spaces/${spaceId}/architectures/value-streams`
-    : '/architectures/value-streams'
+  if (!spaceId) {
+    return (
+      <div className="p-6">
+        <div className="text-center py-8 text-destructive">缺少空间标识，无法加载价值流。</div>
+      </div>
+    )
+  }
+
+  const detailBase = `/spaces/${spaceId}/architectures/value-streams`
 
   return (
     <div className="p-6 space-y-4">
@@ -64,7 +70,7 @@ export default function ValueStreams() {
         <CardHeader><CardTitle>价值流列表</CardTitle></CardHeader>
         <CardContent>
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
-          {error && <div className="text-center py-8 text-destructive">加载失败: {error.message}</div>}
+          {Boolean(error) && <div className="text-center py-8 text-destructive">加载失败</div>}
           {data && (
             <>
               <Table>
@@ -77,7 +83,7 @@ export default function ValueStreams() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.valueStreams.nodes.map((vs: ValueStream) => (
+                  {data.valueStreamsBySpace.map((vs: ValueStream) => (
                     <TableRow key={vs.id}>
                       <TableCell className="font-medium">
                         {vs.name}
@@ -118,7 +124,7 @@ export default function ValueStreams() {
                 </TableBody>
               </Table>
               <div className="flex items-center justify-between mt-4">
-                <p className="text-sm text-muted-foreground">共 {data.valueStreams.paginationInfo.total} 条</p>
+                <p className="text-sm text-muted-foreground">共 {data.valueStreamsBySpace.length} 条</p>
               </div>
             </>
           )}
@@ -127,7 +133,7 @@ export default function ValueStreams() {
 
       <ValueStreamCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} />
       <ValueStreamDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
-      <VersionHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} logicalId={historyLogicalId} />
+      <VersionHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} spaceId={spaceId} logicalId={historyLogicalId} />
       <CreateVersionDialog open={versionOpen} onOpenChange={setVersionOpen} currentItem={versionItem} spaceId={spaceId} />
     </div>
   )
