@@ -117,3 +117,4 @@ async fn existing_rows_backfilled_to_test_space() {
     let count: i64 = row.try_get_by_index(0).expect("read count");
     assert_eq!(count, 1, "exactly one test space row expected");
 }
+
