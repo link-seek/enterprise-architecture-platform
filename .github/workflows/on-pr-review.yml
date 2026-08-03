@@ -27,10 +27,10 @@ jobs:
       needs.pr-review.result == 'success' &&
       github.event.pull_request.user.login == 'app/link-seek-bot' &&
       github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
-    runs-on: ubuntu-latest
     steps:
       - uses: actions/create-github-app-token@v1
         id: app-token
