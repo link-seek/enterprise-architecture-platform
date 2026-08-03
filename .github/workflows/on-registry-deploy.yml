@@ -69,3 +69,4 @@ jobs:
       APP_SEED_ADMIN_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
       SMOKE_TEST_EMAIL: ${{ secrets.APP_SEED_ADMIN_EMAIL }}
       SMOKE_TEST_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
