@@ -3,13 +3,22 @@ name: PR CI
 on:
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        description: 'PR number to run CI for'
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   pr-ci:
-    uses: link-seek/issue-resolver/.github/workflows/pr-ci.yml@main
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' && inputs.pr-number != '')
+    uses: link-seek/issue-resolver-l1/.github/workflows/pr-ci.yml@main
     with:
       enable-backend-tests: true
       enable-frontend-tests: true
