@@ -99,7 +99,7 @@ export default function UsersPage() {
     confirmRole.newRole !== 'admin'
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-4 md:p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">用户管理</h1>
         <Button onClick={() => setDialogOpen(true)}>

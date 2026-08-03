@@ -52,7 +52,7 @@ export default function Capabilities() {
   const { data, loading, error } = useQuery<{ businessCapabilitiesBySpace: Capability[] }>(GET_CAPABILITIES, { variables: { spaceId }, skip: !spaceId })
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-4 md:p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">业务能力</h1>
         {canEdit && (
@@ -167,7 +167,7 @@ function CapabilityCrudDialog({ open, onOpenChange, editing, spaceId }: {
           {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
           <div className="space-y-2"><Label>名称</Label><Input value={name} onChange={e => setName(e.target.value)} /></div>
           <div className="space-y-2"><Label>描述</Label><Input value={description} onChange={e => setDescription(e.target.value)} /></div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label>层级</Label>
               <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={level} onChange={e => setLevel(e.target.value)}>
