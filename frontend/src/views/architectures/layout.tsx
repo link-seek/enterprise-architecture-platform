@@ -26,11 +26,6 @@ function SidebarContent({ onNavigate, spaceName, spaceId }: { onNavigate?: () =>
   const user = useAuthStore((s) => s.user)
   const { canEdit } = useSpaceMembership(spaceId)
 
-  const { data: spaceData } = useQuery<{ spaceById: Space | null }>(GET_SPACE, {
-    variables: { id: spaceId },
-    skip: !spaceId,
-  })
-  const spaceName = spaceData?.spaceById?.name ?? '空间'
   const base = spaceId ? `/spaces/${spaceId}/architectures` : '/architectures'
   const menuItems = [
     { path: `${base}/value-streams`, label: '价值流', icon: LayoutDashboard },

@@ -26,6 +26,8 @@ interface ValueStreamsQuery {
   valueStreamsBySpace?: ValueStream[]
 }
 
+const EMPTY_VALUE_STREAMS: ValueStream[] = []
+
 type BadgeVariant = NonNullable<BadgeProps['variant']>
 
 function statusColor(status: string): BadgeVariant {
@@ -222,7 +224,7 @@ export default function ValueStreams() {
           {data && (
             <>
               <ValueStreamList
-                nodes={data.valueStreamsBySpace ?? []}
+                nodes={data.valueStreamsBySpace ?? EMPTY_VALUE_STREAMS}
                 canEdit={canEdit}
                 isMobile={isMobile}
                 detailBase={detailBase}

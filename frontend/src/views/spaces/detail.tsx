@@ -47,7 +47,7 @@ export default function SpaceDetail() {
   const [archive, { loading: archiveLoading }] = useMutation(ARCHIVE_SPACE, {
     refetchQueries: [{ query: GET_SPACES }],
     onCompleted: () => navigate('/spaces'),
-    onError: (e) => setArchiveError(extractFriendlyError(e)),
+    onError: (e) => { console.error('归档空间失败:', e); setArchiveError(extractFriendlyError(e)) },
   })
 
   const [setVisibility, { loading: visibilityLoading }] = useMutation(SET_SPACE_VISIBILITY, {
@@ -61,8 +61,8 @@ export default function SpaceDetail() {
 
   const space = data?.spaceById
 
-  const handleEdit = useCallback(() => setEditOpen(true), [])
-  const handleMembers = useCallback(() => setMembersOpen(true), [])
+  const handleEdit = useCallback(() => { setArchiveError(null); setEditOpen(true) }, [])
+  const handleMembers = useCallback(() => { setArchiveError(null); setMembersOpen(true) }, [])
   const handleArchive = useCallback(() => { setArchiveError(null); setConfirmArchive(true) }, [])
   const handleVisibility = useCallback(() => {
     if (!space) return
@@ -145,7 +145,7 @@ export default function SpaceDetail() {
 
       <main className="flex-1 container mx-auto max-w-6xl px-4 py-10">
         {archiveError && (
-          <div className="mb-4 flex items-start justify-between gap-3 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+          <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
             <span>{archiveError}</span>
             <button
               type="button"

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Plus, Pencil, Trash2, Loader2, MoreVertical } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -108,7 +108,7 @@ function CapabilityList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
           <TableHead>成熟度</TableHead>
           <TableHead>业务价值</TableHead>
           <TableHead>状态</TableHead>
-          <TableHead>操作</TableHead>
+          {canEdit && <TableHead>操作</TableHead>}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -119,20 +119,18 @@ function CapabilityList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
             <TableCell>{cap.maturity}</TableCell>
             <TableCell>{cap.businessValue}</TableCell>
             <TableCell><Badge variant="outline">{cap.status}</Badge></TableCell>
-            <TableCell>
-              <div className="flex gap-1">
-                {canEdit && (
-                  <>
-                    <Button variant="ghost" size="sm" aria-label="编辑" onClick={() => onEdit(cap)}>
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="sm" aria-label="删除" onClick={() => onDelete(cap)}>
-                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                    </Button>
-                  </>
-                )}
-              </div>
-            </TableCell>
+            {canEdit && (
+              <TableCell>
+                <div className="flex gap-1">
+                  <Button variant="ghost" size="sm" aria-label="编辑" onClick={() => onEdit(cap)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="sm" aria-label="删除" onClick={() => onDelete(cap)}>
+                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                  </Button>
+                </div>
+              </TableCell>
+            )}
           </TableRow>
         ))}
       </TableBody>
@@ -149,8 +147,8 @@ export default function Capabilities() {
   const [deleting, setDeleting] = useState<Capability | null>(null)
   const { data, loading, error } = useQuery<CapabilitiesQuery>(GET_CAPABILITIES, { variables: { spaceId }, skip: !spaceId })
 
-  const handleEdit = (cap: Capability) => { setEditing(cap); setDialogOpen(true) }
-  const handleDelete = (cap: Capability) => setDeleting(cap)
+  const handleEdit = useCallback((cap: Capability) => { setEditing(cap); setDialogOpen(true) }, [])
+  const handleDelete = useCallback((cap: Capability) => setDeleting(cap), [])
 
   return (
     <div className="p-4 md:p-6 space-y-4">
