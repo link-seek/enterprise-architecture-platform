@@ -286,3 +286,48 @@ impl std::str::FromStr for SpaceVisibility {
         }
     }
 }
+
+/// Categorises an application component by its architectural role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationComponentType {
+    #[sea_orm(string_value = "workflow")]
+    Workflow,
+    #[sea_orm(string_value = "script")]
+    Script,
+    #[sea_orm(string_value = "service")]
+    Service,
+    #[sea_orm(string_value = "ui")]
+    Ui,
+}
+
+/// Lifecycle state of an application component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationComponentStatus {
+    #[sea_orm(string_value = "draft")]
+    Draft,
+    #[sea_orm(string_value = "active")]
+    Active,
+    #[sea_orm(string_value = "deprecated")]
+    Deprecated,
+}
+
+/// How an application process is invoked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationProcessTrigger {
+    #[sea_orm(string_value = "push")]
+    Push,
+    #[sea_orm(string_value = "pull_request")]
+    PullRequest,
+    #[sea_orm(string_value = "schedule")]
+    Schedule,
+    #[sea_orm(string_value = "manual")]
+    Manual,
+    #[sea_orm(string_value = "webhook")]
+    Webhook,
+}

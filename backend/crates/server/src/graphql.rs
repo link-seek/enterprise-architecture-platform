@@ -10,6 +10,8 @@ use user_management::infrastructure::persistence::entities::{
 use business_architecture::infrastructure::persistence::entities::{
     business_capability, business_process, capability_process, process_step, stage_capability,
     value_stream, value_stream_stage, space, space_member,
+    application_component, application_process, application_process_step,
+    process_realization, capability_realization, step_realization,
 };
 use business_architecture::application::value_stream_service::ValueStreamService;
 use business_architecture::application::space_service::SpaceService;
@@ -25,6 +27,7 @@ use shared_common::enums::{SpaceRole, SpaceVisibility};
 use shared_common::enums::{
     BusinessValueRating, CapabilityLevel, CapabilityStatus, CostRating,
     LifecycleStatus, MaturityLevel,
+    ApplicationComponentType, ApplicationComponentStatus, ApplicationProcessTrigger,
 };
 
 pub type GraphqlSchema = async_graphql::dynamic::Schema;
@@ -69,6 +72,12 @@ const ADMIN_READ_ENTITIES: &[&str] = &[
     "value_stream_stages",
     "capability_processes",
     "stage_capabilities",
+    "application_components",
+    "application_processes",
+    "application_process_steps",
+    "process_realizations",
+    "capability_realizations",
+    "step_realizations",
 ];
 
 /// Fields hidden from all users (including Admin) in queries.
@@ -1303,6 +1312,59 @@ async fn space_of_stage(db: &DatabaseConnection, stage_id: Uuid) -> async_graphq
     space_of_value_stream(db, stage.value_stream_id).await
 }
 
+/// Resolve the `space_id` of an application component.
+async fn space_of_application_component(
+    db: &DatabaseConnection,
+    id: Uuid,
+) -> async_graphql::Result<Uuid> {
+    use sea_orm::EntityTrait;
+    let c = application_component::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Application component not found."))?;
+    Ok(c.space_id)
+}
+
+/// Resolve the `space_id` of an application process.
+async fn space_of_application_process(
+    db: &DatabaseConnection,
+    id: Uuid,
+) -> async_graphql::Result<Uuid> {
+    use sea_orm::EntityTrait;
+    let p = application_process::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Application process not found."))?;
+    Ok(p.space_id)
+}
+
+/// Resolve the `space_id` of an application process step (via its process).
+async fn space_of_application_process_step(
+    db: &DatabaseConnection,
+    id: Uuid,
+) -> async_graphql::Result<Uuid> {
+    use sea_orm::EntityTrait;
+    let step = application_process_step::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Application process step not found."))?;
+    space_of_application_process(db, step.process_id).await
+}
+
+/// Resolve the `space_id` of a business process step (via its process).
+async fn space_of_process_step(db: &DatabaseConnection, step_id: Uuid) -> async_graphql::Result<Uuid> {
+    use sea_orm::EntityTrait;
+    let step = process_step::Entity::find_by_id(step_id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Process step not found."))?;
+    space_of_process(db, step.process_id).await
+}
+
 /// Parse an optional `[String]` GraphQL argument into a `StringVec`.
 fn parse_string_vec_arg(
     ctx: &async_graphql::dynamic::ResolverContext<'_>,
@@ -1820,6 +1882,728 @@ struct SpaceMemberWithUser {
     user_id: String,
     name: String,
     role: String,
+}
+
+// ============================================================================
+// Custom Application Architecture Domain Mutations (P2+P3, space-level ACL)
+// ============================================================================
+
+fn register_application_component_domain_mutations(builder: &mut Builder) {
+    use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, TypeRef};
+    use sea_orm::ActiveValue::{NotSet, Set};
+    use sea_orm::{EntityTrait, ActiveModelTrait};
+
+    // ── applicationComponentCreate ───────────────────────────────────
+    let create = Field::new(
+        "applicationComponentCreate",
+        TypeRef::named_nn("ApplicationComponents"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Create)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let name = ctx.args.try_get("name")?.string()?.to_owned();
+                let component_type = parse_enum::<ApplicationComponentType>(
+                    ctx.args.try_get("type")?.enum_name()?,
+                )?;
+                let repo = ctx.args.try_get("repo")?.string()?.to_owned();
+                let path = ctx.args.try_get("path")?.string()?.to_owned();
+                let technology = ctx
+                    .args
+                    .get("technology")
+                    .and_then(|v| v.string().ok())
+                    .map(|s| s.to_owned());
+                let status = parse_enum::<ApplicationComponentStatus>(
+                    ctx.args.try_get("status")?.enum_name()?,
+                )?;
+                let version = ctx.args.try_get("version")?.string()?.to_owned();
+                let owner_id = ctx
+                    .args
+                    .get("ownerId")
+                    .and_then(|v| v.string().ok())
+                    .and_then(|s| Uuid::parse_str(s).ok());
+
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                let now = chrono::Utc::now();
+                let am = application_component::ActiveModel {
+                    id: Set(Uuid::now_v7()),
+                    name: Set(name),
+                    r#type: Set(component_type),
+                    repo: Set(repo),
+                    path: Set(path),
+                    technology: Set(technology),
+                    status: Set(status),
+                    version: Set(version),
+                    owner_id: Set(owner_id),
+                    created_at: Set(now),
+                    updated_at: Set(now),
+                    deleted_at: NotSet,
+                    space_id: Set(space_id),
+                };
+                let model = am
+                    .insert(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("type", TypeRef::named_nn("ApplicationComponentTypeEnum")))
+    .argument(InputValue::new("repo", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("path", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("technology", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("status", TypeRef::named_nn("ApplicationComponentStatusEnum")))
+    .argument(InputValue::new("version", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    // ── applicationComponentUpdate ───────────────────────────────────
+    let update = Field::new(
+        "applicationComponentUpdate",
+        TypeRef::named_nn("ApplicationComponents"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Update)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let existing = application_component::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Application component not found."))?;
+                ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+
+                let mut am: application_component::ActiveModel = existing.into();
+                if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) {
+                    am.name = Set(v.to_owned());
+                }
+                if let Some(v) = get_enum_arg(&ctx, "type") {
+                    am.r#type = Set(parse_enum::<ApplicationComponentType>(&v)?);
+                }
+                if let Some(v) = ctx.args.get("repo").and_then(|v| v.string().ok()) {
+                    am.repo = Set(v.to_owned());
+                }
+                if let Some(v) = ctx.args.get("path").and_then(|v| v.string().ok()) {
+                    am.path = Set(v.to_owned());
+                }
+                match ctx.args.get("technology") {
+                    Some(v) if v.is_null() => am.technology = Set(None),
+                    Some(v) => {
+                        if let Ok(s) = v.string() {
+                            am.technology = Set(Some(s.to_owned()));
+                        }
+                    }
+                    None => {}
+                }
+                if let Some(v) = get_enum_arg(&ctx, "status") {
+                    am.status = Set(parse_enum::<ApplicationComponentStatus>(&v)?);
+                }
+                if let Some(v) = ctx.args.get("version").and_then(|v| v.string().ok()) {
+                    am.version = Set(v.to_owned());
+                }
+                match ctx.args.get("ownerId") {
+                    Some(v) if v.is_null() => am.owner_id = Set(None),
+                    Some(v) => {
+                        if let Ok(s) = v.string() {
+                            am.owner_id = Set(Uuid::parse_str(s).ok());
+                        }
+                    }
+                    None => {}
+                }
+                am.updated_at = Set(chrono::Utc::now());
+                let model = am
+                    .update(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("type", TypeRef::named("ApplicationComponentTypeEnum")))
+    .argument(InputValue::new("repo", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("path", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("technology", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("status", TypeRef::named("ApplicationComponentStatusEnum")))
+    .argument(InputValue::new("version", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(update);
+
+    // ── applicationComponentDelete ───────────────────────────────────
+    let delete = Field::new(
+        "applicationComponentDelete",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Delete)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let existing = application_component::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Application component not found."))?;
+                ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+
+                application_component::Entity::delete_by_id(id)
+                    .exec(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+}
+
+fn register_application_process_domain_mutations(builder: &mut Builder) {
+    use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, TypeRef};
+    use sea_orm::ActiveValue::{NotSet, Set};
+    use sea_orm::{EntityTrait, ActiveModelTrait};
+
+    // ── applicationProcessCreate ─────────────────────────────────────
+    let create = Field::new(
+        "applicationProcessCreate",
+        TypeRef::named_nn("ApplicationProcesses"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Create)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let name = ctx.args.try_get("name")?.string()?.to_owned();
+                let description = ctx
+                    .args
+                    .get("description")
+                    .and_then(|v| v.string().ok())
+                    .map(|s| s.to_owned())
+                    .unwrap_or_default();
+                let trigger = parse_enum::<ApplicationProcessTrigger>(
+                    ctx.args.try_get("trigger")?.enum_name()?,
+                )?;
+                let inputs = parse_string_vec_arg(&ctx, "inputs")?;
+                let outputs = parse_string_vec_arg(&ctx, "outputs")?;
+                let timeout: Option<i32> = ctx
+                    .args
+                    .get("timeout")
+                    .and_then(|v| v.i64().ok())
+                    .map(|v| v as i32);
+                let retry: Option<i32> = ctx
+                    .args
+                    .get("retry")
+                    .and_then(|v| v.i64().ok())
+                    .map(|v| v as i32);
+
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                let now = chrono::Utc::now();
+                let am = application_process::ActiveModel {
+                    id: Set(Uuid::now_v7()),
+                    name: Set(name),
+                    description: Set(description),
+                    trigger: Set(trigger),
+                    inputs: Set(inputs),
+                    outputs: Set(outputs),
+                    timeout: Set(timeout),
+                    retry: Set(retry),
+                    status: Set(LifecycleStatus::Active),
+                    logical_id: Set(Uuid::now_v7()),
+                    business_version: Set("v1.0".to_owned()),
+                    created_at: Set(now),
+                    updated_at: Set(now),
+                    deleted_at: NotSet,
+                    space_id: Set(space_id),
+                };
+                let model = am
+                    .insert(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("trigger", TypeRef::named_nn("ApplicationProcessTriggerEnum")))
+    .argument(InputValue::new("inputs", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("outputs", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("timeout", TypeRef::named(TypeRef::INT)))
+    .argument(InputValue::new("retry", TypeRef::named(TypeRef::INT)));
+    builder.mutations.push(create);
+
+    // ── applicationProcessUpdate ─────────────────────────────────────
+    let update = Field::new(
+        "applicationProcessUpdate",
+        TypeRef::named_nn("ApplicationProcesses"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Update)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let existing = application_process::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Application process not found."))?;
+                ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+
+                let mut am: application_process::ActiveModel = existing.into();
+                if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) {
+                    am.name = Set(v.to_owned());
+                }
+                if let Some(v) = ctx.args.get("description").and_then(|v| v.string().ok()) {
+                    am.description = Set(v.to_owned());
+                }
+                if let Some(v) = get_enum_arg(&ctx, "trigger") {
+                    am.trigger = Set(parse_enum::<ApplicationProcessTrigger>(&v)?);
+                }
+                if ctx.args.get("inputs").is_some() {
+                    am.inputs = Set(parse_string_vec_arg(&ctx, "inputs")?);
+                }
+                if ctx.args.get("outputs").is_some() {
+                    am.outputs = Set(parse_string_vec_arg(&ctx, "outputs")?);
+                }
+                match ctx.args.get("timeout") {
+                    Some(v) if v.is_null() => am.timeout = Set(None),
+                    Some(v) => {
+                        if let Ok(n) = v.i64() {
+                            am.timeout = Set(Some(n as i32));
+                        }
+                    }
+                    None => {}
+                }
+                match ctx.args.get("retry") {
+                    Some(v) if v.is_null() => am.retry = Set(None),
+                    Some(v) => {
+                        if let Ok(n) = v.i64() {
+                            am.retry = Set(Some(n as i32));
+                        }
+                    }
+                    None => {}
+                }
+                if let Some(v) = get_enum_arg(&ctx, "status") {
+                    am.status = Set(parse_enum::<LifecycleStatus>(&v)?);
+                }
+                am.updated_at = Set(chrono::Utc::now());
+                let model = am
+                    .update(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("trigger", TypeRef::named("ApplicationProcessTriggerEnum")))
+    .argument(InputValue::new("inputs", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("outputs", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("timeout", TypeRef::named(TypeRef::INT)))
+    .argument(InputValue::new("retry", TypeRef::named(TypeRef::INT)))
+    .argument(InputValue::new("status", TypeRef::named("LifecycleStatusEnum")));
+    builder.mutations.push(update);
+
+    // ── applicationProcessDelete ─────────────────────────────────────
+    let delete = Field::new(
+        "applicationProcessDelete",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Delete)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let existing = application_process::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Application process not found."))?;
+                ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+
+                application_process::Entity::delete_by_id(id)
+                    .exec(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+}
+
+fn register_application_process_step_domain_mutations(builder: &mut Builder) {
+    use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, TypeRef};
+    use sea_orm::ActiveValue::{NotSet, Set};
+    use sea_orm::{EntityTrait, ActiveModelTrait};
+
+    // ── applicationProcessStepCreate ─────────────────────────────────
+    let create = Field::new(
+        "applicationProcessStepCreate",
+        TypeRef::named_nn("ApplicationProcessSteps"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Create)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+
+                let process_id = parse_uuid_arg(&ctx, "processId")?;
+                let space_id = space_of_application_process(db, process_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                let name = ctx.args.try_get("name")?.string()?.to_owned();
+                let action = ctx.args.try_get("action")?.string()?.to_owned();
+                let description = ctx
+                    .args
+                    .get("description")
+                    .and_then(|v| v.string().ok())
+                    .map(|s| s.to_owned())
+                    .unwrap_or_default();
+                let sequence_order: i32 = ctx.args.try_get("sequenceOrder")?.i64()? as i32;
+                let inputs = parse_string_vec_arg(&ctx, "inputs")?;
+                let outputs = parse_string_vec_arg(&ctx, "outputs")?;
+                let dependencies = parse_string_vec_arg(&ctx, "dependencies")?;
+
+                let now = chrono::Utc::now();
+                let am = application_process_step::ActiveModel {
+                    id: Set(Uuid::now_v7()),
+                    name: Set(name),
+                    action: Set(action),
+                    description: Set(description),
+                    sequence_order: Set(sequence_order),
+                    inputs: Set(inputs),
+                    outputs: Set(outputs),
+                    dependencies: Set(dependencies),
+                    process_id: Set(process_id),
+                    created_at: Set(now),
+                    updated_at: Set(now),
+                    deleted_at: NotSet,
+                };
+                let model = am
+                    .insert(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("processId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("action", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("sequenceOrder", TypeRef::named_nn(TypeRef::INT)))
+    .argument(InputValue::new("inputs", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("outputs", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("dependencies", TypeRef::named_list(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    // ── applicationProcessStepUpdate ─────────────────────────────────
+    let update = Field::new(
+        "applicationProcessStepUpdate",
+        TypeRef::named_nn("ApplicationProcessSteps"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Update)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let existing = application_process_step::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Application process step not found."))?;
+                let space_id = space_of_application_process(db, existing.process_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                let mut am: application_process_step::ActiveModel = existing.into();
+                if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) {
+                    am.name = Set(v.to_owned());
+                }
+                if let Some(v) = ctx.args.get("action").and_then(|v| v.string().ok()) {
+                    am.action = Set(v.to_owned());
+                }
+                if let Some(v) = ctx.args.get("description").and_then(|v| v.string().ok()) {
+                    am.description = Set(v.to_owned());
+                }
+                if let Some(v) = ctx.args.get("sequenceOrder").and_then(|v| v.i64().ok()).map(|v| v as i32) {
+                    am.sequence_order = Set(v);
+                }
+                if ctx.args.get("inputs").is_some() {
+                    am.inputs = Set(parse_string_vec_arg(&ctx, "inputs")?);
+                }
+                if ctx.args.get("outputs").is_some() {
+                    am.outputs = Set(parse_string_vec_arg(&ctx, "outputs")?);
+                }
+                if ctx.args.get("dependencies").is_some() {
+                    am.dependencies = Set(parse_string_vec_arg(&ctx, "dependencies")?);
+                }
+                am.updated_at = Set(chrono::Utc::now());
+                let model = am
+                    .update(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("action", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("sequenceOrder", TypeRef::named(TypeRef::INT)))
+    .argument(InputValue::new("inputs", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("outputs", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("dependencies", TypeRef::named_list(TypeRef::STRING)));
+    builder.mutations.push(update);
+
+    // ── applicationProcessStepDelete ─────────────────────────────────
+    let delete = Field::new(
+        "applicationProcessStepDelete",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Delete)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let existing = application_process_step::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Application process step not found."))?;
+                let space_id = space_of_application_process(db, existing.process_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                application_process_step::Entity::delete_by_id(id)
+                    .exec(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+}
+
+fn register_realization_domain_mutations(builder: &mut Builder) {
+    use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, TypeRef};
+    use sea_orm::ActiveValue::Set;
+    use sea_orm::{EntityTrait, ActiveModelTrait};
+
+    // ── processRealizationCreate ─────────────────────────────────────
+    // Join table: business process and application process must share a space.
+    let create = Field::new(
+        "processRealizationCreate",
+        TypeRef::named_nn("ProcessRealizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Create)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+
+                let business_process_id = parse_uuid_arg(&ctx, "businessProcessId")?;
+                let application_process_id = parse_uuid_arg(&ctx, "applicationProcessId")?;
+                let bp_space = space_of_process(db, business_process_id).await?;
+                let ap_space = space_of_application_process(db, application_process_id).await?;
+                if bp_space != ap_space {
+                    return Err(async_graphql::Error::new(
+                        "Business process and application process must belong to the same space.",
+                    ));
+                }
+                ensure_space_edit_access(&ctx, db, bp_space).await?;
+
+                let am = process_realization::ActiveModel {
+                    business_process_id: Set(business_process_id),
+                    application_process_id: Set(application_process_id),
+                };
+                let model = am
+                    .insert(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("businessProcessId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("applicationProcessId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    // ── processRealizationDelete ─────────────────────────────────────
+    let delete = Field::new(
+        "processRealizationDelete",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Delete)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let business_process_id = parse_uuid_arg(&ctx, "businessProcessId")?;
+                let application_process_id = parse_uuid_arg(&ctx, "applicationProcessId")?;
+
+                let existing = process_realization::Entity::find_by_id((business_process_id, application_process_id))
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Process realization link not found."))?;
+                let space_id = space_of_process(db, existing.business_process_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                process_realization::Entity::delete_by_id((business_process_id, application_process_id))
+                    .exec(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("businessProcessId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("applicationProcessId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+
+    // ── capabilityRealizationCreate ──────────────────────────────────
+    // Join table: capability and application component must share a space.
+    let create = Field::new(
+        "capabilityRealizationCreate",
+        TypeRef::named_nn("CapabilityRealizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Create)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+
+                let capability_id = parse_uuid_arg(&ctx, "capabilityId")?;
+                let application_component_id = parse_uuid_arg(&ctx, "applicationComponentId")?;
+                let cap_space = space_of_capability(db, capability_id).await?;
+                let ac_space = space_of_application_component(db, application_component_id).await?;
+                if cap_space != ac_space {
+                    return Err(async_graphql::Error::new(
+                        "Capability and application component must belong to the same space.",
+                    ));
+                }
+                ensure_space_edit_access(&ctx, db, cap_space).await?;
+
+                let am = capability_realization::ActiveModel {
+                    capability_id: Set(capability_id),
+                    application_component_id: Set(application_component_id),
+                };
+                let model = am
+                    .insert(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("applicationComponentId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    // ── capabilityRealizationDelete ──────────────────────────────────
+    let delete = Field::new(
+        "capabilityRealizationDelete",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Delete)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let capability_id = parse_uuid_arg(&ctx, "capabilityId")?;
+                let application_component_id = parse_uuid_arg(&ctx, "applicationComponentId")?;
+
+                let existing = capability_realization::Entity::find_by_id((capability_id, application_component_id))
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Capability realization link not found."))?;
+                let space_id = space_of_capability(db, existing.capability_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                capability_realization::Entity::delete_by_id((capability_id, application_component_id))
+                    .exec(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("applicationComponentId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+
+    // ── stepRealizationCreate ────────────────────────────────────────
+    // Join table: process step and application process step must share a space.
+    let create = Field::new(
+        "stepRealizationCreate",
+        TypeRef::named_nn("StepRealizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Create)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+
+                let process_step_id = parse_uuid_arg(&ctx, "processStepId")?;
+                let application_process_step_id = parse_uuid_arg(&ctx, "applicationProcessStepId")?;
+                let ps_space = space_of_process_step(db, process_step_id).await?;
+                let aps_space = space_of_application_process_step(db, application_process_step_id).await?;
+                if ps_space != aps_space {
+                    return Err(async_graphql::Error::new(
+                        "Process step and application process step must belong to the same space.",
+                    ));
+                }
+                ensure_space_edit_access(&ctx, db, ps_space).await?;
+
+                let am = step_realization::ActiveModel {
+                    process_step_id: Set(process_step_id),
+                    application_process_step_id: Set(application_process_step_id),
+                };
+                let model = am
+                    .insert(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("processStepId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("applicationProcessStepId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    // ── stepRealizationDelete ────────────────────────────────────────
+    let delete = Field::new(
+        "stepRealizationDelete",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Delete)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let process_step_id = parse_uuid_arg(&ctx, "processStepId")?;
+                let application_process_step_id = parse_uuid_arg(&ctx, "applicationProcessStepId")?;
+
+                let existing = step_realization::Entity::find_by_id((process_step_id, application_process_step_id))
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Step realization link not found."))?;
+                let space_id = space_of_process_step(db, existing.process_step_id).await?;
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                step_realization::Entity::delete_by_id((process_step_id, application_process_step_id))
+                    .exec(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("processStepId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("applicationProcessStepId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
 }
 
 fn register_space_scoped_queries(builder: &mut Builder) {
@@ -2425,6 +3209,272 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     )
     .argument(InputValue::new("stageId", TypeRef::named_nn(TypeRef::STRING)));
     builder.queries.push(sc_by_stage);
+
+    // ── Application-architecture by-space / by-parent queries ─────────
+    // Non-admin reads of the new P2/P3 entities go through these queries,
+    // which enforce space visibility/membership before returning rows.
+
+    // applicationComponentsBySpace
+    let ac_by_space = Field::new(
+        "applicationComponentsBySpace",
+        TypeRef::named_nn_list_nn("ApplicationComponents"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = application_component::Entity::find()
+                    .filter(application_component::Column::SpaceId.eq(space_id))
+                    .filter(application_component::Column::DeletedAt.is_null())
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(ac_by_space);
+
+    // applicationProcessesBySpace
+    let ap_by_space = Field::new(
+        "applicationProcessesBySpace",
+        TypeRef::named_nn_list_nn("ApplicationProcesses"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = application_process::Entity::find()
+                    .filter(application_process::Column::SpaceId.eq(space_id))
+                    .filter(application_process::Column::DeletedAt.is_null())
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(ap_by_space);
+
+    // applicationProcessStepsByProcess
+    let aps_by_process = Field::new(
+        "applicationProcessStepsByProcess",
+        TypeRef::named_nn_list_nn("ApplicationProcessSteps"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let process_id = parse_uuid_arg(&ctx, "processId")?;
+                let space_id = space_of_application_process(db, process_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = application_process_step::Entity::find()
+                    .filter(application_process_step::Column::ProcessId.eq(process_id))
+                    .filter(application_process_step::Column::DeletedAt.is_null())
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("processId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(aps_by_process);
+
+    // processRealizationsByBusinessProcess
+    let pr_by_bp = Field::new(
+        "processRealizationsByBusinessProcess",
+        TypeRef::named_nn_list_nn("ProcessRealizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let bp_id = parse_uuid_arg(&ctx, "businessProcessId")?;
+                let space_id = space_of_process(db, bp_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = process_realization::Entity::find()
+                    .filter(process_realization::Column::BusinessProcessId.eq(bp_id))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("businessProcessId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(pr_by_bp);
+
+    // processRealizationsByApplicationProcess
+    let pr_by_ap = Field::new(
+        "processRealizationsByApplicationProcess",
+        TypeRef::named_nn_list_nn("ProcessRealizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let ap_id = parse_uuid_arg(&ctx, "applicationProcessId")?;
+                let space_id = space_of_application_process(db, ap_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = process_realization::Entity::find()
+                    .filter(process_realization::Column::ApplicationProcessId.eq(ap_id))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("applicationProcessId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(pr_by_ap);
+
+    // capabilityRealizationsByCapability
+    let cr_by_cap = Field::new(
+        "capabilityRealizationsByCapability",
+        TypeRef::named_nn_list_nn("CapabilityRealizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let cap_id = parse_uuid_arg(&ctx, "capabilityId")?;
+                let space_id = space_of_capability(db, cap_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = capability_realization::Entity::find()
+                    .filter(capability_realization::Column::CapabilityId.eq(cap_id))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(cr_by_cap);
+
+    // capabilityRealizationsByApplicationComponent
+    let cr_by_ac = Field::new(
+        "capabilityRealizationsByApplicationComponent",
+        TypeRef::named_nn_list_nn("CapabilityRealizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let ac_id = parse_uuid_arg(&ctx, "applicationComponentId")?;
+                let space_id = space_of_application_component(db, ac_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = capability_realization::Entity::find()
+                    .filter(capability_realization::Column::ApplicationComponentId.eq(ac_id))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("applicationComponentId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(cr_by_ac);
+
+    // stepRealizationsByProcessStep
+    let sr_by_ps = Field::new(
+        "stepRealizationsByProcessStep",
+        TypeRef::named_nn_list_nn("StepRealizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let ps_id = parse_uuid_arg(&ctx, "processStepId")?;
+                let space_id = space_of_process_step(db, ps_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = step_realization::Entity::find()
+                    .filter(step_realization::Column::ProcessStepId.eq(ps_id))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("processStepId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(sr_by_ps);
+
+    // stepRealizationsByApplicationProcessStep
+    let sr_by_aps = Field::new(
+        "stepRealizationsByApplicationProcessStep",
+        TypeRef::named_nn_list_nn("StepRealizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let aps_id = parse_uuid_arg(&ctx, "applicationProcessStepId")?;
+                let space_id = space_of_application_process_step(db, aps_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = step_realization::Entity::find()
+                    .filter(step_realization::Column::ApplicationProcessStepId.eq(aps_id))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("applicationProcessStepId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(sr_by_aps);
 }
 
 // ============================================================================
@@ -2463,6 +3513,12 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     register_entity::<value_stream_stage::Entity>(&mut builder);   // queries only
     register_entity::<capability_process::Entity>(&mut builder);   // queries only
     register_entity::<stage_capability::Entity>(&mut builder);     // queries only
+    register_entity::<application_component::Entity>(&mut builder);  // queries only
+    register_entity::<application_process::Entity>(&mut builder);   // queries only
+    register_entity::<application_process_step::Entity>(&mut builder); // queries only
+    register_entity::<process_realization::Entity>(&mut builder);   // queries only
+    register_entity::<capability_realization::Entity>(&mut builder); // queries only
+    register_entity::<step_realization::Entity>(&mut builder);      // queries only
 
     // ── Spaces (reuses `organizations` table) + membership ─────────────
     // Queries are admin-only via the auto-generated query (see ADMIN_READ_ENTITIES);
@@ -2483,6 +3539,12 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
 
     // ── Custom domain mutations for sub-entities (space-level ACL) ────
     register_sub_entity_domain_mutations(&mut builder);
+
+    // ── Custom domain mutations for application architecture (P2) ────
+    register_application_component_domain_mutations(&mut builder);
+    register_application_process_domain_mutations(&mut builder);
+    register_application_process_step_domain_mutations(&mut builder);
+    register_realization_domain_mutations(&mut builder);
 
     // ── Custom domain mutations for Space + membership ────────────────
     register_space_domain_mutations(&mut builder);
@@ -2512,6 +3574,18 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
         .register_entity_dataloader_one_to_many(capability_process::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_one(stage_capability::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_many(stage_capability::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(application_component::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(application_component::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(application_process::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(application_process::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(application_process_step::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(application_process_step::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(process_realization::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(process_realization::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(capability_realization::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(capability_realization::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(step_realization::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(step_realization::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_one(space::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_many(space::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_one(space_member::Entity, tokio::spawn)
@@ -2526,6 +3600,9 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     builder.register_enumeration::<CostRating>();
     builder.register_enumeration::<CapabilityStatus>();
     builder.register_enumeration::<LifecycleStatus>();
+    builder.register_enumeration::<ApplicationComponentType>();
+    builder.register_enumeration::<ApplicationComponentStatus>();
+    builder.register_enumeration::<ApplicationProcessTrigger>();
 
     // SpaceVisibility is used as a field type on the `Organizations` entity
     // (the `visibility` column). If the enum is not registered, seaography
