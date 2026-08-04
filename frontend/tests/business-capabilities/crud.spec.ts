@@ -17,7 +17,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
 
   test('Happy Path - Create Business Capability', async ({ page }) => {
     // Click "新建业务能力" button
-    const createButton = page.getByRole('button', { name: /新建业务能力|New Business Capability/ });
+    const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await expect(createButton).toBeVisible();
     await createButton.click();
     
@@ -64,7 +64,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
 
   test('Happy Path - Read Business Capability @smoke', async ({ page }) => {
     // First create a capability to read
-    const createButton = page.getByRole('button', { name: /新建业务能力|New Business Capability/ });
+    const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('读取测试能力');
@@ -93,7 +93,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
 
   test('Happy Path - Update Business Capability', async ({ page }) => {
     // Create a capability to update
-    const createButton = page.getByRole('button', { name: /新建业务能力|New Business Capability/ });
+    const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('更新前名称');
@@ -151,7 +151,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
 
   test('Happy Path - Delete Business Capability', async ({ page }) => {
     // Create a capability to delete
-    const createButton = page.getByRole('button', { name: /新建业务能力|New Business Capability/ });
+    const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('待删除能力');
@@ -183,7 +183,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
 
   test('Edge Case - Form Validation', async ({ page }) => {
     // Click "新建业务能力" button
-    const createButton = page.getByRole('button', { name: /新建业务能力|New Business Capability/ });
+    const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
     await expect(page.getByRole('dialog')).toBeVisible();
     
@@ -222,7 +222,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
 
   test('Full CRUD Cycle', async ({ page }) => {
     // Create
-    const createButton = page.getByRole('button', { name: /新建业务能力|New Business Capability/ });
+    const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('完整CRUD测试');

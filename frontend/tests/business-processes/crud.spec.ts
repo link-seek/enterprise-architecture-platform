@@ -17,7 +17,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
 
   test('Happy Path - Create Business Process', async ({ page }) => {
     // Click "新建业务流程" button
-    const createButton = page.getByRole('button', { name: /新建业务流程|New Business Process/ });
+    const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await expect(createButton).toBeVisible();
     await createButton.click();
     
@@ -73,7 +73,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
 
   test('Happy Path - Read Business Process @smoke', async ({ page }) => {
     // Create a process to read
-    const createButton = page.getByRole('button', { name: /新建业务流程|New Business Process/ });
+    const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('读取测试流程');
@@ -121,7 +121,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
 
   test('Happy Path - Update Business Process', async ({ page }) => {
     // Create a process to update
-    const createButton = page.getByRole('button', { name: /新建业务流程|New Business Process/ });
+    const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('更新前流程');
@@ -207,7 +207,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
 
   test('Happy Path - Delete Business Process', async ({ page }) => {
     // Create a process to delete
-    const createButton = page.getByRole('button', { name: /新建业务流程|New Business Process/ });
+    const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('待删除流程');
@@ -239,7 +239,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
 
   test('Edge Case - Numeric Input Validation', async ({ page }) => {
     // Click "新建业务流程" button
-    const createButton = page.getByRole('button', { name: /新建业务流程|New Business Process/ });
+    const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
     await expect(page.getByRole('dialog')).toBeVisible();
     
@@ -295,7 +295,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
 
   test('Full CRUD Cycle with Numeric Fields', async ({ page }) => {
     // Create
-    const createButton = page.getByRole('button', { name: /新建业务流程|New Business Process/ });
+    const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('完整CRUD流程');

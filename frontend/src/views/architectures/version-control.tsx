@@ -169,8 +169,8 @@ export function CreateVersionDialog({ open, onOpenChange, currentItem, spaceId }
             新版本 <Badge>{newVersion}</Badge> 将成为 active。
           </p>
           <div className="space-y-2">
-            <Label>新版本号</Label>
-            <Input value={newVersion} onChange={e => setNewVersion(e.target.value)} placeholder="v2.0" />
+            <Label htmlFor="new-version-input">新版本号</Label>
+            <Input id="new-version-input" value={newVersion} onChange={e => setNewVersion(e.target.value)} placeholder="v2.0" />
           </div>
         </div>
         <DialogFooter>
