@@ -62,6 +62,18 @@ export const router = createBrowserRouter([
             lazy: async () => ({ Component: (await import('@/views/architectures/processes')).default }),
           },
           {
+            path: 'applications',
+            lazy: async () => ({ Component: (await import('@/views/architectures/applications')).default }),
+          },
+          {
+            path: 'application-processes',
+            lazy: async () => ({ Component: (await import('@/views/architectures/application-processes')).default }),
+          },
+          {
+            path: 'realizations',
+            lazy: async () => ({ Component: (await import('@/views/architectures/realizations')).default }),
+          },
+          {
             element: <AdminRoute />,
             children: [
               {
