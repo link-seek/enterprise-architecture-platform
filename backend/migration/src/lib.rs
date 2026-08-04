@@ -37,6 +37,12 @@ mod m20250101_000034_rename_oauth_codes_table;
 mod m20250101_000035_add_automation_level_to_processes;
 mod m20250101_000036_add_maturity_to_processes;
 mod m20250101_000037_add_metrics_to_capabilities;
+mod m20250101_000038_create_application_components;
+mod m20250101_000039_create_application_processes;
+mod m20250101_000040_create_application_process_steps;
+mod m20250101_000041_create_process_realizations;
+mod m20250101_000042_create_capability_realizations;
+mod m20250101_000043_create_step_realizations;
 
 pub struct Migrator;
 
@@ -81,6 +87,12 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000035_add_automation_level_to_processes::Migration),
             Box::new(m20250101_000036_add_maturity_to_processes::Migration),
             Box::new(m20250101_000037_add_metrics_to_capabilities::Migration),
+            Box::new(m20250101_000038_create_application_components::Migration),
+            Box::new(m20250101_000039_create_application_processes::Migration),
+            Box::new(m20250101_000040_create_application_process_steps::Migration),
+            Box::new(m20250101_000041_create_process_realizations::Migration),
+            Box::new(m20250101_000042_create_capability_realizations::Migration),
+            Box::new(m20250101_000043_create_step_realizations::Migration),
         ]
     }
 }
