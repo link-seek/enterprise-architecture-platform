@@ -133,8 +133,8 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: 
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="version-input">版本</Label>
-              <Input id="version-input" value={version} onChange={e => setVersion(e.target.value)} />
+              <Label htmlFor="vs-version">版本</Label>
+              <Input id="vs-version" value={version} onChange={e => setVersion(e.target.value)} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="vs-status">状态</Label>

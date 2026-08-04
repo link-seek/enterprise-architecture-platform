@@ -241,12 +241,12 @@ function ProcessCrudDialog({ open, onOpenChange, editing, spaceId }: {
         <DialogHeader><DialogTitle>{editing ? '编辑流程' : '新建流程'}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-4">
           {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
-          <div className="space-y-2"><Label htmlFor="lbl-d7ec2d">名称</Label><Input id="lbl-d7ec2d" value={name} onChange={e => setName(e.target.value)} /></div>
-          <div className="space-y-2"><Label htmlFor="lbl-3bdd08">描述</Label><Input id="lbl-3bdd08" value={description} onChange={e => setDescription(e.target.value)} /></div>
+          <div className="space-y-2"><Label htmlFor="proc-name">名称</Label><Input id="proc-name" value={name} onChange={e => setName(e.target.value)} /></div>
+          <div className="space-y-2"><Label htmlFor="proc-desc">描述</Label><Input id="proc-desc" value={description} onChange={e => setDescription(e.target.value)} /></div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="space-y-2"><Label htmlFor="lbl-1b45e7">SLA</Label><Input id="lbl-1b45e7" value={sla} onChange={e => setSla(e.target.value)} placeholder="2天" /></div>
-            <div className="space-y-2"><Label htmlFor="lbl-07f722">周期(天)</Label><Input id="lbl-07f722" type="number" value={cycleTime} onChange={e => setCycleTime(e.target.value)} /></div>
-            <div className="space-y-2"><Label htmlFor="lbl-bcbf70">单次成本</Label><Input id="lbl-bcbf70" type="number" value={cost} onChange={e => setCost(e.target.value)} /></div>
+            <div className="space-y-2"><Label htmlFor="proc-sla">SLA</Label><Input id="proc-sla" value={sla} onChange={e => setSla(e.target.value)} placeholder="2天" /></div>
+            <div className="space-y-2"><Label htmlFor="proc-cycle">周期(天)</Label><Input id="proc-cycle" type="number" value={cycleTime} onChange={e => setCycleTime(e.target.value)} /></div>
+            <div className="space-y-2"><Label htmlFor="proc-cost">单次成本</Label><Input id="proc-cost" type="number" value={cost} onChange={e => setCost(e.target.value)} /></div>
           </div>
         </div>
         <DialogFooter>
