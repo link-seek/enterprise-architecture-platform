@@ -63,6 +63,16 @@ impl From<&ValueStream> for value_stream::Model {
 
 impl From<value_stream_stage::Model> for ValueStreamStage {
     fn from(m: value_stream_stage::Model) -> Self {
+        let objective_metrics = m
+            .objective_metrics
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+        let key_metrics = m
+            .key_metrics
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
         ValueStreamStage {
             id: m.id,
             name: m.name,
@@ -70,6 +80,12 @@ impl From<value_stream_stage::Model> for ValueStreamStage {
             input: m.input,
             output: m.output,
             value_stream_id: m.value_stream_id,
+            description: m.description,
+            objective_metrics,
+            entry_criteria: m.entry_criteria,
+            exit_criteria: m.exit_criteria,
+            owner_id: m.owner_id,
+            key_metrics,
             created_at: m.created_at,
             updated_at: m.updated_at,
             deleted_at: m.deleted_at,
@@ -77,6 +93,39 @@ impl From<value_stream_stage::Model> for ValueStreamStage {
     }
 }
 
+impl From<ValueStreamStage> for value_stream_stage::Model {
+    fn from(s: ValueStreamStage) -> Self {
+        let objective_metrics = if s.objective_metrics.is_empty() {
+            None
+        } else {
+            serde_json::to_string(&s.objective_metrics).ok()
+        };
+        let key_metrics = if s.key_metrics.is_empty() {
+            None
+        } else {
+            serde_json::to_string(&s.key_metrics).ok()
+        };
+        value_stream_stage::Model {
+            id: s.id,
+            name: s.name,
+            sequence_order: s.sequence_order,
+            input: s.input,
+            output: s.output,
+            value_stream_id: s.value_stream_id,
+            description: s.description,
+            objective_metrics,
+            entry_criteria: s.entry_criteria,
+            exit_criteria: s.exit_criteria,
+            owner_id: s.owner_id,
+            key_metrics,
+            created_at: s.created_at,
+            updated_at: s.updated_at,
+            deleted_at: s.deleted_at,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct SeaOrmValueStreamRepo {
     db: DatabaseConnection,
 }
@@ -291,7 +340,21 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
         Ok(models.into_iter().map(Into::into).collect())
     }
 
+    async fn find_by_id(&self, id: Uuid) -> Result<Option<ValueStreamStage>, DomainError> {
+        let model = value_stream_stage::Entity::find()
+            .filter(value_stream_stage::Column::Id.eq(id))
+            .filter(value_stream_stage::Column::DeletedAt.is_null())
+            .one(&self.db)
+            .await?;
+        Ok(model.map(Into::into))
+    }
+
     async fn save(&self, stage: &ValueStreamStage) -> Result<ValueStreamStage, DomainError> {
+        let objective_metrics_json = serde_json::to_string(&stage.objective_metrics)
+            .map_err(|e| DomainError::Database(format!("serialize objective_metrics: {e}")))?;
+        let key_metrics_json = serde_json::to_string(&stage.key_metrics)
+            .map_err(|e| DomainError::Database(format!("serialize key_metrics: {e}")))?;
+
         let existing = value_stream_stage::Entity::find_by_id(stage.id)
             .one(&self.db)
             .await?;
@@ -302,6 +365,12 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
             active.sequence_order = Set(stage.sequence_order);
             active.input = Set(stage.input.clone());
             active.output = Set(stage.output.clone());
+            active.description = Set(stage.description.clone());
+            active.objective_metrics = Set(Some(objective_metrics_json));
+            active.entry_criteria = Set(stage.entry_criteria.clone());
+            active.exit_criteria = Set(stage.exit_criteria.clone());
+            active.owner_id = Set(stage.owner_id);
+            active.key_metrics = Set(Some(key_metrics_json));
             active.updated_at = Set(stage.updated_at);
             active.deleted_at = Set(stage.deleted_at);
             active.update(&self.db).await?
@@ -313,6 +382,12 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
                 input: Set(stage.input.clone()),
                 output: Set(stage.output.clone()),
                 value_stream_id: Set(stage.value_stream_id),
+                description: Set(stage.description.clone()),
+                objective_metrics: Set(Some(objective_metrics_json)),
+                entry_criteria: Set(stage.entry_criteria.clone()),
+                exit_criteria: Set(stage.exit_criteria.clone()),
+                owner_id: Set(stage.owner_id),
+                key_metrics: Set(Some(key_metrics_json)),
                 created_at: Set(stage.created_at),
                 updated_at: Set(stage.updated_at),
                 deleted_at: Set(stage.deleted_at),
@@ -334,6 +409,23 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
         active.update(&self.db).await?;
 
         Ok(())
+    }
+
+    async fn sequence_order_exists(
+        &self,
+        vs_id: Uuid,
+        sequence_order: i32,
+        exclude_id: Option<Uuid>,
+    ) -> Result<bool, DomainError> {
+        let mut query = value_stream_stage::Entity::find()
+            .filter(value_stream_stage::Column::ValueStreamId.eq(vs_id))
+            .filter(value_stream_stage::Column::SequenceOrder.eq(sequence_order))
+            .filter(value_stream_stage::Column::DeletedAt.is_null());
+        if let Some(excl) = exclude_id {
+            query = query.filter(value_stream_stage::Column::Id.ne(excl));
+        }
+        let count = query.count(&self.db).await?;
+        Ok(count > 0)
     }
 }
 

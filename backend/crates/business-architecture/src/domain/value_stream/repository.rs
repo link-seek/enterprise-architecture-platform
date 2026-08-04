@@ -32,6 +32,15 @@ pub trait ValueStreamStageRepository: Send + Sync + 'static {
         &self,
         vs_id: Uuid,
     ) -> Result<Vec<ValueStreamStage>, DomainError>;
+    async fn find_by_id(&self, id: Uuid) -> Result<Option<ValueStreamStage>, DomainError>;
     async fn save(&self, stage: &ValueStreamStage) -> Result<ValueStreamStage, DomainError>;
     async fn soft_delete(&self, id: Uuid) -> Result<(), DomainError>;
+    /// Check whether a stage with the given `sequence_order` already exists
+    /// for the value stream (excluding `exclude_id` if provided).
+    async fn sequence_order_exists(
+        &self,
+        vs_id: Uuid,
+        sequence_order: i32,
+        exclude_id: Option<Uuid>,
+    ) -> Result<bool, DomainError>;
 }

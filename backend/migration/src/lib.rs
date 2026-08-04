@@ -34,6 +34,8 @@ mod m20250101_000031_add_visibility_to_organizations;
 mod m20250101_000032_create_space_audit_logs;
 mod m20250101_000033_add_indexes_for_auth;
 mod m20250101_000034_rename_oauth_codes_table;
+mod m20250101_000035_enrich_value_stream_stage;
+mod m20250101_000036_backfill_entity_owners;
 
 pub struct Migrator;
 
@@ -75,6 +77,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000032_create_space_audit_logs::Migration),
             Box::new(m20250101_000033_add_indexes_for_auth::Migration),
             Box::new(m20250101_000034_rename_oauth_codes_table::Migration),
+            Box::new(m20250101_000035_enrich_value_stream_stage::Migration),
+            Box::new(m20250101_000036_backfill_entity_owners::Migration),
         ]
     }
 }
