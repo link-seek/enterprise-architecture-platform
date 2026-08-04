@@ -17,7 +17,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
 
   test('Happy Path - Create Business Process', async ({ page }) => {
     // Click "新建业务流程" button
-    const createButton = page.getByRole('button', { name: /新建业务流程|New Business Process/ });
+    const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await expect(createButton).toBeVisible();
     await createButton.click();
     
@@ -72,11 +72,13 @@ test.describe('Business Processes Management - CRUD Operations', () => {
   });
 
   test('Happy Path - Read Business Process @smoke', async ({ page }) => {
+    // Use a unique name to avoid strict-mode violations from residual data on repeated runs
+    const name = `读取测试流程_${Date.now()}`;
     // Create a process to read
-    const createButton = page.getByRole('button', { name: /新建业务流程|New Business Process/ });
+    const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
     
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('读取测试流程');
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('用于读取测试的业务流程');
     
     // Fill numeric fields
@@ -95,14 +97,14 @@ test.describe('Business Processes Management - CRUD Operations', () => {
       await costField.fill('5000');
     }
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Verify new process appears in table
-    await expect(page.getByText('读取测试流程')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(name)).toBeVisible({ timeout: 10000 });
     
     // Verify all fields displayed correctly
-    const row = page.locator('tr').filter({ hasText: '读取测试流程' });
+    const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible();
     await expect(row.getByText('用于读取测试的业务流程')).toBeVisible();
     
@@ -121,7 +123,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
 
   test('Happy Path - Update Business Process', async ({ page }) => {
     // Create a process to update
-    const createButton = page.getByRole('button', { name: /新建业务流程|New Business Process/ });
+    const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('更新前流程');
@@ -207,7 +209,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
 
   test('Happy Path - Delete Business Process', async ({ page }) => {
     // Create a process to delete
-    const createButton = page.getByRole('button', { name: /新建业务流程|New Business Process/ });
+    const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('待删除流程');
@@ -239,7 +241,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
 
   test('Edge Case - Numeric Input Validation', async ({ page }) => {
     // Click "新建业务流程" button
-    const createButton = page.getByRole('button', { name: /新建业务流程|New Business Process/ });
+    const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
     await expect(page.getByRole('dialog')).toBeVisible();
     
@@ -295,7 +297,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
 
   test('Full CRUD Cycle with Numeric Fields', async ({ page }) => {
     // Create
-    const createButton = page.getByRole('button', { name: /新建业务流程|New Business Process/ });
+    const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('完整CRUD流程');

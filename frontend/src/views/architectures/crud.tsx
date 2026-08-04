@@ -124,29 +124,29 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: 
         <div className="space-y-4 py-4">
           {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
           <div className="space-y-2">
-            <Label>名称</Label>
-            <Input value={name} onChange={e => setName(e.target.value)} placeholder="价值流名称" />
+            <Label htmlFor="value-stream-name">名称</Label>
+            <Input id="value-stream-name" value={name} onChange={e => setName(e.target.value)} placeholder="价值流名称" />
           </div>
           <div className="space-y-2">
-            <Label>描述</Label>
-            <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="价值流描述" />
+            <Label htmlFor="value-stream-description">描述</Label>
+            <Input id="value-stream-description" value={description} onChange={e => setDescription(e.target.value)} placeholder="价值流描述" />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>版本</Label>
-              <Input value={version} onChange={e => setVersion(e.target.value)} />
+              <Label htmlFor="value-stream-version">版本</Label>
+              <Input id="value-stream-version" aria-label="版本" value={version} onChange={e => setVersion(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>状态</Label>
-              <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={status} onChange={e => setStatus(e.target.value)}>
+              <Label htmlFor="value-stream-status">状态</Label>
+              <select id="value-stream-status" className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={status} onChange={e => setStatus(e.target.value)}>
                 <option value="active">active</option>
                 <option value="archived">archived</option>
               </select>
             </div>
           </div>
           <div className="space-y-2">
-            <Label>重要性</Label>
-            <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={importance} onChange={e => setImportance(e.target.value)}>
+            <Label htmlFor="value-stream-importance">重要性</Label>
+            <select id="value-stream-importance" className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={importance} onChange={e => setImportance(e.target.value)}>
               <option value="Critical">Critical</option>
               <option value="High">High</option>
               <option value="Medium">Medium</option>

@@ -241,8 +241,8 @@ function ProcessCrudDialog({ open, onOpenChange, editing, spaceId }: {
         <DialogHeader><DialogTitle>{editing ? '编辑流程' : '新建流程'}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-4">
           {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
-          <div className="space-y-2"><Label>名称</Label><Input value={name} onChange={e => setName(e.target.value)} /></div>
-          <div className="space-y-2"><Label>描述</Label><Input value={description} onChange={e => setDescription(e.target.value)} /></div>
+          <div className="space-y-2"><Label htmlFor="process-name">名称</Label><Input id="process-name" value={name} onChange={e => setName(e.target.value)} /></div>
+          <div className="space-y-2"><Label htmlFor="process-description">描述</Label><Input id="process-description" value={description} onChange={e => setDescription(e.target.value)} /></div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="space-y-2"><Label>SLA</Label><Input value={sla} onChange={e => setSla(e.target.value)} placeholder="2天" /></div>
             <div className="space-y-2"><Label>周期(天)</Label><Input type="number" value={cycleTime} onChange={e => setCycleTime(e.target.value)} /></div>
