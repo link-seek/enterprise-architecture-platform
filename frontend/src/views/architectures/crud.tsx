@@ -124,12 +124,12 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: 
         <div className="space-y-4 py-4">
           {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
           <div className="space-y-2">
-            <Label>名称</Label>
-            <Input value={name} onChange={e => setName(e.target.value)} placeholder="价值流名称" />
+            <Label htmlFor="vs-name">名称</Label>
+            <Input id="vs-name" value={name} onChange={e => setName(e.target.value)} placeholder="价值流名称" />
           </div>
           <div className="space-y-2">
-            <Label>描述</Label>
-            <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="价值流描述" />
+            <Label htmlFor="vs-desc">描述</Label>
+            <Input id="vs-desc" value={description} onChange={e => setDescription(e.target.value)} placeholder="价值流描述" />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">

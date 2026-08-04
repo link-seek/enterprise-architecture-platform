@@ -236,8 +236,8 @@ function CapabilityCrudDialog({ open, onOpenChange, editing, spaceId }: {
         <DialogHeader><DialogTitle>{editing ? '编辑能力' : '新建能力'}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-4">
           {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
-          <div className="space-y-2"><Label>名称</Label><Input value={name} onChange={e => setName(e.target.value)} /></div>
-          <div className="space-y-2"><Label>描述</Label><Input value={description} onChange={e => setDescription(e.target.value)} /></div>
+          <div className="space-y-2"><Label htmlFor="lbl-d7ec2d">名称</Label><Input id="lbl-d7ec2d" value={name} onChange={e = setName(e.target.value)} /></div>
+          <div className="space-y-2"><Label htmlFor="lbl-3bdd08">描述</Label><Input id="lbl-3bdd08" value={description} onChange={e = setDescription(e.target.value)} /></div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label>层级</Label>
