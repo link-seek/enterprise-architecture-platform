@@ -24,6 +24,8 @@ impl From<business_process::Model> for BusinessProcess {
             sla: m.sla,
             cost_per_transaction: m.cost_per_transaction,
             cycle_time: m.cycle_time,
+            automation_level: m.automation_level,
+            maturity: m.maturity,
             owner_id: m.owner_id,
             created_by: m.created_by,
             updated_by: m.updated_by,
@@ -131,6 +133,8 @@ impl ProcessRepository for SeaOrmProcessRepo {
             active.sla = Set(proc.sla.clone());
             active.cost_per_transaction = Set(proc.cost_per_transaction);
             active.cycle_time = Set(proc.cycle_time);
+            active.automation_level = Set(proc.automation_level);
+            active.maturity = Set(proc.maturity);
             active.owner_id = Set(proc.owner_id);
             active.updated_by = Set(proc.updated_by);
             active.updated_at = Set(proc.updated_at);
@@ -146,6 +150,8 @@ impl ProcessRepository for SeaOrmProcessRepo {
                 sla: Set(proc.sla.clone()),
                 cost_per_transaction: Set(proc.cost_per_transaction),
                 cycle_time: Set(proc.cycle_time),
+                automation_level: Set(proc.automation_level),
+                maturity: Set(proc.maturity),
                 owner_id: Set(proc.owner_id),
                 created_by: Set(proc.created_by),
                 updated_by: Set(proc.updated_by),
@@ -282,6 +288,8 @@ impl SeaOrmProcessRepo {
             sla: Set(old.sla.clone()),
             cost_per_transaction: Set(old.cost_per_transaction),
             cycle_time: Set(old.cycle_time),
+            automation_level: Set(old.automation_level),
+            maturity: Set(old.maturity),
             owner_id: Set(old.owner_id),
             created_by: Set(old.created_by),
             updated_by: Set(old.updated_by),

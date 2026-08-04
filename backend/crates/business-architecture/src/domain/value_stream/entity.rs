@@ -65,6 +65,21 @@ impl ValueStream {
         }
     }
 
+    /// Set optional fields on a newly created ValueStream (builder-style).
+    pub fn with_details(
+        mut self,
+        stakeholders: Option<StringVec>,
+        triggering_event: Option<String>,
+        end_deliverable: Option<String>,
+        owner_id: Option<Uuid>,
+    ) -> Self {
+        if let Some(s) = stakeholders { self.stakeholders = s; }
+        if let Some(t) = triggering_event { self.triggering_event = Some(t); }
+        if let Some(e) = end_deliverable { self.end_deliverable = Some(e); }
+        if let Some(o) = owner_id { self.owner_id = Some(o); }
+        self
+    }
+
     /// Archive this value stream. Only active streams can be archived.
     /// This is a lifecycle state transition: Active → Archived (one-way).
     pub fn archive(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
@@ -134,6 +149,10 @@ impl ValueStream {
         name: Option<String>,
         description: Option<Option<String>>,
         importance: Option<ValueStreamImportance>,
+        stakeholders: Option<StringVec>,
+        triggering_event: Option<Option<String>>,
+        end_deliverable: Option<Option<String>>,
+        owner_id: Option<Option<Uuid>>,
         now: DateTime<Utc>,
     ) -> Result<(), DomainError> {
         if self.status != LifecycleStatus::Active {
@@ -144,6 +163,10 @@ impl ValueStream {
         if let Some(n) = name { self.name = n; }
         if let Some(d) = description { self.description = d; }
         if let Some(i) = importance { self.importance = i; }
+        if let Some(s) = stakeholders { self.stakeholders = s; }
+        if let Some(t) = triggering_event { self.triggering_event = t; }
+        if let Some(e) = end_deliverable { self.end_deliverable = e; }
+        if let Some(o) = owner_id { self.owner_id = o; }
         self.updated_at = now;
         Ok(())
     }
