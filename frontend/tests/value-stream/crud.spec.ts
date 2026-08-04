@@ -211,7 +211,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByText('测试取消删除')).toBeVisible();
   });
 
-  test('View Value Stream Details @smoke', async ({ page }) => {
+  test('View Value Stream Details', async ({ page }) => {
     // First, create a value stream to view
     await page.getByRole('button', { name: '新建价值流' }).click();
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('查看详情测试');

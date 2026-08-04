@@ -71,7 +71,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     }
   });
 
-  test('Happy Path - Read Business Process @smoke', async ({ page }) => {
+  test('Happy Path - Read Business Process', async ({ page }) => {
     // Create a process to read
     const createButton = page.getByRole('button', { name: /新建业务流程|New Business Process/ });
     await createButton.click();
