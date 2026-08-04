@@ -34,6 +34,9 @@ mod m20250101_000031_add_visibility_to_organizations;
 mod m20250101_000032_create_space_audit_logs;
 mod m20250101_000033_add_indexes_for_auth;
 mod m20250101_000034_rename_oauth_codes_table;
+mod m20250101_000035_add_automation_level_to_processes;
+mod m20250101_000036_add_maturity_to_processes;
+mod m20250101_000037_add_metrics_to_capabilities;
 mod m20250101_000038_create_application_components;
 mod m20250101_000039_create_application_processes;
 mod m20250101_000040_create_application_process_steps;
@@ -81,6 +84,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000032_create_space_audit_logs::Migration),
             Box::new(m20250101_000033_add_indexes_for_auth::Migration),
             Box::new(m20250101_000034_rename_oauth_codes_table::Migration),
+            Box::new(m20250101_000035_add_automation_level_to_processes::Migration),
+            Box::new(m20250101_000036_add_maturity_to_processes::Migration),
+            Box::new(m20250101_000037_add_metrics_to_capabilities::Migration),
             Box::new(m20250101_000038_create_application_components::Migration),
             Box::new(m20250101_000039_create_application_processes::Migration),
             Box::new(m20250101_000040_create_application_process_steps::Migration),

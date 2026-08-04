@@ -5,6 +5,7 @@ use shared_common::enums::{
     BusinessValueRating, CapabilityLevel, CapabilityStatus, CostRating, LifecycleStatus,
     MaturityLevel,
 };
+use shared_common::value_objects::StringStringMap;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
@@ -22,6 +23,7 @@ pub struct Model {
     pub maturity: MaturityLevel,
     pub business_value: BusinessValueRating,
     pub cost: CostRating,
+    pub metrics: Option<StringStringMap>,
     pub owner_id: Option<Uuid>,
     pub created_by: Option<Uuid>,
     pub updated_by: Option<Uuid>,

@@ -20,6 +20,21 @@ pub enum CapabilityLevel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
 #[serde(rename_all = "snake_case")]
+pub enum AutomationLevel {
+    #[sea_orm(string_value = "manual")]
+    #[serde(rename = "manual")]
+    Manual,
+    #[sea_orm(string_value = "semi_automated")]
+    #[serde(rename = "semi_automated")]
+    SemiAutomated,
+    #[sea_orm(string_value = "fully_automated")]
+    #[serde(rename = "fully_automated")]
+    FullyAutomated,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
 pub enum MaturityLevel {
     #[sea_orm(string_value = "level1")]
     #[serde(rename = "level1")]

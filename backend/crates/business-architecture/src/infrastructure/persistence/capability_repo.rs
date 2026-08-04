@@ -25,6 +25,7 @@ impl From<business_capability::Model> for BusinessCapability {
             maturity: m.maturity,
             business_value: m.business_value,
             cost: m.cost,
+            metrics: m.metrics,
             owner_id: m.owner_id,
             created_by: m.created_by,
             updated_by: m.updated_by,
@@ -73,6 +74,7 @@ impl CapabilityRepository for SeaOrmCapabilityRepo {
             active.maturity = Set(cap.maturity);
             active.business_value = Set(cap.business_value);
             active.cost = Set(cap.cost);
+            active.metrics = Set(cap.metrics.clone());
             active.owner_id = Set(cap.owner_id);
             active.updated_by = Set(cap.updated_by);
             active.updated_at = Set(cap.updated_at);
@@ -90,6 +92,7 @@ impl CapabilityRepository for SeaOrmCapabilityRepo {
                 maturity: Set(cap.maturity),
                 business_value: Set(cap.business_value),
                 cost: Set(cap.cost),
+                metrics: Set(cap.metrics.clone()),
                 owner_id: Set(cap.owner_id),
                 created_by: Set(cap.created_by),
                 updated_by: Set(cap.updated_by),

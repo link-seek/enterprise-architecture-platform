@@ -25,7 +25,7 @@ use business_architecture::infrastructure::persistence::space_audit_repo::SeaOrm
 use shared_common::enums::ValueStreamImportance;
 use shared_common::enums::{SpaceRole, SpaceVisibility};
 use shared_common::enums::{
-    BusinessValueRating, CapabilityLevel, CapabilityStatus, CostRating,
+    AutomationLevel, BusinessValueRating, CapabilityLevel, CapabilityStatus, CostRating,
     LifecycleStatus, MaturityLevel,
     ApplicationComponentType, ApplicationComponentStatus, ApplicationProcessTrigger,
 };
@@ -514,13 +514,20 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 let description = ctx.args.get("description").and_then(|v| v.string().ok()).map(|s| s.to_owned());
                 let business_version = ctx.args.try_get("businessVersion")?.string()?.to_owned();
                 let importance = parse_importance(ctx.args.try_get("importance")?.enum_name()?)?;
+                let stakeholders = match ctx.args.get("stakeholders") {
+                    Some(_) => Some(parse_string_vec_arg(&ctx, "stakeholders")?),
+                    None => None,
+                };
+                let triggering_event = ctx.args.get("triggeringEvent").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+                let end_deliverable = ctx.args.get("endDeliverable").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+                let owner_id = ctx.args.get("ownerId").and_then(|v| v.string().ok()).and_then(|s| Uuid::parse_str(s).ok());
 
                 ensure_space_edit_access(&ctx, db, space_id).await?;
 
                 let repo = SeaOrmValueStreamRepo::new(db.clone());
                 let service = ValueStreamService::new(repo);
                 let vs = service
-                    .create(space_id, name, description, business_version, importance)
+                    .create(space_id, name, description, business_version, importance, stakeholders, triggering_event, end_deliverable, owner_id)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
 
@@ -533,7 +540,11 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("businessVersion", TypeRef::named_nn(TypeRef::STRING)))
-    .argument(InputValue::new("importance", TypeRef::named_nn(TypeRef::STRING)));
+    .argument(InputValue::new("importance", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("stakeholders", TypeRef::named_nn_list(TypeRef::STRING)))
+    .argument(InputValue::new("triggeringEvent", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("endDeliverable", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)));
 
     builder.mutations.push(create_field);
 
@@ -561,6 +572,25 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     Some(v) if !v.is_null() => Some(parse_importance(v.enum_name()?)?),
                     _ => None,
                 };
+                let stakeholders = match ctx.args.get("stakeholders") {
+                    Some(_) => Some(parse_string_vec_arg(&ctx, "stakeholders")?),
+                    None => None,
+                };
+                let triggering_event = match ctx.args.get("triggeringEvent") {
+                    Some(v) if v.is_null() => Some(None),
+                    Some(v) => v.string().ok().map(|s| Some(s.to_owned())),
+                    None => None,
+                };
+                let end_deliverable = match ctx.args.get("endDeliverable") {
+                    Some(v) if v.is_null() => Some(None),
+                    Some(v) => v.string().ok().map(|s| Some(s.to_owned())),
+                    None => None,
+                };
+                let owner_id = match ctx.args.get("ownerId") {
+                    Some(v) if v.is_null() => Some(None),
+                    Some(v) => v.string().ok().and_then(|s| Uuid::parse_str(s).ok()).map(|u| Some(u)),
+                    None => None,
+                };
 
                 let repo = SeaOrmValueStreamRepo::new(db.clone());
                 // Enforce space-level ACL: look up the target's space before mutating.
@@ -573,7 +603,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
 
                 let service = ValueStreamService::new(repo);
                 let vs = service
-                    .update(id, name, description, importance)
+                    .update(id, name, description, importance, stakeholders, triggering_event, end_deliverable, owner_id)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
 
@@ -585,7 +615,11 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
-    .argument(InputValue::new("importance", TypeRef::named(TypeRef::STRING)));
+    .argument(InputValue::new("importance", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("stakeholders", TypeRef::named_nn_list(TypeRef::STRING)))
+    .argument(InputValue::new("triggeringEvent", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("endDeliverable", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)));
 
     builder.mutations.push(update_field);
 
@@ -998,6 +1032,16 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
                 let level = parse_enum::<CapabilityLevel>(ctx.args.try_get("level")?.enum_name()?)?;
                 let maturity = parse_enum::<MaturityLevel>(ctx.args.try_get("maturity")?.enum_name()?)?;
                 let business_value = parse_enum::<BusinessValueRating>(ctx.args.try_get("businessValue")?.enum_name()?)?;
+                let cost = match get_enum_arg(&ctx, "cost") {
+                    Some(v) => parse_enum::<CostRating>(&v)?,
+                    None => CostRating::Low,
+                };
+                let capability_status = match get_enum_arg(&ctx, "capabilityStatus") {
+                    Some(v) => parse_enum::<CapabilityStatus>(&v)?,
+                    None => CapabilityStatus::Active,
+                };
+                let owner_id = ctx.args.get("ownerId").and_then(|v| v.string().ok()).and_then(|s| Uuid::parse_str(s).ok());
+                let metrics = parse_string_string_map_arg(&ctx, "metrics")?;
 
                 ensure_space_edit_access(&ctx, db, space_id).await?;
 
@@ -1007,14 +1051,15 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
                     logical_id: Set(Uuid::now_v7()),
                     business_version: Set("v1.0".to_owned()),
                     status: Set(LifecycleStatus::Active),
-                    capability_status: Set(CapabilityStatus::Active),
+                    capability_status: Set(capability_status),
                     name: Set(name),
                     description: Set(description),
                     level: Set(level),
                     maturity: Set(maturity),
                     business_value: Set(business_value),
-                    cost: Set(CostRating::Low),
-                    owner_id: NotSet,
+                    cost: Set(cost),
+                    metrics: Set(metrics),
+                    owner_id: Set(owner_id),
                     created_by: NotSet,
                     updated_by: NotSet,
                     created_at: Set(now),
@@ -1035,7 +1080,11 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("level", TypeRef::named_nn("CapabilityLevelEnum")))
     .argument(InputValue::new("maturity", TypeRef::named_nn("MaturityLevelEnum")))
-    .argument(InputValue::new("businessValue", TypeRef::named_nn("BusinessValueRatingEnum")));
+    .argument(InputValue::new("businessValue", TypeRef::named_nn("BusinessValueRatingEnum")))
+    .argument(InputValue::new("cost", TypeRef::named("CostRatingEnum")))
+    .argument(InputValue::new("capabilityStatus", TypeRef::named("CapabilityStatusEnum")))
+    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("metrics", TypeRef::named(TypeRef::STRING)));
     builder.mutations.push(create);
 
     // ── capabilityUpdate ─────────────────────────────────────────────
@@ -1071,6 +1120,18 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
                 if let Some(v) = get_enum_arg(&ctx, "businessValue") {
                     am.business_value = Set(parse_enum::<BusinessValueRating>(&v)?);
                 }
+                if let Some(v) = get_enum_arg(&ctx, "cost") {
+                    am.cost = Set(parse_enum::<CostRating>(&v)?);
+                }
+                if let Some(v) = get_enum_arg(&ctx, "capabilityStatus") {
+                    am.capability_status = Set(parse_enum::<CapabilityStatus>(&v)?);
+                }
+                if let Some(v) = ctx.args.get("ownerId").and_then(|v| v.string().ok()) {
+                    am.owner_id = Set(Uuid::parse_str(v).ok());
+                }
+                if let Some(metrics) = parse_string_string_map_arg(&ctx, "metrics")? {
+                    am.metrics = Set(Some(metrics));
+                }
                 am.updated_at = Set(chrono::Utc::now());
                 let model = am
                     .update(db)
@@ -1085,7 +1146,11 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("level", TypeRef::named("CapabilityLevelEnum")))
     .argument(InputValue::new("maturity", TypeRef::named("MaturityLevelEnum")))
-    .argument(InputValue::new("businessValue", TypeRef::named("BusinessValueRatingEnum")));
+    .argument(InputValue::new("businessValue", TypeRef::named("BusinessValueRatingEnum")))
+    .argument(InputValue::new("cost", TypeRef::named("CostRatingEnum")))
+    .argument(InputValue::new("capabilityStatus", TypeRef::named("CapabilityStatusEnum")))
+    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("metrics", TypeRef::named(TypeRef::STRING)));
     builder.mutations.push(update);
 
     // ── capabilityDelete ─────────────────────────────────────────────
@@ -1141,6 +1206,15 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                 let sla = ctx.args.get("sla").and_then(|v| v.string().ok()).map(|s| s.to_owned());
                 let cycle_time: Option<i64> = ctx.args.get("cycleTime").and_then(|v| v.i64().ok());
                 let cost_per_transaction: Option<f64> = ctx.args.get("costPerTransaction").and_then(|v| v.f64().ok());
+                let automation_level = match get_enum_arg(&ctx, "automationLevel") {
+                    Some(v) => Some(parse_enum::<AutomationLevel>(&v)?),
+                    None => None,
+                };
+                let maturity = match get_enum_arg(&ctx, "maturity") {
+                    Some(v) => Some(parse_enum::<MaturityLevel>(&v)?),
+                    None => None,
+                };
+                let owner_id = ctx.args.get("ownerId").and_then(|v| v.string().ok()).and_then(|s| Uuid::parse_str(s).ok());
 
                 ensure_space_edit_access(&ctx, db, space_id).await?;
 
@@ -1155,7 +1229,9 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                     sla: Set(sla),
                     cost_per_transaction: Set(cost_per_transaction),
                     cycle_time: Set(cycle_time),
-                    owner_id: NotSet,
+                    automation_level: Set(automation_level),
+                    maturity: Set(maturity),
+                    owner_id: Set(owner_id),
                     created_by: NotSet,
                     updated_by: NotSet,
                     created_at: Set(now),
@@ -1176,7 +1252,10 @@ fn register_process_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("sla", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("cycleTime", TypeRef::named(TypeRef::INT)))
-    .argument(InputValue::new("costPerTransaction", TypeRef::named(TypeRef::FLOAT)));
+    .argument(InputValue::new("costPerTransaction", TypeRef::named(TypeRef::FLOAT)))
+    .argument(InputValue::new("automationLevel", TypeRef::named("AutomationLevelEnum")))
+    .argument(InputValue::new("maturity", TypeRef::named("MaturityLevelEnum")))
+    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)));
     builder.mutations.push(create);
 
     // ── processUpdate ────────────────────────────────────────────────
@@ -1212,6 +1291,15 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                 if let Some(v) = ctx.args.get("costPerTransaction").and_then(|v| v.f64().ok()) {
                     am.cost_per_transaction = Set(Some(v));
                 }
+                if let Some(v) = get_enum_arg(&ctx, "automationLevel") {
+                    am.automation_level = Set(Some(parse_enum::<AutomationLevel>(&v)?));
+                }
+                if let Some(v) = get_enum_arg(&ctx, "maturity") {
+                    am.maturity = Set(Some(parse_enum::<MaturityLevel>(&v)?));
+                }
+                if let Some(v) = ctx.args.get("ownerId").and_then(|v| v.string().ok()) {
+                    am.owner_id = Set(Uuid::parse_str(v).ok());
+                }
                 am.updated_at = Set(chrono::Utc::now());
                 let model = am
                     .update(db)
@@ -1226,7 +1314,10 @@ fn register_process_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("sla", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("cycleTime", TypeRef::named(TypeRef::INT)))
-    .argument(InputValue::new("costPerTransaction", TypeRef::named(TypeRef::FLOAT)));
+    .argument(InputValue::new("costPerTransaction", TypeRef::named(TypeRef::FLOAT)))
+    .argument(InputValue::new("automationLevel", TypeRef::named("AutomationLevelEnum")))
+    .argument(InputValue::new("maturity", TypeRef::named("MaturityLevelEnum")))
+    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)));
     builder.mutations.push(update);
 
     // ── processDelete ────────────────────────────────────────────────
@@ -1381,6 +1472,24 @@ fn parse_string_vec_arg(
             Ok(shared_common::value_objects::StringVec(list))
         }
         None => Ok(Default::default()),
+    }
+}
+
+/// Parse an optional `StringStringMap` argument from a JSON string.
+/// Returns `None` when the argument is absent or explicitly `null`.
+fn parse_string_string_map_arg(
+    ctx: &async_graphql::dynamic::ResolverContext<'_>,
+    name: &str,
+) -> async_graphql::Result<Option<shared_common::value_objects::StringStringMap>> {
+    match ctx.args.get(name) {
+        Some(v) if v.is_null() => Ok(Some(Default::default())),
+        Some(v) => {
+            let json = v.string()?;
+            let map: std::collections::HashMap<String, String> = serde_json::from_str(json)
+                .map_err(|e| async_graphql::Error::new(format!("Invalid JSON for '{name}': {e}")))?;
+            Ok(Some(shared_common::value_objects::StringStringMap(map)))
+        }
+        None => Ok(None),
     }
 }
 
@@ -3600,6 +3709,7 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     builder.register_enumeration::<CostRating>();
     builder.register_enumeration::<CapabilityStatus>();
     builder.register_enumeration::<LifecycleStatus>();
+    builder.register_enumeration::<AutomationLevel>();
     builder.register_enumeration::<ApplicationComponentType>();
     builder.register_enumeration::<ApplicationComponentStatus>();
     builder.register_enumeration::<ApplicationProcessTrigger>();
