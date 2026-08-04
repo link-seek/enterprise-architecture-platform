@@ -212,23 +212,25 @@ test.describe('Value Stream Management - CRUD Operations', () => {
   });
 
   test('View Value Stream Details @smoke', async ({ page }) => {
+    // Use a unique name to avoid strict-mode violations from residual data on repeated runs
+    const name = `查看详情测试_${Date.now()}`;
     // First, create a value stream to view
     await page.getByRole('button', { name: '新建价值流' }).click();
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('查看详情测试');
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这是一个用于查看详情的测试价值流');
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
-    await statusField.fill('active');
+    await statusField.selectOption('active');
     
     const importanceField = page.getByRole('combobox', { name: /重要性|Importance/ }).or(page.getByRole('textbox', { name: /重要性|Importance/ }));
-    await importanceField.fill('high');
+    await importanceField.selectOption('High');
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created value stream and click "查看" button
-    const row = page.locator('tr').filter({ hasText: '查看详情测试' });
+    const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible();
     
     // Click "查看" button
@@ -238,7 +240,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page).toHaveURL(/\/architectures\/value-streams\/.+/);
     
     // Verify all value stream data displayed
-    await expect(page.getByText('查看详情测试')).toBeVisible();
+    await expect(page.getByText(name)).toBeVisible();
     await expect(page.getByText('这是一个用于查看详情的测试价值流')).toBeVisible();
     await expect(page.getByText('v1.0')).toBeVisible();
     await expect(page.getByText('active')).toBeVisible();

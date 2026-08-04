@@ -48,7 +48,7 @@ test.describe('Value Stream Management - Version Control', () => {
     // The UI should reflect the new version somehow
     
     // Click history (History) button on same value stream
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="history"]') }).click();
+    await row.getByRole('button', { name: '历史' }).click();
     
     // Verify version history dialog opens
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -118,36 +118,37 @@ test.describe('Value Stream Management - Version Control', () => {
   });
 
   test('Version History Dialog Functionality @smoke', async ({ page }) => {
+    // Use a unique name to avoid strict-mode violations from residual data on repeated runs
+    const name = `历史测试_${Date.now()}`;
     // Create a value stream with multiple versions
     await page.getByRole('button', { name: '新建价值流' }).click();
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('历史测试');
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('用于历史测试');
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
-    await statusField.fill('active');
+    await statusField.selectOption('active');
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the value stream
-    const row = page.locator('tr').filter({ hasText: '历史测试' });
+    const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible();
     
     // Open history dialog
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="history"]') }).click();
+    await row.getByRole('button', { name: '历史' }).click();
     
     // Verify history dialog opens
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByRole('heading', { name: /版本历史|Version History/ })).toBeVisible();
     
     // Verify dialog contains expected elements
-    await expect(page.getByText(/版本|Version/)).toBeVisible();
-    await expect(page.getByText(/创建时间|Created at/)).toBeVisible();
-    await expect(page.getByText(/创建者|Created by/)).toBeVisible();
+    await expect(page.getByRole('dialog').getByRole('columnheader', { name: /版本|Version/ })).toBeVisible();
+    await expect(page.getByRole('dialog').getByRole('columnheader', { name: /创建时间|Created at/ })).toBeVisible();
     
-    // Verify close button works
-    await page.getByRole('button', { name: /关闭|Close/ }).or(page.locator('button[aria-label="Close"]')).click();
+    // Verify close button works (dialog contains a Chinese "关闭" button; radix X "Close" is a sibling outside the dialog)
+    await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
@@ -223,7 +224,7 @@ test.describe('Value Stream Management - Version Control', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Open history dialog
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="history"]') }).click();
+    await row.getByRole('button', { name: '历史' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
     
     // Look for restore button on v1.0

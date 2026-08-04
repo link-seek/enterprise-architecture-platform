@@ -17,7 +17,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
 
   test('Happy Path - Create Business Capability', async ({ page }) => {
     // Click "新建业务能力" button
-    const createButton = page.getByRole('button', { name: /新建业务能力|New Business Capability/ });
+    const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await expect(createButton).toBeVisible();
     await createButton.click();
     
@@ -63,28 +63,29 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
   });
 
   test('Happy Path - Read Business Capability @smoke', async ({ page }) => {
+    // Use a unique name to avoid strict-mode violations from residual data on repeated runs
+    const name = `读取测试能力_${Date.now()}`;
     // First create a capability to read
-    const createButton = page.getByRole('button', { name: /新建业务能力|New Business Capability/ });
+    const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
-    
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('读取测试能力');
+
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('用于读取测试的业务能力');
-    
+
     const maturityField = page.getByRole('combobox', { name: /成熟度|Maturity/ }).or(page.getByRole('textbox', { name: /成熟度|Maturity/ }));
     if (await maturityField.isVisible()) {
       await maturityField.fill('发展中');
     }
-    
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Verify new capability appears in table
-    await expect(page.getByText('读取测试能力')).toBeVisible({ timeout: 10000 });
-    
-    // Verify all fields displayed correctly
-    const row = page.locator('tr').filter({ hasText: '读取测试能力' });
+    await expect(page.getByText(name)).toBeVisible({ timeout: 10000 });
+
+    // Verify the capability row is displayed (description is not shown in the list table)
+    const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible();
-    await expect(row.getByText('用于读取测试的业务能力')).toBeVisible();
     
     if (await maturityField.isVisible()) {
       await expect(row.getByText('发展中')).toBeVisible();
@@ -93,7 +94,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
 
   test('Happy Path - Update Business Capability', async ({ page }) => {
     // Create a capability to update
-    const createButton = page.getByRole('button', { name: /新建业务能力|New Business Capability/ });
+    const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('更新前名称');
@@ -151,7 +152,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
 
   test('Happy Path - Delete Business Capability', async ({ page }) => {
     // Create a capability to delete
-    const createButton = page.getByRole('button', { name: /新建业务能力|New Business Capability/ });
+    const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('待删除能力');
@@ -183,7 +184,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
 
   test('Edge Case - Form Validation', async ({ page }) => {
     // Click "新建业务能力" button
-    const createButton = page.getByRole('button', { name: /新建业务能力|New Business Capability/ });
+    const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
     await expect(page.getByRole('dialog')).toBeVisible();
     
@@ -222,7 +223,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
 
   test('Full CRUD Cycle', async ({ page }) => {
     // Create
-    const createButton = page.getByRole('button', { name: /新建业务能力|New Business Capability/ });
+    const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('完整CRUD测试');
