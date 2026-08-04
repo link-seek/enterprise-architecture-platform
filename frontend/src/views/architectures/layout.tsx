@@ -15,6 +15,9 @@ import {
   Users,
   ArrowLeft,
   Menu,
+  Component,
+  GitBranch,
+  Link2,
 } from 'lucide-react'
 import { GET_SPACE } from '@/api/spaces'
 import type { Space } from '@/api/spaces'
@@ -31,6 +34,9 @@ function SidebarContent({ onNavigate, spaceName, spaceId }: { onNavigate?: () =>
     { path: `${base}/value-streams`, label: '价值流', icon: LayoutDashboard },
     { path: `${base}/capabilities`, label: '业务能力', icon: Boxes },
     { path: `${base}/processes`, label: '业务流程', icon: Workflow },
+    { path: `${base}/applications`, label: '应用组件', icon: Component },
+    { path: `${base}/application-processes`, label: '应用流程', icon: GitBranch },
+    { path: `${base}/realizations`, label: '映射关系', icon: Link2 },
   ]
 
   const adminMenuItems = [
