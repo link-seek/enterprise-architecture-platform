@@ -16,6 +16,7 @@ pub trait ValueStreamRepository: Send + Sync + 'static {
         logical_id: Uuid,
     ) -> Result<Vec<ValueStream>, DomainError>;
     async fn save(&self, vs: &ValueStream) -> Result<ValueStream, DomainError>;
+    async fn save_batch(&self, vss: &[ValueStream]) -> Result<(), DomainError>;
     async fn archive(&self, id: Uuid) -> Result<(), DomainError>;
     async fn soft_delete(&self, id: Uuid) -> Result<(), DomainError>;
     async fn list_active(

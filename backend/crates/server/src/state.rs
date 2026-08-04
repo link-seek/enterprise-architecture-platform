@@ -6,6 +6,7 @@ use moka::future::Cache;
 use sea_orm::DatabaseConnection;
 use migration::MigratorTrait;
 use shared_common::enums::UserRole;
+use uuid::Uuid;
 use user_management::domain::user::entity::User;
 use user_management::domain::user::repository::UserRepository;
 use user_management::infrastructure::persistence::user_repo::SeaOrmUserRepo;
@@ -16,6 +17,7 @@ use crate::config::Configuration;
 pub struct AppState {
     pub db: DatabaseConnection,
     pub config: Arc<Configuration>,
+    #[allow(dead_code)]
     pub cache: Cache<String, serde_json::Value>,
 }
 
@@ -48,7 +50,7 @@ impl AppState {
             Some(_) => {
                 seed_admin(&db).await?;
             }
-            None if app_env == "local" || app_env == "dev" => {
+            None if app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev") => {
                 seed_admin(&db).await?;
             }
             None => {
@@ -75,13 +77,25 @@ impl AppState {
     }
 }
 
+/// Format a `Uuid` as a SQLite hex blob literal (`X'...'`), matching how
+/// SeaORM stores `Uuid` columns in SQLite (16-byte binary blob).
+fn uuid_to_sqlite_blob(uuid: &Uuid) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(35);
+    s.push_str("X'");
+    for b in uuid.as_bytes() {
+        write!(s, "{b:02x}").unwrap();
+    }
+    s.push('\'');
+    s
+}
+
 /// Idempotently ensure the test space exists (created by migration with a
 /// fixed UUID) and, if an admin user is present, make that admin its owner.
 /// Also seeds the E2E test users as space members (editor role) so that
 /// integration/E2E tests can exercise the edit path instead of read-only mode.
 async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
     use sea_orm::ConnectionTrait;
-    use uuid::Uuid;
 
     let test_space_id =
         Uuid::parse_str(migration::m20250101_000029_add_space_id_to_business_entities::TEST_SPACE_ID)
@@ -104,14 +118,19 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
     .await?
     .map(|r| r.id);
 
+    // SeaORM stores Uuid as a 16-byte binary blob in SQLite. Raw SQL must use
+    // X'...' hex literals (not string UUIDs) so that SeaORM entity queries —
+    // which compare against binary blobs — can actually match these rows.
+    let space_blob = uuid_to_sqlite_blob(&test_space_id);
     if let Some(admin_id) = admin_id {
-        let now = chrono::Utc::now();
+        let user_blob = uuid_to_sqlite_blob(&admin_id);
+        let now = chrono::Utc::now().to_rfc3339();
         let insert = format!(
             r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
-               VALUES ('{space}','{user}','owner','{now}','{now}')
+               VALUES ({space},{user},'owner','{now}','{now}')
                ON CONFLICT ("space_id","user_id") DO NOTHING"#,
-            space = test_space_id,
-            user = admin_id,
+            space = space_blob,
+            user = user_blob,
             now = now
         );
         let _ = db.execute_unprepared(&insert).await;
@@ -122,7 +141,7 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
     // only seeded in local/dev environments to avoid leaking test accounts into
     // production.
     let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
-    if app_env == "local" || app_env == "dev" {
+    if app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev") {
         let test_users = [
             ("test@example.com", "测试用户", "testpassword123"),
             ("e2e3@test.com", "E2E Test 3", "e2e123456"),
@@ -146,13 +165,14 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
                 let saved = repo.save(&user).await?;
                 saved.id
             };
-            let now = chrono::Utc::now();
+            let now = chrono::Utc::now().to_rfc3339();
+            let user_blob = uuid_to_sqlite_blob(&user_id);
             let insert = format!(
                 r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
-                   VALUES ('{space}','{user}','editor','{now}','{now}')
+                   VALUES ({space},{user},'editor','{now}','{now}')
                    ON CONFLICT ("space_id","user_id") DO NOTHING"#,
-                space = test_space_id,
-                user = user_id,
+                space = space_blob,
+                user = user_blob,
                 now = now
             );
             let _ = db.execute_unprepared(&insert).await;
@@ -164,8 +184,8 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
 async fn seed_admin(db: &DatabaseConnection) -> anyhow::Result<()> {
     let email = std::env::var("APP_SEED_ADMIN_EMAIL")
         .unwrap_or_else(|_| "admin@test.com".to_string());
-    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
-    let is_production = !(app_env == "local" || app_env == "dev");
+    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
+    let is_production = !(app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev"));
     let password = match std::env::var("APP_SEED_ADMIN_PASSWORD") {
         Ok(p) => p,
         Err(_) if is_production => {

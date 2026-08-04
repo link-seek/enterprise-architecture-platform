@@ -3,17 +3,30 @@ name: Build and Push Images
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
   actions: write
+  issues: write
+  pull-requests: write
+  checks: write
 
 jobs:
   ci-cd:
-    uses: link-seek/issue-resolver/.github/workflows/ci-cd-acr.yml@main
+    uses: link-seek/issue-resolver-l1/.github/workflows/ci-cd-acr.yml@main
     with:
       ghcr-image: ghcr.io/link-seek/eap-backend
       oss-bucket: eap-frontend-xyc
       frontend-build-env: '["VITE_API_URL=https://api.xieyucheng.top/api"]'
+    secrets: inherit
+
+  e2e-test:
+    needs: ci-cd
+    if: needs.ci-cd.result == 'success'
+    uses: link-seek/issue-resolver-l1/.github/workflows/e2e-test.yml@main
+    with:
+      ref: ''
+      e2e-filter: '--grep @smoke'
     secrets: inherit

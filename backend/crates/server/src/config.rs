@@ -1,3 +1,4 @@
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +16,33 @@ pub struct ServerConfig {
     pub port: u16,
     #[serde(default)]
     pub allow_public_register: bool,
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitConfig {
+    #[serde(default = "default_rate_limit_per_second")]
+    pub per_second: u64,
+    #[serde(default = "default_rate_limit_burst_size")]
+    pub burst_size: u32,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            per_second: default_rate_limit_per_second(),
+            burst_size: default_rate_limit_burst_size(),
+        }
+    }
+}
+
+fn default_rate_limit_per_second() -> u64 {
+    4
+}
+
+fn default_rate_limit_burst_size() -> u32 {
+    25
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,8 +54,7 @@ pub struct DatabaseConfig {
 pub struct JwtConfig {
     pub access_token_ttl_minutes: u64,
     pub refresh_token_ttl_days: u64,
-    pub rsa_private_key_pem: String,
-    pub rsa_public_key_pem: String,
+    pub secret: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,13 +82,24 @@ impl Configuration {
         let mut builder = config::Config::builder()
             .add_source(config::File::with_name("config/default").required(false));
 
-        let env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
+        // When APP_ENV is unset, default to "production" (fail-safe / least-privilege).
+        // This is an intentional breaking change from the previous "local" default:
+        // deployments that forget to set APP_ENV now run in production mode, which
+        // requires an explicit JWT secret (APP_JWT__SECRET) and will refuse to
+        // start if it is empty. Operators upgrading to this version must either
+        // set APP_ENV=local for development or provide APP_JWT__SECRET in
+        // production. Comparison is case-insensitive so "Production" / "PRODUCTION"
+        // are treated as production.
+        let env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
         builder = builder.add_source(
             config::File::with_name(&format!("config/{env}")).required(false),
         );
 
-        builder = builder
-            .add_source(config::Environment::with_prefix("APP").separator("__"));
+        builder = builder.add_source(
+            config::Environment::with_prefix("APP")
+                .prefix_separator("_")
+                .separator("__"),
+        );
 
         let cfg: Self = builder.build()?.try_deserialize()?;
         Ok(cfg)
@@ -69,22 +107,46 @@ impl Configuration {
 
     /// Fill in empty config values with sensible defaults for development.
     ///
-    /// - JWT secret: generate random 32-byte hex if empty
+    /// - JWT secret: in local/dev, generate random 32-byte hex if empty;
+    ///   in all other environments, require an explicit secret (bail if empty)
     /// - SQLite data/ directory: create if it doesn't exist
     /// - LLM api_key: warn if empty (degraded mode, non-blocking)
+    /// - Rate limit: validate per_second > 0 and burst_size > 0 (bail if invalid)
     pub fn ensure_defaults(&mut self) -> anyhow::Result<()> {
-        if self.jwt.rsa_private_key_pem.is_empty() {
-            let random_bytes: [u8; 32] = rand::random();
+        if self.jwt.secret.is_empty() {
+            let env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
+            // Fail-safe / least-privilege: only "local" and "dev" environments may
+            // auto-generate a random JWT secret. Every other environment (including
+            // the unset default "production", "staging", "prod", etc.) is treated as
+            // production and requires an explicit APP_JWT__SECRET.
+            let is_dev = env.eq_ignore_ascii_case("local") || env.eq_ignore_ascii_case("dev");
+            if !is_dev {
+                anyhow::bail!(
+                    "JWT secret must be set in non-development environments. \
+                     Set it via environment variable APP_JWT__SECRET, or set APP_ENV=local for development."
+                );
+            }
+            let mut random_bytes = [0u8; 32];
+            rand::rngs::OsRng.fill_bytes(&mut random_bytes);
             let hex_secret: String = random_bytes.iter().map(|b| format!("{b:02x}")).collect();
             tracing::warn!(
-                "JWT secret (rsa_private_key_pem) is empty — generated random secret for development. \
-                 Set a fixed value in production via environment variable APP_JWT__RSA_PRIVATE_KEY_PEM."
+                "JWT secret is empty — generated random secret for development. \
+                 Set a fixed value in production via environment variable APP_JWT__SECRET."
             );
-            self.jwt.rsa_private_key_pem = hex_secret;
+            self.jwt.secret = hex_secret;
         }
 
-        if self.jwt.rsa_public_key_pem.is_empty() {
-            self.jwt.rsa_public_key_pem = self.jwt.rsa_private_key_pem.clone();
+        if self.server.rate_limit.per_second == 0 {
+            anyhow::bail!(
+                "rate_limit.per_second must be greater than 0; \
+                 set APP_SERVER__RATE_LIMIT__PER_SECOND to a positive value."
+            );
+        }
+        if self.server.rate_limit.burst_size == 0 {
+            anyhow::bail!(
+                "rate_limit.burst_size must be greater than 0; \
+                 set APP_SERVER__RATE_LIMIT__BURST_SIZE to a positive value."
+            );
         }
 
         if let Some(data_dir) = self.extract_sqlite_data_dir() {

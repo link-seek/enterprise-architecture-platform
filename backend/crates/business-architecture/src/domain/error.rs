@@ -24,7 +24,7 @@ pub enum DomainError {
     NotSpaceOwner,
     #[error("space name cannot be empty")]
     SpaceNameEmpty,
-    #[error("space quota exceeded: non-admin users may own at most one space")]
+    #[error("space quota exceeded: non-admin users may own at most three spaces (including archived)")]
     SpaceQuotaExceeded,
     #[error("user is already a member of this space")]
     AlreadyMember,
@@ -44,6 +44,8 @@ pub enum DomainError {
     },
     #[error("validation error: {0}")]
     Validation(String),
+    #[error("audit log persistence failed: {0}")]
+    AuditLogFailed(String),
     #[error("semver error: {0}")]
     Semver(String),
     #[error("database error: {0}")]

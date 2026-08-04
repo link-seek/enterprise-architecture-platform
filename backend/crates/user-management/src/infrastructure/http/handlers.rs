@@ -9,6 +9,7 @@ use axum::Json;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::Utc;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, Set, TransactionTrait};
 use sha2::{Digest, Sha256};
 use shared_common::enums::{UserRole, UserStatus};
@@ -204,10 +205,12 @@ fn sign_jwt(secret: &str, user: &User, expires_in: u64) -> Result<String, ApiErr
 }
 
 fn verify_jwt(secret: &str, token: &str) -> Result<Claims, ApiError> {
+    let mut validation = Validation::default();
+    validation.validate_exp = true;
     let data = decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
-        &Validation::default(),
+        &validation,
     )?;
     Ok(data.claims)
 }
@@ -544,7 +547,7 @@ pub async fn oauth_authorize(
 
     let mut redirect_url = format!("{}?code={}", input.redirect_uri, code);
     if let Some(state) = input.state {
-        redirect_url.push_str(&format!("&state={}", state));
+        redirect_url.push_str(&format!("&state={}", percent_encode(state.as_bytes(), NON_ALPHANUMERIC)));
     }
 
     Ok(Redirect::to(&redirect_url).into_response())

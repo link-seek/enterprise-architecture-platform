@@ -17,7 +17,7 @@ jobs:
         run: echo "tag=$(git rev-parse --short=8 HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Build Docker image
-        run: docker build --build-arg VITE_API_URL=https://api.prod.com -t swr.cn-north-9.myhuaweicloud.com/eap/frontend:${{ steps.tag.outputs.tag }} -t swr.cn-north-9.myhuaweicloud.com/eap/frontend:latest .
+        run: docker build -t swr.cn-north-9.myhuaweicloud.com/eap/frontend:${{ steps.tag.outputs.tag }} -t swr.cn-north-9.myhuaweicloud.com/eap/frontend:latest .
 
       - name: Login to SWR
         env:

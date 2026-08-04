@@ -30,6 +30,10 @@ mod m20250101_000027_create_space_members;
 mod m20250101_000028_create_space_invitations;
 pub mod m20250101_000029_add_space_id_to_business_entities;
 mod m20250101_000030_fix_organization_uuid_format;
+mod m20250101_000031_add_visibility_to_organizations;
+mod m20250101_000032_create_space_audit_logs;
+mod m20250101_000033_add_indexes_for_auth;
+mod m20250101_000034_rename_oauth_codes_table;
 
 pub struct Migrator;
 
@@ -67,6 +71,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000028_create_space_invitations::Migration),
             Box::new(m20250101_000029_add_space_id_to_business_entities::Migration),
             Box::new(m20250101_000030_fix_organization_uuid_format::Migration),
+            Box::new(m20250101_000031_add_visibility_to_organizations::Migration),
+            Box::new(m20250101_000032_create_space_audit_logs::Migration),
+            Box::new(m20250101_000033_add_indexes_for_auth::Migration),
+            Box::new(m20250101_000034_rename_oauth_codes_table::Migration),
         ]
     }
 }

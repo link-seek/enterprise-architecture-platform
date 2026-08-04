@@ -15,10 +15,9 @@ import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { useIsMobile } from '@/hooks/use-media-query'
 
 const GET_PROCESSES = gql`
-  query GetProcesses($spaceId: String) {
-    businessProcesses(filters: { spaceId: { eq: $spaceId } }) {
-      nodes { id name description sla cycleTime costPerTransaction status }
-      paginationInfo { total }
+  query GetProcesses($spaceId: String!) {
+    businessProcessesBySpace(spaceId: $spaceId) {
+      id name description sla cycleTime costPerTransaction status
     }
   }
 `
@@ -47,7 +46,7 @@ interface Process {
 }
 
 interface ProcessesQuery {
-  businessProcesses?: { nodes: Process[]; paginationInfo?: { total: number } }
+  businessProcessesBySpace?: Process[]
 }
 
 function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
@@ -151,7 +150,7 @@ export default function Processes() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Process | null>(null)
   const [deleting, setDeleting] = useState<Process | null>(null)
-  const { data, loading, error } = useQuery<ProcessesQuery>(GET_PROCESSES, { variables: { spaceId } })
+  const { data, loading, error } = useQuery<ProcessesQuery>(GET_PROCESSES, { variables: { spaceId }, skip: !spaceId })
 
   const handleEdit = useCallback((p: Process) => { setEditing(p); setDialogOpen(true) }, [])
   const handleDelete = useCallback((p: Process) => setDeleting(p), [])
@@ -170,10 +169,10 @@ export default function Processes() {
         <CardHeader><CardTitle>流程列表</CardTitle></CardHeader>
         <CardContent>
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
-          {error && <div className="text-center py-8 text-destructive">加载失败</div>}
+          {Boolean(error) && <div className="text-center py-8 text-destructive">加载失败</div>}
           {data && (
             <ProcessList
-              nodes={data.businessProcesses?.nodes ?? []}
+              nodes={data.businessProcessesBySpace ?? []}
               canEdit={canEdit}
               isMobile={isMobile}
               onEdit={handleEdit}

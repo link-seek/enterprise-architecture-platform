@@ -1,42 +1,78 @@
 use chrono::Utc;
-use shared_common::enums::{SpaceRole, UserRole};
+use shared_common::enums::{SpaceRole, SpaceVisibility, UserRole};
 use uuid::Uuid;
 
 use crate::domain::error::DomainError;
 use crate::domain::space::entity::{Space, SpaceMember};
-use crate::domain::space::repository::{MembershipRepository, SpaceRepository};
+use crate::domain::space::audit::SpaceAuditLog;
+use crate::domain::space::repository::{AuditLogRepository, MembershipRepository, SpaceRepository};
 
-/// Application Service for Space: orchestrates space CRUD, membership, and
-/// space-level access control (quota + member ACL).
-pub struct SpaceService<S: SpaceRepository, M: MembershipRepository> {
+/// Maximum number of spaces a non-admin user may own, including archived ones.
+/// Archiving does not release a slot. Admins are unlimited. Fixed per R3/R8
+/// (not configurable).
+pub const SPACE_QUOTA_LIMIT: u64 = 3;
+
+/// Application Service for Space: orchestrates space CRUD, membership,
+/// visibility, and space-level access control (quota + member ACL + visibility).
+pub struct SpaceService<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> {
     spaces: S,
     members: M,
+    audit: A,
+    /// When `true`, a failure to persist the audit log is logged at `error`
+    /// level (for operational alerting). When `false` (default, best-effort),
+    /// the failure is logged at `warn` level. In both cases the visibility
+    /// change still succeeds — it has already been persisted, so returning
+    /// `Err` would mislead the caller into thinking the change did not happen.
+    strict_audit: bool,
 }
 
-impl<S: SpaceRepository, M: MembershipRepository> SpaceService<S, M> {
-    pub fn new(spaces: S, members: M) -> Self {
-        Self { spaces, members }
+impl<S: SpaceRepository, M: MembershipRepository, A: AuditLogRepository> SpaceService<S, M, A> {
+    pub fn new(spaces: S, members: M, audit: A) -> Self {
+        Self {
+            spaces,
+            members,
+            audit,
+            strict_audit: false,
+        }
+    }
+
+    /// Enable strict audit mode: audit-log persistence failures are logged at
+    /// `error` level for operational alerting (rather than `warn` in
+    /// best-effort mode). The visibility change still succeeds either way.
+    pub fn with_strict_audit(mut self) -> Self {
+        self.strict_audit = true;
+        self
     }
 
     /// Create a space. The creator becomes its owner. Non-admin users may own
-    /// at most one space (quota); admins are unlimited.
+    /// at most three spaces (including archived); admins are unlimited.
     pub async fn create_space(
         &self,
         creator_id: Uuid,
         creator_role: UserRole,
         name: String,
         description: Option<String>,
+        visibility: SpaceVisibility,
     ) -> Result<Space, DomainError> {
         if !creator_role.is_admin() {
+            // NOTE: This is a best-effort soft quota. `count_owned_by` and the
+            // subsequent `save` + `members.add` are independent async operations
+            // with no shared transaction or lock, so concurrent create requests
+            // by the same user can all pass this check before any of them
+            // inserts. Enforcing a hard limit would require transactional
+            // check-and-insert, which the repository traits do not expose; the
+            // accepted race is bounded (a user could exceed the limit by at
+            // most the number of concurrent requests) and admins remain
+            // unlimited.
             let owned = self.spaces.count_owned_by(creator_id).await?;
-            if owned >= 1 {
+            if owned >= SPACE_QUOTA_LIMIT {
                 return Err(DomainError::SpaceQuotaExceeded);
             }
         }
 
         let now = Utc::now();
         let id = Uuid::now_v7();
-        let space = Space::create(id, name, description, now)?;
+        let space = Space::create(id, name, description, visibility, now)?;
         let saved = self.spaces.save(&space).await?;
 
         // Creator becomes owner.
@@ -51,7 +87,8 @@ impl<S: SpaceRepository, M: MembershipRepository> SpaceService<S, M> {
         Ok(saved)
     }
 
-    /// Update a space's name/description. Requires owner or admin.
+    /// Update a space's name/description. Requires owner or admin. Visibility is
+    /// intentionally not mutable here — use `set_visibility` (R4).
     pub async fn update_space(
         &self,
         space_id: Uuid,
@@ -72,6 +109,71 @@ impl<S: SpaceRepository, M: MembershipRepository> SpaceService<S, M> {
         self.spaces.save(&space).await
     }
 
+    /// Change a space's visibility. Requires owner or admin. Records an audit
+    /// log entry. The visibility is persisted *first* and the audit log
+    /// recorded *after*, so a persistence failure leaves no orphan audit log
+    /// claiming a change that did not happen. An audit-log failure is always
+    /// logged (at `error` level in strict mode, `warn` in best-effort mode)
+    /// but does **not** cause the method to return `Err` — the change has
+    /// already been persisted, so returning `Err` would violate the `Result`
+    /// contract by implying the change did not happen.
+    pub async fn set_visibility(
+        &self,
+        space_id: Uuid,
+        actor_id: Uuid,
+        actor_role: UserRole,
+        visibility: SpaceVisibility,
+    ) -> Result<Space, DomainError> {
+        self.ensure_can_manage(space_id, actor_id, actor_role).await?;
+        let mut space = self.spaces.find_by_id(space_id).await?.ok_or(DomainError::SpaceNotFound)?;
+        if space.deleted_at.is_some() {
+            return Err(DomainError::SpaceNotFound);
+        }
+        let from = space.visibility;
+        // No-op when the visibility is unchanged: skip the write (and the
+        // audit log) to avoid a meaningless database update and an unnecessary
+        // bump of `updated_at`.
+        if from == visibility {
+            return Ok(space);
+        }
+        let now = Utc::now();
+        space.set_visibility(visibility, now);
+
+        // Persist the visibility change *before* recording the audit log. If
+        // the save fails, no audit log is written, so there is never an orphan
+        // audit log for a change that did not take effect.
+        let saved = self.spaces.save(&space).await?;
+
+        let log = SpaceAuditLog::visibility_changed(
+            Uuid::now_v7(),
+            saved.id,
+            actor_id,
+            from.as_str(),
+            visibility.as_str(),
+            now,
+        );
+
+        if let Err(e) = self.audit.record(&log).await {
+            if self.strict_audit {
+                tracing::error!(
+                    error = %e,
+                    space_id = %saved.id,
+                    actor_id = %actor_id,
+                    "failed to record space visibility audit log"
+                );
+            } else {
+                tracing::warn!(
+                    error = %e,
+                    space_id = %saved.id,
+                    actor_id = %actor_id,
+                    "failed to record space visibility audit log"
+                );
+            }
+        }
+
+        Ok(saved)
+    }
+
     /// Soft-delete (archive) a space. Requires owner or admin.
     pub async fn archive_space(
         &self,
@@ -83,9 +185,65 @@ impl<S: SpaceRepository, M: MembershipRepository> SpaceService<S, M> {
         self.spaces.soft_delete(space_id).await
     }
 
-    /// List all public (non-deleted) spaces.
+    /// Spaces visible to an anonymous caller: public non-deleted spaces only.
     pub async fn list_public(&self) -> Result<Vec<Space>, DomainError> {
         self.spaces.find_all_public().await
+    }
+
+    /// Fetch a single space by id (regardless of visibility). Callers must
+    /// have already passed `ensure_can_read` to authorize the read.
+    pub async fn find_space(&self, space_id: Uuid) -> Result<Option<Space>, DomainError> {
+        self.spaces.find_by_id(space_id).await
+    }
+
+    /// Spaces visible to an authenticated caller: public spaces plus private
+    /// spaces they are a member of. Admins see all non-deleted spaces.
+    pub async fn list_visible(
+        &self,
+        actor_id: Uuid,
+        actor_role: UserRole,
+    ) -> Result<Vec<Space>, DomainError> {
+        if actor_role.is_admin() {
+            return self.spaces.find_all_non_deleted().await;
+        }
+        self.spaces.find_visible_for_user(actor_id).await
+    }
+
+    /// Visibility-aware read guard. Admins always pass. Public spaces pass for
+    /// anyone (including anonymous — callers pass a sentinel id/role for anon).
+    /// Private spaces require membership.
+    ///
+    /// To avoid leaking the existence of private spaces to unauthorized
+    /// callers, both "space not found" and "private space the caller cannot
+    /// access" collapse to the same `SpaceNotFound` error for non-admins. An
+    /// attacker cannot distinguish a non-existent id from a private id they
+    /// are not a member of.
+    pub async fn ensure_can_read(
+        &self,
+        space_id: Uuid,
+        actor_id: Option<Uuid>,
+        actor_role: UserRole,
+    ) -> Result<(), DomainError> {
+        if actor_role.is_admin() {
+            return Ok(());
+        }
+        let space = self
+            .spaces
+            .find_by_id(space_id)
+            .await?
+            .ok_or(DomainError::SpaceNotFound)?;
+        if space.visibility.is_public() {
+            return Ok(());
+        }
+        // Private: require membership. Any failure (anonymous caller or
+        // non-member) maps to SpaceNotFound so the existence of a private
+        // space is not revealed.
+        if let Some(actor_id) = actor_id {
+            if self.members.find_membership(space_id, actor_id).await?.is_some() {
+                return Ok(());
+            }
+        }
+        Err(DomainError::SpaceNotFound)
     }
 
     /// Add a member to a space. Requires owner or admin. Prevents duplicates.
@@ -201,7 +359,41 @@ mod tests {
             Ok(self.spaces.lock().await.get(&id).cloned())
         }
         async fn find_all_public(&self) -> Result<Vec<Space>, DomainError> {
-            Ok(self.spaces.lock().await.values().filter(|s| s.deleted_at.is_none()).cloned().collect())
+            Ok(self
+                .spaces
+                .lock()
+                .await
+                .values()
+                .filter(|s| s.deleted_at.is_none() && s.visibility.is_public())
+                .cloned()
+                .collect())
+        }
+        async fn find_all_non_deleted(&self) -> Result<Vec<Space>, DomainError> {
+            Ok(self
+                .spaces
+                .lock()
+                .await
+                .values()
+                .filter(|s| s.deleted_at.is_none())
+                .cloned()
+                .collect())
+        }
+        async fn find_visible_for_user(&self, user_id: Uuid) -> Result<Vec<Space>, DomainError> {
+            let spaces = self.spaces.lock().await;
+            let members = self.members.lock().await;
+            Ok(spaces
+                .values()
+                .filter(|s| {
+                    if s.deleted_at.is_some() {
+                        return false;
+                    }
+                    if s.visibility.is_public() {
+                        return true;
+                    }
+                    members.contains_key(&(s.id, user_id))
+                })
+                .cloned()
+                .collect())
         }
         async fn save(&self, space: &Space) -> Result<Space, DomainError> {
             self.spaces.lock().await.insert(space.id, space.clone());
@@ -215,6 +407,7 @@ mod tests {
             Ok(())
         }
         async fn count_owned_by(&self, user_id: Uuid) -> Result<u64, DomainError> {
+            // Counts all owner memberships (including archived spaces), per R3.
             Ok(self.members.lock().await.values().filter(|m| m.user_id == user_id && m.role.is_owner()).count() as u64)
         }
     }
@@ -250,26 +443,121 @@ mod tests {
         }
     }
 
-    fn svc() -> SpaceService<FakeSpaceRepo, FakeMemberRepo> {
+    struct FakeAuditRepo {
+        logs: tokio::sync::Mutex<Vec<SpaceAuditLog>>,
+        fail_record: std::sync::atomic::AtomicBool,
+    }
+
+    impl FakeAuditRepo {
+        fn new() -> Self {
+            Self {
+                logs: tokio::sync::Mutex::new(Vec::new()),
+                fail_record: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+
+        fn failing() -> Self {
+            let r = Self::new();
+            r.fail_record
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            r
+        }
+
+        async fn count(&self) -> usize {
+            self.logs.lock().await.len()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl AuditLogRepository for FakeAuditRepo {
+        async fn record(&self, log: &SpaceAuditLog) -> Result<(), DomainError> {
+            if self.fail_record.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(DomainError::AuditLogFailed("injected failure".into()));
+            }
+            self.logs.lock().await.push(log.clone());
+            Ok(())
+        }
+
+        async fn list_for_space(
+            &self,
+            space_id: Uuid,
+            limit: Option<u64>,
+            offset: u64,
+        ) -> Result<Vec<SpaceAuditLog>, DomainError> {
+            let max_limit = limit.unwrap_or(200).min(1000);
+            Ok(self
+                .logs
+                .lock()
+                .await
+                .iter()
+                .filter(|l| l.space_id() == space_id)
+                .skip(offset as usize)
+                .take(max_limit as usize)
+                .cloned()
+                .collect())
+        }
+    }
+
+    fn svc() -> SpaceService<FakeSpaceRepo, FakeMemberRepo, FakeAuditRepo> {
         let members: MemberStore = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
-        SpaceService::new(FakeSpaceRepo::new(members.clone()), FakeMemberRepo::new(members))
+        SpaceService::new(
+            FakeSpaceRepo::new(members.clone()),
+            FakeMemberRepo::new(members),
+            FakeAuditRepo::new(),
+        )
+    }
+
+    fn svc_with_audit(
+        audit: FakeAuditRepo,
+    ) -> SpaceService<FakeSpaceRepo, FakeMemberRepo, FakeAuditRepo> {
+        let members: MemberStore = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        SpaceService::new(
+            FakeSpaceRepo::new(members.clone()),
+            FakeMemberRepo::new(members),
+            audit,
+        )
+    }
+
+    /// Convenience: create a public space (the common case in existing tests).
+    async fn create_public(
+        s: &SpaceService<FakeSpaceRepo, FakeMemberRepo, FakeAuditRepo>,
+        creator_id: Uuid,
+        creator_role: UserRole,
+        name: &str,
+    ) -> Space {
+        s.create_space(creator_id, creator_role, name.into(), None, SpaceVisibility::Public)
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
     async fn create_space_makes_creator_owner() {
         let s = svc();
         let creator = Uuid::now_v7();
-        let space = s.create_space(creator, UserRole::Architect, "S".into(), None).await.unwrap();
+        let space = create_public(&s, creator, UserRole::Architect, "S").await;
         let m = s.my_membership(space.id, creator).await.unwrap().unwrap();
         assert_eq!(m.role, SpaceRole::Owner);
     }
 
     #[tokio::test]
-    async fn non_admin_quota_one_space() {
+    async fn quota_three_including_archived() {
         let s = svc();
         let user = Uuid::now_v7();
-        s.create_space(user, UserRole::Architect, "first".into(), None).await.unwrap();
-        let err = s.create_space(user, UserRole::Architect, "second".into(), None).await.unwrap_err();
+        let s1 = create_public(&s, user, UserRole::Architect, "first").await;
+        create_public(&s, user, UserRole::Architect, "second").await;
+        create_public(&s, user, UserRole::Architect, "third").await;
+        // Fourth is rejected.
+        let err = s
+            .create_space(user, UserRole::Architect, "fourth".into(), None, SpaceVisibility::Public)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::SpaceQuotaExceeded));
+        // Archiving does not release the slot.
+        s.archive_space(s1.id, user, UserRole::Architect).await.unwrap();
+        let err = s
+            .create_space(user, UserRole::Architect, "fifth".into(), None, SpaceVisibility::Public)
+            .await
+            .unwrap_err();
         assert!(matches!(err, DomainError::SpaceQuotaExceeded));
     }
 
@@ -277,8 +565,10 @@ mod tests {
     async fn admin_unlimited_spaces() {
         let s = svc();
         let admin = Uuid::now_v7();
-        s.create_space(admin, UserRole::Admin, "a".into(), None).await.unwrap();
-        s.create_space(admin, UserRole::Admin, "b".into(), None).await.unwrap();
+        create_public(&s, admin, UserRole::Admin, "a").await;
+        create_public(&s, admin, UserRole::Admin, "b").await;
+        create_public(&s, admin, UserRole::Admin, "c").await;
+        create_public(&s, admin, UserRole::Admin, "d").await;
     }
 
     #[tokio::test]
@@ -287,7 +577,7 @@ mod tests {
         let owner = Uuid::now_v7();
         let editor = Uuid::now_v7();
         let other = Uuid::now_v7();
-        let space = s.create_space(owner, UserRole::Architect, "S".into(), None).await.unwrap();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
         s.add_member(space.id, owner, UserRole::Architect, editor, SpaceRole::Editor).await.unwrap();
         // editor attempting to add a member → denied
         let err = s.add_member(space.id, editor, UserRole::Architect, other, SpaceRole::Editor).await.unwrap_err();
@@ -299,7 +589,7 @@ mod tests {
         let s = svc();
         let owner = Uuid::now_v7();
         let stranger = Uuid::now_v7();
-        let space = s.create_space(owner, UserRole::Architect, "S".into(), None).await.unwrap();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
         let err = s.ensure_can_edit(space.id, stranger, UserRole::Architect).await.unwrap_err();
         assert!(matches!(err, DomainError::NotSpaceMember));
     }
@@ -309,7 +599,7 @@ mod tests {
         let s = svc();
         let owner = Uuid::now_v7();
         let editor = Uuid::now_v7();
-        let space = s.create_space(owner, UserRole::Architect, "S".into(), None).await.unwrap();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
         s.add_member(space.id, owner, UserRole::Architect, editor, SpaceRole::Editor).await.unwrap();
         s.ensure_can_edit(space.id, editor, UserRole::Architect).await.unwrap();
         let err = s.ensure_can_manage(space.id, editor, UserRole::Architect).await.unwrap_err();
@@ -320,7 +610,7 @@ mod tests {
     async fn cannot_remove_last_owner() {
         let s = svc();
         let owner = Uuid::now_v7();
-        let space = s.create_space(owner, UserRole::Architect, "S".into(), None).await.unwrap();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
         let err = s.remove_member(space.id, owner, UserRole::Architect, owner).await.unwrap_err();
         assert!(matches!(err, DomainError::CannotRemoveLastOwner));
     }
@@ -330,7 +620,7 @@ mod tests {
         let s = svc();
         let owner = Uuid::now_v7();
         let editor = Uuid::now_v7();
-        let space = s.create_space(owner, UserRole::Architect, "S".into(), None).await.unwrap();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
         s.add_member(space.id, owner, UserRole::Architect, editor, SpaceRole::Editor).await.unwrap();
         let err = s.add_member(space.id, owner, UserRole::Architect, editor, SpaceRole::Editor).await.unwrap_err();
         assert!(matches!(err, DomainError::AlreadyMember));
@@ -341,7 +631,7 @@ mod tests {
         let s = svc();
         let owner = Uuid::now_v7();
         let admin = Uuid::now_v7();
-        let space = s.create_space(owner, UserRole::Architect, "S".into(), None).await.unwrap();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
         // admin (non-member) can manage
         s.ensure_can_manage(space.id, admin, UserRole::Admin).await.unwrap();
         s.ensure_can_edit(space.id, admin, UserRole::Admin).await.unwrap();
@@ -351,7 +641,154 @@ mod tests {
     async fn empty_space_name_rejected() {
         let s = svc();
         let user = Uuid::now_v7();
-        let err = s.create_space(user, UserRole::Architect, "   ".into(), None).await.unwrap_err();
+        let err = s
+            .create_space(user, UserRole::Architect, "   ".into(), None, SpaceVisibility::Public)
+            .await
+            .unwrap_err();
         assert!(matches!(err, DomainError::SpaceNameEmpty));
+    }
+
+    // --- Visibility / read-access tests (R2) ---
+
+    #[tokio::test]
+    async fn public_space_readable_by_non_member() {
+        let s = svc();
+        let owner = Uuid::now_v7();
+        let stranger = Uuid::now_v7();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
+        // Anonymous (no id) can read public.
+        s.ensure_can_read(space.id, None, UserRole::Architect).await.unwrap();
+        // Logged-in non-member can read public.
+        s.ensure_can_read(space.id, Some(stranger), UserRole::Architect).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn private_space_denied_for_non_member() {
+        let s = svc();
+        let owner = Uuid::now_v7();
+        let stranger = Uuid::now_v7();
+        let space = s
+            .create_space(owner, UserRole::Architect, "S".into(), None, SpaceVisibility::Private)
+            .await
+            .unwrap();
+        // Anonymous denied (existence of private space is not revealed).
+        let err = s.ensure_can_read(space.id, None, UserRole::Architect).await.unwrap_err();
+        assert!(matches!(err, DomainError::SpaceNotFound));
+        // Logged-in non-member denied.
+        let err = s.ensure_can_read(space.id, Some(stranger), UserRole::Architect).await.unwrap_err();
+        assert!(matches!(err, DomainError::SpaceNotFound));
+    }
+
+    #[tokio::test]
+    async fn private_space_readable_by_member() {
+        let s = svc();
+        let owner = Uuid::now_v7();
+        let editor = Uuid::now_v7();
+        let space = s
+            .create_space(owner, UserRole::Architect, "S".into(), None, SpaceVisibility::Private)
+            .await
+            .unwrap();
+        s.add_member(space.id, owner, UserRole::Architect, editor, SpaceRole::Editor).await.unwrap();
+        // Owner (member) can read.
+        s.ensure_can_read(space.id, Some(owner), UserRole::Architect).await.unwrap();
+        // Editor (member) can read.
+        s.ensure_can_read(space.id, Some(editor), UserRole::Architect).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn admin_bypasses_private() {
+        let s = svc();
+        let owner = Uuid::now_v7();
+        let admin = Uuid::now_v7();
+        let space = s
+            .create_space(owner, UserRole::Architect, "S".into(), None, SpaceVisibility::Private)
+            .await
+            .unwrap();
+        // Admin (non-member) can read private.
+        s.ensure_can_read(space.id, Some(admin), UserRole::Admin).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_visibility_requires_owner() {
+        let s = svc();
+        let owner = Uuid::now_v7();
+        let editor = Uuid::now_v7();
+        let stranger = Uuid::now_v7();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
+        s.add_member(space.id, owner, UserRole::Architect, editor, SpaceRole::Editor).await.unwrap();
+        // Editor cannot change visibility.
+        let err = s
+            .set_visibility(space.id, editor, UserRole::Architect, SpaceVisibility::Private)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotSpaceOwner));
+        // Non-member cannot change visibility.
+        let err = s
+            .set_visibility(space.id, stranger, UserRole::Architect, SpaceVisibility::Private)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotSpaceOwner));
+        // Owner can.
+        let updated = s
+            .set_visibility(space.id, owner, UserRole::Architect, SpaceVisibility::Private)
+            .await
+            .unwrap();
+        assert!(updated.visibility.is_private());
+        // Admin can.
+        let admin = Uuid::now_v7();
+        s.set_visibility(space.id, admin, UserRole::Admin, SpaceVisibility::Public).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_visibility_noop_when_unchanged() {
+        let s = svc();
+        let owner = Uuid::now_v7();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
+        let original_updated_at = space.updated_at;
+        // Setting to the same visibility is a no-op: the returned space keeps
+        // its original updated_at (no save occurred).
+        let result = s
+            .set_visibility(space.id, owner, UserRole::Architect, SpaceVisibility::Public)
+            .await
+            .unwrap();
+        assert_eq!(result.updated_at, original_updated_at);
+        assert!(result.visibility.is_public());
+    }
+
+    #[tokio::test]
+    async fn strict_audit_failure_succeeds_with_error_log() {
+        let audit = FakeAuditRepo::failing();
+        let s = svc_with_audit(audit).with_strict_audit();
+        let owner = Uuid::now_v7();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
+        // The visibility is persisted *before* the audit log is recorded, so a
+        // save failure leaves no orphan audit log. Here the save succeeds but
+        // the audit write fails; in strict mode the failure is logged at error
+        // level but the change still succeeds (returning Err would imply the
+        // change did not happen, violating the Result contract).
+        let result = s
+            .set_visibility(space.id, owner, UserRole::Architect, SpaceVisibility::Private)
+            .await
+            .unwrap();
+        assert!(result.visibility.is_private());
+        // No audit log was recorded (recording always fails).
+        assert_eq!(s.audit.count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn best_effort_audit_failure_succeeds() {
+        let audit = FakeAuditRepo::failing();
+        let s = svc_with_audit(audit);
+        let owner = Uuid::now_v7();
+        let space = create_public(&s, owner, UserRole::Architect, "S").await;
+        // In best-effort mode an audit failure is swallowed: the visibility
+        // change succeeds and no error is returned.
+        let result = s
+            .set_visibility(space.id, owner, UserRole::Architect, SpaceVisibility::Private)
+            .await
+            .unwrap();
+        assert!(result.visibility.is_private());
+        // No audit log was recorded (recording always fails).
+        assert_eq!(s.audit.count().await, 0);
     }
 }

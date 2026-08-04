@@ -1,0 +1,45 @@
+name: On Deploy Broken
+
+# 当 deploy-broken issue 创建时，触发 L2 分析部署失败原因
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  issues: write
+  actions: write
+
+jobs:
+  dispatch-l2:
+    if: contains(github.event.issue.labels.*.name, 'deploy-broken')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Dispatch L2
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh api repos/link-seek/issue-resolver-l2/actions/workflows/capability-resolver.yml/dispatches \
+            -X POST \
+            -f ref=main \
+            -f "inputs[consumer-repo]=${{ github.repository }}" \
+            -f "inputs[pr-number]=${{ github.event.issue.number }}" \
+            -f "inputs[head-sha]=deploy-broken" \
+            -f "inputs[l2-round]=1" \
+            -f "inputs[revert-last]=false" \
+            || echo "Failed to dispatch L2"
+
+      - name: Comment on issue
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
+            -f body="🔄 已触发 L2 (capability-resolver) 分析部署失败原因。L2 会自行获取失败日志并分析根因。" \
+            2>/dev/null || true

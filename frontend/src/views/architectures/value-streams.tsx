@@ -23,7 +23,7 @@ interface ValueStream {
 }
 
 interface ValueStreamsQuery {
-  valueStreams?: { nodes: ValueStream[]; paginationInfo?: { total: number } }
+  valueStreamsBySpace?: ValueStream[]
 }
 
 type BadgeVariant = NonNullable<BadgeProps['variant']>
@@ -184,11 +184,18 @@ export default function ValueStreams() {
 
   const { data, loading, error } = useQuery<ValueStreamsQuery>(GET_VALUE_STREAMS, {
     variables: { spaceId },
+    skip: !spaceId,
   })
 
-  const detailBase = spaceId
-    ? `/spaces/${spaceId}/architectures/value-streams`
-    : '/architectures/value-streams'
+  if (!spaceId) {
+    return (
+      <div className="p-6">
+        <div className="text-center py-8 text-destructive">缺少空间标识，无法加载价值流。</div>
+      </div>
+    )
+  }
+
+  const detailBase = `/spaces/${spaceId}/architectures/value-streams`
 
   const handleEdit = useCallback((vs: ValueStream) => { setEditing(vs); setDialogOpen(true) }, [])
   const handleDelete = useCallback((vs: ValueStream) => setDeleting(vs), [])
@@ -211,11 +218,11 @@ export default function ValueStreams() {
         <CardHeader><CardTitle>价值流列表</CardTitle></CardHeader>
         <CardContent>
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
-          {error && <div className="text-center py-8 text-destructive">加载失败: {error.message}</div>}
+          {Boolean(error) && <div className="text-center py-8 text-destructive">加载失败</div>}
           {data && (
             <>
               <ValueStreamList
-                nodes={data.valueStreams?.nodes ?? []}
+                nodes={data.valueStreamsBySpace ?? []}
                 canEdit={canEdit}
                 isMobile={isMobile}
                 detailBase={detailBase}
@@ -226,7 +233,7 @@ export default function ValueStreams() {
                 onHistory={handleHistory}
               />
               <div className="flex items-center justify-between mt-4">
-                <p className="text-sm text-muted-foreground">共 {data.valueStreams?.paginationInfo?.total ?? 0} 条</p>
+                <p className="text-sm text-muted-foreground">共 {data.valueStreamsBySpace?.length ?? 0} 条</p>
               </div>
             </>
           )}
@@ -235,7 +242,7 @@ export default function ValueStreams() {
 
       <ValueStreamCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} />
       <ValueStreamDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
-      <VersionHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} logicalId={historyLogicalId} />
+      <VersionHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} spaceId={spaceId} logicalId={historyLogicalId} />
       <CreateVersionDialog open={versionOpen} onOpenChange={setVersionOpen} currentItem={versionItem} spaceId={spaceId} />
     </div>
   )

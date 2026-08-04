@@ -79,7 +79,7 @@ function RoleSelect({ user, disabled, onChange }: {
 }
 
 export default function UsersPage() {
-  const { data, loading, refetch } = useQuery(GET_USERS)
+  const { data, loading, refetch } = useQuery<{ users: { nodes: User[] } }>(GET_USERS)
   const isMobile = useIsMobile()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState({ email: '', name: '', password: '', role: 'viewer' })

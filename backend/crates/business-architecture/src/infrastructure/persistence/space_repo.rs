@@ -4,7 +4,8 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder, Set,
 };
-use shared_common::enums::SpaceRole;
+use shared_common::enums::{SpaceRole, SpaceVisibility};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::domain::error::DomainError;
@@ -18,6 +19,7 @@ impl From<space::Model> for Space {
             id: m.id,
             name: m.name,
             description: m.description,
+            visibility: m.visibility,
             created_at: m.created_at,
             updated_at: m.updated_at,
             deleted_at: m.deleted_at,
@@ -61,10 +63,71 @@ impl SpaceRepository for SeaOrmSpaceRepo {
     async fn find_all_public(&self) -> Result<Vec<Space>, DomainError> {
         let models = space::Entity::find()
             .filter(space::Column::DeletedAt.is_null())
+            .filter(space::Column::Visibility.eq(SpaceVisibility::Public))
             .order_by_asc(space::Column::CreatedAt)
             .all(&self.db)
             .await?;
         Ok(models.into_iter().map(Into::into).collect())
+    }
+
+    async fn find_all_non_deleted(&self) -> Result<Vec<Space>, DomainError> {
+        let models = space::Entity::find()
+            .filter(space::Column::DeletedAt.is_null())
+            .order_by_asc(space::Column::CreatedAt)
+            .all(&self.db)
+            .await?;
+        Ok(models.into_iter().map(Into::into).collect())
+    }
+
+    async fn find_visible_for_user(&self, user_id: Uuid) -> Result<Vec<Space>, DomainError> {
+        // Public non-deleted spaces ∪ private non-deleted spaces the user is a
+        // member of. Built as: all non-deleted spaces where visibility=public OR
+        // the user has a membership row. We load public spaces and member space
+        // ids separately and merge, rather than emitting a single OR query, to
+        // keep the logic simple and avoid backend-specific OR-condition quirks.
+        let public = space::Entity::find()
+            .filter(space::Column::DeletedAt.is_null())
+            .filter(space::Column::Visibility.eq(SpaceVisibility::Public))
+            .all(&self.db)
+            .await?;
+
+        // Join membership rows with their space and keep only non-archived
+        // spaces. Filtering archived spaces here (instead of only in the
+        // private_member query below) keeps the IN-clause and the in-memory
+        // id list bounded to currently-relevant spaces.
+        let member_space_ids: Vec<Uuid> = space_member::Entity::find()
+            .filter(space_member::Column::UserId.eq(user_id))
+            .find_also_related(space::Entity)
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .filter_map(|(m, s)| {
+                if s.map(|s| s.deleted_at.is_none()).unwrap_or(false) {
+                    Some(m.space_id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut result: Vec<Space> = public.into_iter().map(Into::into).collect();
+        if !member_space_ids.is_empty() {
+            let private_member = space::Entity::find()
+                .filter(space::Column::DeletedAt.is_null())
+                .filter(space::Column::Visibility.eq(SpaceVisibility::Private))
+                .filter(space::Column::Id.is_in(member_space_ids))
+                .all(&self.db)
+                .await?;
+            result.extend(private_member.into_iter().map(Into::into));
+        }
+        // Dedup by id: a concurrent visibility flip can cause the same space
+        // to appear in both the public and private-member result sets.
+        let mut seen: HashSet<Uuid> = HashSet::with_capacity(result.len());
+        result.retain(|s| seen.insert(s.id));
+        // Sort by (created_at, id) so ties on created_at still produce a
+        // deterministic order.
+        result.sort_by_key(|s| (s.created_at, s.id));
+        Ok(result)
     }
 
     async fn save(&self, space_obj: &Space) -> Result<Space, DomainError> {
@@ -73,6 +136,7 @@ impl SpaceRepository for SeaOrmSpaceRepo {
             let mut active: space::ActiveModel = model.into();
             active.name = Set(space_obj.name.clone());
             active.description = Set(space_obj.description.clone());
+            active.visibility = Set(space_obj.visibility);
             active.updated_at = Set(space_obj.updated_at);
             active.deleted_at = Set(space_obj.deleted_at);
             active.update(&self.db).await?
@@ -81,6 +145,7 @@ impl SpaceRepository for SeaOrmSpaceRepo {
                 id: Set(space_obj.id),
                 name: Set(space_obj.name.clone()),
                 description: Set(space_obj.description.clone()),
+                visibility: Set(space_obj.visibility),
                 created_at: Set(space_obj.created_at),
                 updated_at: Set(space_obj.updated_at),
                 deleted_at: Set(space_obj.deleted_at),
@@ -103,23 +168,23 @@ impl SpaceRepository for SeaOrmSpaceRepo {
     }
 
     async fn count_owned_by(&self, user_id: Uuid) -> Result<u64, DomainError> {
-        // Count owner memberships only for non-archived spaces. Without this
-        // filter a non-admin who archives their only space would remain at the
-        // 1-space quota and could never create another.
-        let pairs = space_member::Entity::find()
+        // Count all owner memberships regardless of archive status. Quota is
+        // cumulative (limit 3 including archived): archiving a space does not
+        // release the slot, so a user who owned 3 spaces (even if all archived)
+        // cannot create another and must ask an Admin to create one for them.
+        //
+        // We join with the space table to guard against orphaned membership
+        // rows (e.g. if a space was hard-deleted but the member row survived
+        // due to disabled foreign keys). Only memberships whose space row
+        // still exists are counted.
+        let count = space_member::Entity::find()
             .filter(space_member::Column::UserId.eq(user_id))
             .filter(space_member::Column::Role.eq("owner"))
             .find_also_related(space::Entity)
             .all(&self.db)
-            .await?;
-        let count = pairs
+            .await?
             .into_iter()
-            .filter(|(_, space_opt)| {
-                space_opt
-                    .as_ref()
-                    .map(|s| s.deleted_at.is_none())
-                    .unwrap_or(false)
-            })
+            .filter(|(_, s)| s.is_some())
             .count() as u64;
         Ok(count)
     }

@@ -49,7 +49,7 @@ jobs:
   deploy:
     needs: resolve-tag
     if: needs.resolve-tag.outputs.tag != ''
-    uses: link-seek/issue-resolver/.github/workflows/deploy-pipeline.yml@main
+    uses: link-seek/issue-resolver-l1/.github/workflows/deploy-pipeline.yml@main
     with:
       image-tag: ${{ needs.resolve-tag.outputs.tag }}
       runner-label: eap-prod
@@ -69,3 +69,5 @@ jobs:
       APP_SEED_ADMIN_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
       SMOKE_TEST_EMAIL: ${{ secrets.APP_SEED_ADMIN_EMAIL }}
       SMOKE_TEST_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+      APP_JWT__SECRET: ${{ secrets.APP_JWT__SECRET }}

@@ -85,18 +85,12 @@ impl RefreshTokenRepository for SeaOrmRefreshTokenRepo {
     }
 
     async fn revoke_all_for_user(&self, user_id: Uuid) -> Result<(), DomainError> {
-        let models = refresh_token::Entity::find()
+        refresh_token::Entity::update_many()
+            .col_expr(refresh_token::Column::RevokedAt, sea_orm::sea_query::Expr::value(Some(Utc::now())))
             .filter(refresh_token::Column::UserId.eq(user_id))
             .filter(refresh_token::Column::RevokedAt.is_null())
-            .all(&self.db)
+            .exec(&self.db)
             .await?;
-
-        let now = Utc::now();
-        for model in models {
-            let mut active: refresh_token::ActiveModel = model.into();
-            active.revoked_at = Set(Some(now));
-            active.update(&self.db).await?;
-        }
 
         Ok(())
     }

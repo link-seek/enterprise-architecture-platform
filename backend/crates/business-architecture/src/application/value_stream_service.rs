@@ -63,9 +63,9 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         // Domain rule: archive current, create new version with same logical_id
         let new_vs = current.create_new_version(new_id, new_version, name, description, now)?;
 
-        // Persist: save archived current, then save new version
-        self.repo.save(&current).await?;
-        self.repo.save(&new_vs).await
+        // Persist: save archived current and new version atomically
+        self.repo.save_batch(&[current, new_vs.clone()]).await?;
+        Ok(new_vs)
     }
 
     /// Update mutable fields of an active value stream.

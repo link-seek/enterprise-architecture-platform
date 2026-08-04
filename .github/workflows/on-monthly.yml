@@ -12,5 +12,5 @@ permissions:
 
 jobs:
   cleanup:
-    uses: link-seek/issue-resolver/.github/workflows/monthly-cleanup.yml@main
+    uses: link-seek/issue-resolver-l1/.github/workflows/monthly-cleanup.yml@main
     secrets: inherit

@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
+use shared_common::enums::SpaceVisibility;
 use uuid::Uuid;
 
 /// A Space is the multi-tenant container for one enterprise's architecture.
@@ -13,6 +14,7 @@ pub struct Model {
     pub id: Uuid,
     pub name: String,
     pub description: Option<String>,
+    pub visibility: SpaceVisibility,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,

@@ -26,6 +26,11 @@ function SidebarContent({ onNavigate, spaceName, spaceId }: { onNavigate?: () =>
   const user = useAuthStore((s) => s.user)
   const { canEdit } = useSpaceMembership(spaceId)
 
+  const { data: spaceData } = useQuery<{ spaceById: Space | null }>(GET_SPACE, {
+    variables: { id: spaceId },
+    skip: !spaceId,
+  })
+  const spaceName = spaceData?.spaceById?.name ?? '空间'
   const base = spaceId ? `/spaces/${spaceId}/architectures` : '/architectures'
   const menuItems = [
     { path: `${base}/value-streams`, label: '价值流', icon: LayoutDashboard },
@@ -126,11 +131,11 @@ export default function ArchLayout() {
   const isMobile = useIsMobile()
   const [drawerOpen, setDrawerOpen] = useState(false)
 
-  const { data: spaceData } = useQuery<{ organizations: { nodes: Space[] } }>(GET_SPACE, {
+  const { data: spaceData } = useQuery<{ spaceById: Space | null }>(GET_SPACE, {
     variables: { id: spaceId },
     skip: !spaceId,
   })
-  const spaceName = spaceData?.organizations?.nodes?.[0]?.name ?? '空间'
+  const spaceName = spaceData?.spaceById?.name ?? '空间'
 
   return (
     <div className="flex h-screen">

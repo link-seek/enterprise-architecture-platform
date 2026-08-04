@@ -15,9 +15,9 @@ export default function SpacesList() {
   const navigate = useNavigate()
   const [createOpen, setCreateOpen] = useState(false)
 
-  const { data, loading, error } = useQuery<{ organizations: { nodes: Space[] } }>(GET_SPACES)
+  const { data, loading, error } = useQuery<{ spaces: Space[] }>(GET_SPACES)
 
-  const spaces = data?.organizations?.nodes ?? []
+  const spaces = data?.spaces ?? []
 
   return (
     <div className="min-h-screen bg-secondary flex flex-col">
