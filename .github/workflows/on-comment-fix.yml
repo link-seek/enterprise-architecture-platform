@@ -46,3 +46,4 @@ jobs:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
       TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
