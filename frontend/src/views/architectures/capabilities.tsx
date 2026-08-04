@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Plus, Pencil, Trash2, Loader2, MoreVertical } from 'lucide-react'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, memo } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -49,7 +49,9 @@ interface CapabilitiesQuery {
   businessCapabilitiesBySpace?: Capability[]
 }
 
-function CapabilityList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
+const EMPTY_CAPABILITIES: Capability[] = []
+
+const CapabilityList = memo(function CapabilityList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
   nodes: Capability[]
   canEdit: boolean
   isMobile: boolean
@@ -136,7 +138,7 @@ function CapabilityList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
       </TableBody>
     </Table>
   )
-}
+})
 
 export default function Capabilities() {
   const { spaceId } = useParams<{ spaceId: string }>()
@@ -167,7 +169,7 @@ export default function Capabilities() {
           {Boolean(error) && <div className="text-center py-8 text-destructive">加载失败</div>}
           {data && (
             <CapabilityList
-              nodes={data.businessCapabilitiesBySpace ?? []}
+              nodes={data.businessCapabilitiesBySpace ?? EMPTY_CAPABILITIES}
               canEdit={canEdit}
               isMobile={isMobile}
               onEdit={handleEdit}

@@ -73,7 +73,7 @@ function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
               <Badge variant="outline" className="shrink-0">{p.status}</Badge>
             </div>
             <div className="flex flex-wrap gap-1 text-xs text-muted-foreground">
-              <span>SLA: {p.sla || '-'}</span>
+              <span>SLA: {p.sla ?? '-'}</span>
               <span>周期: {p.cycleTime ?? '-'}</span>
               <span>成本: {p.costPerTransaction ?? '-'}</span>
             </div>
@@ -120,7 +120,7 @@ function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
           <TableRow key={p.id}>
             <TableCell className="font-medium">{p.name}</TableCell>
             <TableCell className="text-muted-foreground">{p.description}</TableCell>
-            <TableCell>{p.sla || '-'}</TableCell>
+            <TableCell>{p.sla ?? '-'}</TableCell>
             <TableCell>{p.cycleTime ?? '-'}</TableCell>
             <TableCell>{p.costPerTransaction ?? '-'}</TableCell>
             <TableCell><Badge variant="outline">{p.status}</Badge></TableCell>

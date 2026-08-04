@@ -82,7 +82,7 @@ export default function SpaceDetail() {
     { icon: Users, label: '成员', onClick: handleMembers, visible: role === 'owner' },
     { icon: space?.visibility === 'public' ? EyeOff : Eye, label: space?.visibility === 'public' ? '设为私有' : '设为公开', onClick: handleVisibility, visible: role === 'owner' },
     { icon: Archive, label: '归档', onClick: handleArchive, visible: role === 'owner' },
-  ].filter((a) => a.visible), [canEdit, role, handleEdit, handleMembers, handleArchive, handleVisibility, space])
+  ].filter((a) => a.visible), [canEdit, role, handleEdit, handleMembers, handleArchive, handleVisibility, space?.visibility])
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">加载中...</div>
   if (error) return <div className="min-h-screen flex items-center justify-center text-destructive">加载失败: {error.message}</div>
@@ -113,7 +113,7 @@ export default function SpaceDetail() {
                     {visibleActions.map((action) => {
                       const Icon = action.icon
                       return (
-                        <DropdownMenuItem key={action.label} onClick={action.onClick}>
+                        <DropdownMenuItem key={action.label} onClick={action.onClick} disabled={archiveLoading || visibilityLoading}>
                           <Icon className="h-4 w-4 mr-2" />{action.label}
                         </DropdownMenuItem>
                       )

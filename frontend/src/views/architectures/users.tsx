@@ -49,9 +49,15 @@ interface User {
 
 const ROLE_OPTIONS = ['admin', 'architect', 'viewer'] as const
 
+const STATUS_VARIANT_MAP: Record<string, 'default' | 'secondary' | 'destructive'> = {
+  active: 'default',
+  inactive: 'secondary',
+}
+
 function StatusBadge({ status, className }: { status: string; className?: string }) {
+  const variant = STATUS_VARIANT_MAP[status] ?? 'destructive'
   return (
-    <Badge variant={status === 'active' ? 'default' : 'destructive'} className={className}>
+    <Badge variant={variant} className={className}>
       {status}
     </Badge>
   )
@@ -60,13 +66,13 @@ function StatusBadge({ status, className }: { status: string; className?: string
 function RoleSelect({ user, disabled, onChange }: {
   user: User
   disabled: boolean
-  onChange: (user: User, newRole: string) => void
+  onChange: (user: User, newRole: typeof ROLE_OPTIONS[number]) => void
 }) {
   return (
     <select
       value={user.role}
       disabled={disabled}
-      onChange={(e) => onChange(user, e.target.value)}
+      onChange={(e) => onChange(user, e.target.value as typeof ROLE_OPTIONS[number])}
       className="border rounded px-2 py-1 text-sm bg-background"
     >
       {ROLE_OPTIONS.map((r) => (
@@ -86,7 +92,7 @@ export default function UsersPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [roleUpdating, setRoleUpdating] = useState<string | null>(null)
-  const [confirmRole, setConfirmRole] = useState<{ user: User; newRole: string } | null>(null)
+  const [confirmRole, setConfirmRole] = useState<{ user: User; newRole: typeof ROLE_OPTIONS[number] } | null>(null)
 
   const users: User[] = data?.users?.nodes || []
 
@@ -119,7 +125,7 @@ export default function UsersPage() {
     }
   }
 
-  function onRoleSelect(user: User, newRole: string) {
+  function onRoleSelect(user: User, newRole: typeof ROLE_OPTIONS[number]) {
     if (newRole === user.role) return
     setConfirmRole({ user, newRole })
   }
@@ -186,7 +192,7 @@ export default function UsersPage() {
 
   const renderContent = () => {
     if (loading) return renderLoading()
-    if (queryError) return <div className="text-center py-8 text-destructive">加载失败：{queryError.message}</div>
+    if (queryError) return <div className="text-center py-8 text-destructive">加载失败，请稍后重试</div>
     if (users.length === 0) return renderEmpty()
     return isMobile ? renderMobile() : renderDesktop()
   }

@@ -45,6 +45,15 @@ interface ValueStreamAction {
   destructive?: boolean
 }
 
+function ActionButton({ action }: { action: ValueStreamAction }) {
+  const Icon = action.icon
+  return (
+    <Button variant="ghost" size="sm" aria-label={action.label} onClick={action.onClick}>
+      <Icon className={`h-3.5 w-3.5${action.destructive ? ' text-destructive' : ''}`} />
+    </Button>
+  )
+}
+
 function buildActions(vs: ValueStream, onEdit: (vs: ValueStream) => void, onVersion: (vs: ValueStream) => void, onHistory: (vs: ValueStream) => void, onDelete: (vs: ValueStream) => void): ValueStreamAction[] {
   return [
     { icon: Pencil, label: '编辑', onClick: () => onEdit(vs) },
@@ -151,15 +160,13 @@ const ValueStreamList = memo(function ValueStreamList({ nodes, canEdit, isMobile
                 </Link>
                 {canEdit && (
                   <>
-                    {actions.map((action) => {
-                      const Icon = action.icon
-                      return (
-                        <Button key={action.label} variant="ghost" size="sm" aria-label={action.label} onClick={action.onClick}>
-                          <Icon className={`h-3.5 w-3.5${action.destructive ? ' text-destructive' : ''}`} />
-                        </Button>
-                      )
-                    })}
+                    {actions.filter((a) => !a.destructive).map((action) => (
+                      <ActionButton key={action.label} action={action} />
+                    ))}
                     {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
+                    {actions.filter((a) => a.destructive).map((action) => (
+                      <ActionButton key={action.label} action={action} />
+                    ))}
                   </>
                 )}
               </div>
