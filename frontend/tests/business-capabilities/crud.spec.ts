@@ -1,18 +1,15 @@
 // spec: specs/eap-test-plan.md
 import { test, expect } from '@playwright/test';
+import { login, SPACE_BASE } from '../helpers/auth';
 
 test.describe('Business Capabilities Management - CRUD Operations', () => {
   test.beforeEach(async ({ page }) => {
-    // Login before each test
-    await page.goto('/login');
-    await page.getByRole('textbox', { name: '邮箱' }).fill('test@example.com');
-    await page.getByRole('textbox', { name: '密码' }).fill('testpassword123');
-    await page.getByRole('button', { name: '登录' }).click();
-    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
-    
+    // Login before each test (env-driven credentials for multi-environment reuse)
+    await login(page);
+
     // Navigate to capabilities page
     await page.getByRole('link', { name: '业务能力' }).click();
-    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/capabilities');
+    await expect(page).toHaveURL(`${SPACE_BASE}/capabilities`);
   });
 
   test('Happy Path - Create Business Capability', async ({ page }) => {
