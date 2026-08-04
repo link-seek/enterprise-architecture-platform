@@ -14,8 +14,20 @@ impl std::fmt::Display for NaturalId {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, FromJsonQueryResult, ToSchema)]
 pub struct StringVec(pub Vec<String>);
 
+impl StringVec {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, FromJsonQueryResult, ToSchema)]
 pub struct NaturalIdVec(pub Vec<NaturalId>);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, FromJsonQueryResult, ToSchema)]
 pub struct StringStringMap(pub std::collections::HashMap<String, String>);
+
+impl StringStringMap {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}

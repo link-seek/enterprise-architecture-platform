@@ -89,14 +89,17 @@ impl<R: ValueStreamRepository, S: ValueStreamStageRepository> ValueStreamService
         // Load existing stages to copy into the new version.
         let stages = self.stage_repo.find_by_value_stream(current_id).await?;
 
-        // Persist: save archived current and new version atomically
-        self.repo.save_batch(&[current, new_vs.clone()]).await?;
+        // Prepare stage copies for the new version (each gets a fresh id).
+        let new_stages: Vec<ValueStreamStage> = stages
+            .iter()
+            .map(|stage| stage.clone_for_new_version(Uuid::now_v7(), new_id, now))
+            .collect();
 
-        // Copy stages to the new version (each gets a fresh id).
-        for stage in stages {
-            let new_stage = stage.clone_for_new_version(Uuid::now_v7(), new_id, now);
-            self.stage_repo.save(&new_stage).await?;
-        }
+        // Persist atomically: archive current + insert new version + copy
+        // stages, all within a single database transaction.
+        self.repo
+            .save_version_with_stages(&[current, new_vs.clone()], &new_stages)
+            .await?;
 
         Ok(new_vs)
     }
@@ -167,11 +170,7 @@ impl<R: ValueStreamRepository, S: ValueStreamStageRepository> ValueStreamService
             .sequence_order_exists(value_stream_id, sequence_order, None)
             .await?
         {
-            return Err(DomainError::InvalidTransition {
-                from: format!("sequence_order {sequence_order}"),
-                to: "unique".to_string(),
-                entity: "ValueStreamStage".to_string(),
-            });
+            return Err(DomainError::DuplicateSequenceOrder);
         }
         let id = Uuid::now_v7();
         let now = Utc::now();
@@ -213,7 +212,7 @@ impl<R: ValueStreamRepository, S: ValueStreamStageRepository> ValueStreamService
             .stage_repo
             .find_by_id(id)
             .await?
-            .ok_or(DomainError::ValueStreamNotFound)?;
+            .ok_or(DomainError::ValueStreamStageNotFound)?;
         let now = Utc::now();
 
         if let Some(seq) = sequence_order {
@@ -223,11 +222,7 @@ impl<R: ValueStreamRepository, S: ValueStreamStageRepository> ValueStreamService
                     .sequence_order_exists(stage.value_stream_id, seq, Some(id))
                     .await?
             {
-                return Err(DomainError::InvalidTransition {
-                    from: format!("sequence_order {seq}"),
-                    to: "unique".to_string(),
-                    entity: "ValueStreamStage".to_string(),
-                });
+                return Err(DomainError::DuplicateSequenceOrder);
             }
         }
 

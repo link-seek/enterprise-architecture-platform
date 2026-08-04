@@ -8,6 +8,8 @@ pub enum DomainError {
     ProcessNotFound,
     #[error("value stream not found")]
     ValueStreamNotFound,
+    #[error("value stream stage not found")]
+    ValueStreamStageNotFound,
     #[error("process version not found")]
     ProcessVersionNotFound,
     #[error("cannot reference archived process")]

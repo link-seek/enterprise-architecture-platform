@@ -922,6 +922,7 @@ fn domain_err_to_graphql(e: DomainError) -> async_graphql::Error {
         DomainError::SpaceQuotaExceeded => "SPACE_QUOTA_EXCEEDED",
         DomainError::SpaceNotFound => "SPACE_NOT_FOUND",
         DomainError::ProcessNotFound | DomainError::ValueStreamNotFound
+        | DomainError::ValueStreamStageNotFound
         | DomainError::ProcessVersionNotFound | DomainError::CapabilityNotFound
         | DomainError::InvitationNotFound => "NOT_FOUND",
         DomainError::SpaceNameEmpty | DomainError::Validation(_) => "VALIDATION_ERROR",
@@ -1840,11 +1841,30 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     .get("exitCriteria")
                     .and_then(|v| v.string().ok())
                     .map(|s| s.to_owned());
-                let stage_owner_id = ctx
-                    .args
-                    .get("ownerId")
-                    .and_then(|v| v.string().ok())
-                    .and_then(|s| Uuid::parse_str(s).ok());
+                let stage_owner_id = match ctx.args.get("ownerId") {
+                    Some(v) if v.is_null() => None,
+                    Some(v) => {
+                        let s = v.string()?;
+                        let uuid = Uuid::parse_str(s)
+                            .map_err(|e| async_graphql::Error::new(format!("Invalid ownerId UUID: {e}")))?;
+                        Some(uuid)
+                    }
+                    None => None,
+                };
+                // Validate that the stage owner is a member of the same space.
+                if let Some(owner) = stage_owner_id {
+                    let svc = space_service(db);
+                    let membership = svc
+                        .my_membership(space_id, owner)
+                        .await
+                        .map_err(domain_err_to_graphql)?;
+                    if membership.is_none() {
+                        return Err(graphql_err_with_code(
+                            &DomainError::NotSpaceMemberForOwnership,
+                            "FORBIDDEN_NEW_OWNER_NOT_MEMBER",
+                        ));
+                    }
+                }
                 let key_metrics = parse_string_string_map_arg(&ctx, "keyMetrics")?;
 
                 let repo = SeaOrmValueStreamRepo::new(db.clone());
@@ -1938,7 +1958,12 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                 };
                 let stage_owner_id = match ctx.args.get("ownerId") {
                     Some(v) if v.is_null() => Some(None),
-                    Some(v) => v.string().ok().map(|s| Some(Uuid::parse_str(s).ok())),
+                    Some(v) => {
+                        let s = v.string()?;
+                        let uuid = Uuid::parse_str(s)
+                            .map_err(|e| async_graphql::Error::new(format!("Invalid ownerId UUID: {e}")))?;
+                        Some(Some(uuid))
+                    }
                     None => None,
                 };
                 let key_metrics = parse_optional_string_string_map_arg(&ctx, "keyMetrics")?;

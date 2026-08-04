@@ -295,6 +295,106 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
         Ok(())
     }
 
+    async fn save_version_with_stages(
+        &self,
+        vss: &[ValueStream],
+        stages: &[ValueStreamStage],
+    ) -> Result<(), DomainError> {
+        let txn = self.db.begin().await?;
+
+        // Save value stream versions (archived current + new version).
+        for vs in vss {
+            let existing = value_stream::Entity::find_by_id(vs.id)
+                .one(&txn)
+                .await?;
+
+            if let Some(model) = existing {
+                let mut active: value_stream::ActiveModel = model.into();
+                active.business_version = Set(vs.business_version.clone());
+                active.status = Set(vs.status);
+                active.name = Set(vs.name.clone());
+                active.description = Set(vs.description.clone());
+                active.triggering_event = Set(vs.triggering_event.clone());
+                active.end_deliverable = Set(vs.end_deliverable.clone());
+                active.owner_id = Set(vs.owner_id);
+                active.importance = Set(vs.importance);
+                active.stakeholders = Set(vs.stakeholders.clone());
+                active.performance_metrics = Set(vs.performance_metrics.clone());
+                active.updated_by = Set(vs.updated_by);
+                active.updated_at = Set(vs.updated_at);
+                active.deleted_at = Set(vs.deleted_at);
+                active.update(&txn).await.map_err(|e| {
+                    DomainError::Database(format!(
+                        "save_version_with_stages: failed to update value stream (id={}): {e}",
+                        vs.id
+                    ))
+                })?;
+            } else {
+                let active = value_stream::ActiveModel {
+                    id: Set(vs.id),
+                    logical_id: Set(vs.logical_id),
+                    business_version: Set(vs.business_version.clone()),
+                    status: Set(vs.status),
+                    name: Set(vs.name.clone()),
+                    description: Set(vs.description.clone()),
+                    triggering_event: Set(vs.triggering_event.clone()),
+                    end_deliverable: Set(vs.end_deliverable.clone()),
+                    owner_id: Set(vs.owner_id),
+                    importance: Set(vs.importance),
+                    stakeholders: Set(vs.stakeholders.clone()),
+                    performance_metrics: Set(vs.performance_metrics.clone()),
+                    created_by: Set(vs.created_by),
+                    updated_by: Set(vs.updated_by),
+                    created_at: Set(vs.created_at),
+                    updated_at: Set(vs.updated_at),
+                    deleted_at: Set(vs.deleted_at),
+                    space_id: Set(vs.space_id),
+                };
+                active.insert(&txn).await.map_err(|e| {
+                    DomainError::Database(format!(
+                        "save_version_with_stages: failed to insert value stream (id={}): {e}",
+                        vs.id
+                    ))
+                })?;
+            }
+        }
+
+        // Copy stages to the new version.
+        for stage in stages {
+            let objective_metrics_json = serde_json::to_string(&stage.objective_metrics)
+                .map_err(|e| DomainError::Database(format!("serialize objective_metrics: {e}")))?;
+            let key_metrics_json = serde_json::to_string(&stage.key_metrics)
+                .map_err(|e| DomainError::Database(format!("serialize key_metrics: {e}")))?;
+
+            let active = value_stream_stage::ActiveModel {
+                id: Set(stage.id),
+                name: Set(stage.name.clone()),
+                sequence_order: Set(stage.sequence_order),
+                input: Set(stage.input.clone()),
+                output: Set(stage.output.clone()),
+                value_stream_id: Set(stage.value_stream_id),
+                description: Set(stage.description.clone()),
+                objective_metrics: Set(Some(objective_metrics_json)),
+                entry_criteria: Set(stage.entry_criteria.clone()),
+                exit_criteria: Set(stage.exit_criteria.clone()),
+                owner_id: Set(stage.owner_id),
+                key_metrics: Set(Some(key_metrics_json)),
+                created_at: Set(stage.created_at),
+                updated_at: Set(stage.updated_at),
+                deleted_at: Set(stage.deleted_at),
+            };
+            active.insert(&txn).await.map_err(|e| {
+                DomainError::Database(format!(
+                    "save_version_with_stages: failed to insert stage (id={}): {e}",
+                    stage.id
+                ))
+            })?;
+        }
+
+        txn.commit().await?;
+        Ok(())
+    }
+
     async fn soft_delete(&self, id: Uuid) -> Result<(), DomainError> {
         let model = value_stream::Entity::find_by_id(id)
             .one(&self.db)
@@ -402,7 +502,7 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
         let model = value_stream_stage::Entity::find_by_id(id)
             .one(&self.db)
             .await?
-            .ok_or(DomainError::ValueStreamNotFound)?;
+            .ok_or(DomainError::ValueStreamStageNotFound)?;
 
         let mut active: value_stream_stage::ActiveModel = model.into();
         active.deleted_at = Set(Some(chrono::Utc::now()));
