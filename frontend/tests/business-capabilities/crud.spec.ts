@@ -62,7 +62,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     }
   });
 
-  test('Happy Path - Read Business Capability', async ({ page }) => {
+  test('Happy Path - Read Business Capability @smoke', async ({ page }) => {
     // First create a capability to read
     const createButton = page.getByRole('button', { name: /新建业务能力|New Business Capability/ });
     await createButton.click();

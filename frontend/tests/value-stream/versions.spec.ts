@@ -117,7 +117,7 @@ test.describe('Value Stream Management - Version Control', () => {
     }
   });
 
-  test('Version History Dialog Functionality', async ({ page }) => {
+  test('Version History Dialog Functionality @smoke', async ({ page }) => {
     // Create a value stream with multiple versions
     await page.getByRole('button', { name: '新建价值流' }).click();
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('历史测试');

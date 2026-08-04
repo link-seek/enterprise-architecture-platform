@@ -28,5 +28,4 @@ jobs:
     uses: link-seek/issue-resolver-l1/.github/workflows/e2e-test.yml@main
     with:
       ref: ''
-      e2e-filter: '--grep @smoke'
     secrets: inherit
