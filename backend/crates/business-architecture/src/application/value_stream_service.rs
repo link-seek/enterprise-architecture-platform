@@ -25,10 +25,15 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         description: Option<String>,
         business_version: String,
         importance: shared_common::enums::ValueStreamImportance,
+        stakeholders: Option<shared_common::value_objects::StringVec>,
+        triggering_event: Option<String>,
+        end_deliverable: Option<String>,
+        owner_id: Option<Uuid>,
     ) -> Result<ValueStream, DomainError> {
         let id = Uuid::now_v7();
         let now = Utc::now();
-        let vs = ValueStream::create(id, space_id, name, description, business_version, importance, now);
+        let vs = ValueStream::create(id, space_id, name, description, business_version, importance, now)
+            .with_details(stakeholders, triggering_event, end_deliverable, owner_id);
         self.repo.save(&vs).await
     }
 
@@ -75,10 +80,14 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         name: Option<String>,
         description: Option<Option<String>>,
         importance: Option<shared_common::enums::ValueStreamImportance>,
+        stakeholders: Option<shared_common::value_objects::StringVec>,
+        triggering_event: Option<Option<String>>,
+        end_deliverable: Option<Option<String>>,
+        owner_id: Option<Option<Uuid>>,
     ) -> Result<ValueStream, DomainError> {
         let mut vs = self.repo.find_by_id(id).await?.ok_or(DomainError::ValueStreamNotFound)?;
         let now = Utc::now();
-        vs.update(name, description, importance, now)?; // Domain rule: archived cannot be updated
+        vs.update(name, description, importance, stakeholders, triggering_event, end_deliverable, owner_id, now)?; // Domain rule: archived cannot be updated
         self.repo.save(&vs).await
     }
 
