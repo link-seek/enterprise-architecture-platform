@@ -665,7 +665,6 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                         name,
                         description,
                         importance,
-                        None,
                         triggering_event,
                         end_deliverable,
                         stakeholders,
@@ -783,6 +782,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 check_value_stream_auth(&ctx, OperationType::Update)?;
 
                 let db = ctx.data::<DatabaseConnection>()?;
+                let claims = require_claims(&ctx)?;
 
                 let id_str = ctx.args.try_get("id")?.string()?;
                 let id = Uuid::parse_str(id_str)
@@ -812,7 +812,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
 
                 let service = ValueStreamService::new(repo.clone(), repo);
                 let vs = service
-                    .transfer_ownership(id, new_owner_id)
+                    .transfer_ownership(id, new_owner_id, claims.user_id)
                     .await
                     .map_err(domain_err_to_graphql)?;
 

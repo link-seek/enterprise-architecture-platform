@@ -36,6 +36,7 @@ mod m20250101_000033_add_indexes_for_auth;
 mod m20250101_000034_rename_oauth_codes_table;
 mod m20250101_000035_enrich_value_stream_stage;
 mod m20250101_000036_backfill_entity_owners;
+mod m20250101_000037_unique_stage_sequence_order;
 
 pub struct Migrator;
 
@@ -79,6 +80,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000034_rename_oauth_codes_table::Migration),
             Box::new(m20250101_000035_enrich_value_stream_stage::Migration),
             Box::new(m20250101_000036_backfill_entity_owners::Migration),
+            Box::new(m20250101_000037_unique_stage_sequence_order::Migration),
         ]
     }
 }

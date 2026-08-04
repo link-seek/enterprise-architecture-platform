@@ -86,25 +86,18 @@ impl<R: ValueStreamRepository, S: ValueStreamStageRepository> ValueStreamService
         // Domain rule: archive current, create new version with same logical_id
         let new_vs = current.create_new_version(new_id, new_version, name, description, now)?;
 
-        // Load existing stages to copy into the new version.
-        let stages = self.stage_repo.find_by_value_stream(current_id).await?;
-
-        // Prepare stage copies for the new version (each gets a fresh id).
-        let new_stages: Vec<ValueStreamStage> = stages
-            .iter()
-            .map(|stage| stage.clone_for_new_version(Uuid::now_v7(), new_id, now))
-            .collect();
-
         // Persist atomically: archive current + insert new version + copy
-        // stages, all within a single database transaction.
+        // stages (read inside the transaction), all within a single database
+        // transaction to avoid TOCTOU races on stage data.
         self.repo
-            .save_version_with_stages(&[current, new_vs.clone()], &new_stages)
+            .save_version_with_stages(current_id, new_id, &[current, new_vs.clone()], now)
             .await?;
 
         Ok(new_vs)
     }
 
     /// Update mutable fields of an active value stream.
+    /// Ownership transfer is NOT supported here — use `transfer_ownership`.
     #[allow(clippy::too_many_arguments)]
     pub async fn update(
         &self,
@@ -112,7 +105,6 @@ impl<R: ValueStreamRepository, S: ValueStreamStageRepository> ValueStreamService
         name: Option<String>,
         description: Option<Option<String>>,
         importance: Option<shared_common::enums::ValueStreamImportance>,
-        owner_id: Option<Uuid>,
         triggering_event: Option<Option<String>>,
         end_deliverable: Option<Option<String>>,
         stakeholders: Option<StringVec>,
@@ -124,7 +116,6 @@ impl<R: ValueStreamRepository, S: ValueStreamStageRepository> ValueStreamService
             name,
             description,
             importance,
-            owner_id,
             triggering_event,
             end_deliverable,
             stakeholders,
@@ -142,10 +133,11 @@ impl<R: ValueStreamRepository, S: ValueStreamStageRepository> ValueStreamService
         &self,
         id: Uuid,
         new_owner_id: Uuid,
+        actor_id: Uuid,
     ) -> Result<ValueStream, DomainError> {
         let mut vs = self.repo.find_by_id(id).await?.ok_or(DomainError::ValueStreamNotFound)?;
         let now = Utc::now();
-        vs.transfer_ownership(new_owner_id, now);
+        vs.transfer_ownership(new_owner_id, actor_id, now)?;
         self.repo.save(&vs).await
     }
 
@@ -238,7 +230,7 @@ impl<R: ValueStreamRepository, S: ValueStreamStageRepository> ValueStreamService
             owner_id,
             key_metrics,
             now,
-        );
+        )?; // Domain rule: soft-deleted cannot be updated
         self.stage_repo.save(&stage).await
     }
 

@@ -137,13 +137,13 @@ impl ValueStream {
     }
 
     /// Update mutable fields. Archived streams cannot be updated.
-    /// `owner_id` is used only for ownership transfer (not a general edit).
+    /// `owner_id` is NOT accepted here — ownership transfer must go through
+    /// `transfer_ownership` which enforces its own authorization checks.
     pub fn update(
         &mut self,
         name: Option<String>,
         description: Option<Option<String>>,
         importance: Option<ValueStreamImportance>,
-        owner_id: Option<Uuid>,
         triggering_event: Option<Option<String>>,
         end_deliverable: Option<Option<String>>,
         stakeholders: Option<StringVec>,
@@ -158,7 +158,6 @@ impl ValueStream {
         if let Some(n) = name { self.name = n; }
         if let Some(d) = description { self.description = d; }
         if let Some(i) = importance { self.importance = i; }
-        if let Some(o) = owner_id { self.owner_id = Some(o); }
         if let Some(t) = triggering_event { self.triggering_event = t; }
         if let Some(e) = end_deliverable { self.end_deliverable = e; }
         if let Some(s) = stakeholders { self.stakeholders = s; }
@@ -169,9 +168,22 @@ impl ValueStream {
 
     /// Transfer ownership to a new user. Only the current owner or admin
     /// may call this (the caller is responsible for enforcing that).
-    pub fn transfer_ownership(&mut self, new_owner_id: Uuid, now: DateTime<Utc>) {
+    /// Records who performed the transfer via `actor_id` for audit.
+    pub fn transfer_ownership(
+        &mut self,
+        new_owner_id: Uuid,
+        actor_id: Uuid,
+        now: DateTime<Utc>,
+    ) -> Result<(), DomainError> {
+        if self.status != LifecycleStatus::Active {
+            return Err(DomainError::CannotModifyArchived {
+                entity: "ValueStream".to_string(),
+            });
+        }
         self.owner_id = Some(new_owner_id);
+        self.updated_by = Some(actor_id);
         self.updated_at = now;
+        Ok(())
     }
 
     /// Check if this is the active version among its versions.
@@ -244,7 +256,7 @@ impl ValueStreamStage {
         }
     }
 
-    /// Update mutable fields.
+    /// Update mutable fields. Soft-deleted stages cannot be updated.
     pub fn update(
         &mut self,
         name: Option<String>,
@@ -258,7 +270,12 @@ impl ValueStreamStage {
         owner_id: Option<Option<Uuid>>,
         key_metrics: Option<StringStringMap>,
         now: DateTime<Utc>,
-    ) {
+    ) -> Result<(), DomainError> {
+        if self.deleted_at.is_some() {
+            return Err(DomainError::CannotModifyArchived {
+                entity: "ValueStreamStage".to_string(),
+            });
+        }
         if let Some(n) = name { self.name = n; }
         if let Some(s) = sequence_order { self.sequence_order = s; }
         if let Some(i) = input { self.input = i; }
@@ -270,6 +287,7 @@ impl ValueStreamStage {
         if let Some(oid) = owner_id { self.owner_id = oid; }
         if let Some(km) = key_metrics { self.key_metrics = km; }
         self.updated_at = now;
+        Ok(())
     }
 
     /// Create a copy of this stage attached to a different value stream

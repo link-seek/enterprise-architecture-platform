@@ -18,13 +18,16 @@ pub trait ValueStreamRepository: Send + Sync + 'static {
     async fn save(&self, vs: &ValueStream) -> Result<ValueStream, DomainError>;
     async fn save_batch(&self, vss: &[ValueStream]) -> Result<(), DomainError>;
     /// Atomically persist a version transition: save the archived current
-    /// version and the new version, and copy the given stages to the new
-    /// version — all within a single database transaction.
+    /// version and the new version, and copy stages from the current version
+    /// to the new version — all within a single database transaction.
+    /// Stages are read inside the transaction to avoid TOCTOU races.
     async fn save_version_with_stages(
         &self,
+        current_id: Uuid,
+        new_vs_id: Uuid,
         vss: &[ValueStream],
-        stages: &[ValueStreamStage],
-    ) -> Result<(), DomainError>;
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<ValueStreamStage>, DomainError>;
     async fn archive(&self, id: Uuid) -> Result<(), DomainError>;
     async fn soft_delete(&self, id: Uuid) -> Result<(), DomainError>;
     async fn list_active(

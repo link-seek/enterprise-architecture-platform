@@ -11,6 +11,24 @@ use crate::domain::value_stream::entity::{ValueStream, ValueStreamStage};
 use crate::domain::value_stream::repository::{ValueStreamRepository, ValueStreamStageRepository};
 use crate::infrastructure::persistence::entities::{stage_capability, value_stream, value_stream_stage};
 
+/// Maps a SeaORM `DbErr` to `DomainError::DuplicateSequenceOrder` when the
+/// error is a unique-constraint violation on the stage sequence-order index,
+/// otherwise passes through as a generic `Database` error. This provides the
+/// DB-level safety net for the TOCTOU race between the application-level
+/// `sequence_order_exists` check and the `save` insert.
+fn map_unique_violation(e: sea_orm::DbErr) -> DomainError {
+    let msg = e.to_string();
+    let is_unique_violation = msg.contains("UNIQUE constraint failed")
+        || msg.contains("duplicate key value violates unique constraint")
+        || msg.contains("Duplicate entry");
+    if is_unique_violation {
+        tracing::warn!(error = %msg, "unique constraint violation on value_stream_stage save");
+        DomainError::DuplicateSequenceOrder
+    } else {
+        DomainError::Database(msg)
+    }
+}
+
 impl From<value_stream::Model> for ValueStream {
     fn from(m: value_stream::Model) -> Self {
         ValueStream {
@@ -63,16 +81,34 @@ impl From<&ValueStream> for value_stream::Model {
 
 impl From<value_stream_stage::Model> for ValueStreamStage {
     fn from(m: value_stream_stage::Model) -> Self {
-        let objective_metrics = m
-            .objective_metrics
-            .as_deref()
-            .and_then(|s| serde_json::from_str(s).ok())
-            .unwrap_or_default();
-        let key_metrics = m
-            .key_metrics
-            .as_deref()
-            .and_then(|s| serde_json::from_str(s).ok())
-            .unwrap_or_default();
+        let objective_metrics = match &m.objective_metrics {
+            Some(s) => match serde_json::from_str(s) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        stage_id = %m.id,
+                        "Failed to parse objective_metrics JSON from DB; using empty default"
+                    );
+                    Default::default()
+                }
+            },
+            None => Default::default(),
+        };
+        let key_metrics = match &m.key_metrics {
+            Some(s) => match serde_json::from_str(s) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        stage_id = %m.id,
+                        "Failed to parse key_metrics JSON from DB; using empty default"
+                    );
+                    Default::default()
+                }
+            },
+            None => Default::default(),
+        };
         ValueStreamStage {
             id: m.id,
             name: m.name,
@@ -95,16 +131,29 @@ impl From<value_stream_stage::Model> for ValueStreamStage {
 
 impl From<ValueStreamStage> for value_stream_stage::Model {
     fn from(s: ValueStreamStage) -> Self {
-        let objective_metrics = if s.objective_metrics.is_empty() {
-            None
-        } else {
-            serde_json::to_string(&s.objective_metrics).ok()
-        };
-        let key_metrics = if s.key_metrics.is_empty() {
-            None
-        } else {
-            serde_json::to_string(&s.key_metrics).ok()
-        };
+        // Always serialize metrics to Some(json) for consistency with the
+        // `save` method, which also uses Some(json). This avoids NULL vs
+        // "[]" storage inconsistency across different persistence paths.
+        let objective_metrics = serde_json::to_string(&s.objective_metrics)
+            .map(Some)
+            .unwrap_or_else(|e| {
+                tracing::error!(
+                    error = %e,
+                    stage_id = %s.id,
+                    "Failed to serialize objective_metrics; storing as NULL"
+                );
+                None
+            });
+        let key_metrics = serde_json::to_string(&s.key_metrics)
+            .map(Some)
+            .unwrap_or_else(|e| {
+                tracing::error!(
+                    error = %e,
+                    stage_id = %s.id,
+                    "Failed to serialize key_metrics; storing as NULL"
+                );
+                None
+            });
         value_stream_stage::Model {
             id: s.id,
             name: s.name,
@@ -297,9 +346,11 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
 
     async fn save_version_with_stages(
         &self,
+        current_id: Uuid,
+        new_vs_id: Uuid,
         vss: &[ValueStream],
-        stages: &[ValueStreamStage],
-    ) -> Result<(), DomainError> {
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<ValueStreamStage>, DomainError> {
         let txn = self.db.begin().await?;
 
         // Save value stream versions (archived current + new version).
@@ -359,8 +410,22 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
             }
         }
 
+        // Read current stages inside the transaction to avoid TOCTOU races.
+        let current_stage_models = value_stream_stage::Entity::find()
+            .filter(value_stream_stage::Column::ValueStreamId.eq(current_id))
+            .filter(value_stream_stage::Column::DeletedAt.is_null())
+            .all(&txn)
+            .await?;
+
+        // Clone stages for the new version (each gets a fresh id).
+        let mut new_stages: Vec<ValueStreamStage> = Vec::new();
+        for model in current_stage_models {
+            let stage: ValueStreamStage = model.into();
+            new_stages.push(stage.clone_for_new_version(Uuid::now_v7(), new_vs_id, now));
+        }
+
         // Copy stages to the new version.
-        for stage in stages {
+        for stage in &new_stages {
             let objective_metrics_json = serde_json::to_string(&stage.objective_metrics)
                 .map_err(|e| DomainError::Database(format!("serialize objective_metrics: {e}")))?;
             let key_metrics_json = serde_json::to_string(&stage.key_metrics)
@@ -392,7 +457,7 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
         }
 
         txn.commit().await?;
-        Ok(())
+        Ok(new_stages)
     }
 
     async fn soft_delete(&self, id: Uuid) -> Result<(), DomainError> {
@@ -473,7 +538,7 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
             active.key_metrics = Set(Some(key_metrics_json));
             active.updated_at = Set(stage.updated_at);
             active.deleted_at = Set(stage.deleted_at);
-            active.update(&self.db).await?
+            active.update(&self.db).await.map_err(map_unique_violation)?
         } else {
             let active = value_stream_stage::ActiveModel {
                 id: Set(stage.id),
@@ -492,7 +557,7 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
                 updated_at: Set(stage.updated_at),
                 deleted_at: Set(stage.deleted_at),
             };
-            active.insert(&self.db).await?
+            active.insert(&self.db).await.map_err(map_unique_violation)?
         };
 
         Ok(result.into())
