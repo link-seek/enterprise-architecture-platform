@@ -79,7 +79,7 @@ function RoleSelect({ user, disabled, onChange }: {
 }
 
 export default function UsersPage() {
-  const { data, loading, refetch } = useQuery<{ users: { nodes: User[] } }>(GET_USERS)
+  const { data, loading, error: queryError, refetch } = useQuery<{ users: { nodes: User[] } }>(GET_USERS)
   const isMobile = useIsMobile()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState({ email: '', name: '', password: '', role: 'viewer' })
@@ -186,6 +186,7 @@ export default function UsersPage() {
 
   const renderContent = () => {
     if (loading) return renderLoading()
+    if (queryError) return <div className="text-center py-8 text-destructive">加载失败：{queryError.message}</div>
     if (users.length === 0) return renderEmpty()
     return isMobile ? renderMobile() : renderDesktop()
   }

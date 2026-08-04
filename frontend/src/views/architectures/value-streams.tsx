@@ -59,7 +59,7 @@ const ValueStreamList = memo(function ValueStreamList({ nodes, canEdit, isMobile
   canEdit: boolean
   isMobile: boolean
   detailBase: string
-  spaceId?: string
+  spaceId: string
   onEdit: (vs: ValueStream) => void
   onDelete: (vs: ValueStream) => void
   onVersion: (vs: ValueStream) => void
@@ -189,6 +189,11 @@ export default function ValueStreams() {
     skip: !spaceId,
   })
 
+  const handleEdit = useCallback((vs: ValueStream) => { setEditing(vs); setDialogOpen(true) }, [])
+  const handleDelete = useCallback((vs: ValueStream) => setDeleting(vs), [])
+  const handleVersion = useCallback((vs: ValueStream) => { setVersionItem(vs); setVersionOpen(true) }, [])
+  const handleHistory = useCallback((vs: ValueStream) => { setHistoryLogicalId(vs.logicalId); setHistoryOpen(true) }, [])
+
   if (!spaceId) {
     return (
       <div className="p-6">
@@ -198,11 +203,6 @@ export default function ValueStreams() {
   }
 
   const detailBase = `/spaces/${spaceId}/architectures/value-streams`
-
-  const handleEdit = useCallback((vs: ValueStream) => { setEditing(vs); setDialogOpen(true) }, [])
-  const handleDelete = useCallback((vs: ValueStream) => setDeleting(vs), [])
-  const handleVersion = useCallback((vs: ValueStream) => { setVersionItem(vs); setVersionOpen(true) }, [])
-  const handleHistory = useCallback((vs: ValueStream) => { setHistoryLogicalId(vs.logicalId); setHistoryOpen(true) }, [])
 
   return (
     <div className="p-4 md:p-6 space-y-4">

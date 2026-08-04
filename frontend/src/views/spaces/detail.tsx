@@ -52,7 +52,7 @@ export default function SpaceDetail() {
 
   const [setVisibility, { loading: visibilityLoading }] = useMutation(SET_SPACE_VISIBILITY, {
     refetchQueries: [{ query: GET_SPACE, variables: { id: spaceId } }],
-    onError: (e) => setVisibilityError(extractFriendlyError(e)),
+    onError: (e) => { console.error('设置可见性失败:', e); setVisibilityError(extractFriendlyError(e)) },
     onCompleted: () => {
       setVisibilityError(null)
       setPendingVisibility(null)
@@ -61,14 +61,15 @@ export default function SpaceDetail() {
 
   const space = data?.spaceById
 
-  const handleEdit = useCallback(() => { setArchiveError(null); setEditOpen(true) }, [])
-  const handleMembers = useCallback(() => { setArchiveError(null); setMembersOpen(true) }, [])
-  const handleArchive = useCallback(() => { setArchiveError(null); setConfirmArchive(true) }, [])
+  const clearAllErrors = useCallback(() => { setArchiveError(null); setVisibilityError(null) }, [])
+  const handleEdit = useCallback(() => { clearAllErrors(); setEditOpen(true) }, [clearAllErrors])
+  const handleMembers = useCallback(() => { clearAllErrors(); setMembersOpen(true) }, [clearAllErrors])
+  const handleArchive = useCallback(() => { clearAllErrors(); setConfirmArchive(true) }, [clearAllErrors])
   const handleVisibility = useCallback(() => {
     if (!space) return
-    setVisibilityError(null)
+    clearAllErrors()
     setPendingVisibility(space.visibility === 'public' ? 'private' : 'public')
-  }, [space])
+  }, [space, clearAllErrors])
 
   const statsItems = [
     { label: '价值流', value: stats?.valueStreamCountBySpace ?? 0, to: 'value-streams' },
@@ -79,7 +80,7 @@ export default function SpaceDetail() {
   const visibleActions = useMemo(() => [
     { icon: Pencil, label: '编辑', onClick: handleEdit, visible: canEdit },
     { icon: Users, label: '成员', onClick: handleMembers, visible: role === 'owner' },
-    { icon: space.visibility === 'public' ? EyeOff : Eye, label: space.visibility === 'public' ? '设为私有' : '设为公开', onClick: handleVisibility, visible: role === 'owner' },
+    { icon: space?.visibility === 'public' ? EyeOff : Eye, label: space?.visibility === 'public' ? '设为私有' : '设为公开', onClick: handleVisibility, visible: role === 'owner' },
     { icon: Archive, label: '归档', onClick: handleArchive, visible: role === 'owner' },
   ].filter((a) => a.visible), [canEdit, role, handleEdit, handleMembers, handleArchive, handleVisibility, space])
 
@@ -124,7 +125,7 @@ export default function SpaceDetail() {
                   {visibleActions.map((action) => {
                     const Icon = action.icon
                     return (
-                      <Button key={action.label} variant="outline" size="sm" onClick={action.onClick}>
+                      <Button key={action.label} variant="outline" size="sm" onClick={action.onClick} disabled={archiveLoading || visibilityLoading}>
                         <Icon className="h-4 w-4 mr-2" />
                         {action.label}
                       </Button>

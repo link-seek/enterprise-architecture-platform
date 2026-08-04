@@ -114,7 +114,7 @@ function CapabilityList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
       <TableBody>
         {nodes.map((cap) => (
           <TableRow key={cap.id}>
-            <TableCell className="font-medium">{cap.name}</TableCell>
+            <TableCell className="font-medium break-words">{cap.name}</TableCell>
             <TableCell>{cap.level}</TableCell>
             <TableCell>{cap.maturity}</TableCell>
             <TableCell>{cap.businessValue}</TableCell>
