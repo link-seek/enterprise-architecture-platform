@@ -23,6 +23,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Loader2, UserPlus } from 'lucide-react'
+import { useIsMobile } from '@/hooks/use-media-query'
 
 const GET_USERS = gql`
   query GetUsers {
@@ -48,14 +49,50 @@ interface User {
 
 const ROLE_OPTIONS = ['admin', 'architect', 'viewer'] as const
 
+const STATUS_VARIANT_MAP: Record<string, 'default' | 'secondary' | 'destructive'> = {
+  active: 'default',
+  inactive: 'secondary',
+}
+
+function StatusBadge({ status, className }: { status: string; className?: string }) {
+  const variant = STATUS_VARIANT_MAP[status] ?? 'destructive'
+  return (
+    <Badge variant={variant} className={className}>
+      {status}
+    </Badge>
+  )
+}
+
+function RoleSelect({ user, disabled, onChange }: {
+  user: User
+  disabled: boolean
+  onChange: (user: User, newRole: typeof ROLE_OPTIONS[number]) => void
+}) {
+  return (
+    <select
+      value={user.role}
+      disabled={disabled}
+      onChange={(e) => onChange(user, e.target.value as typeof ROLE_OPTIONS[number])}
+      className="border rounded px-2 py-1 text-sm bg-background"
+    >
+      {ROLE_OPTIONS.map((r) => (
+        <option key={r} value={r}>
+          {r}
+        </option>
+      ))}
+    </select>
+  )
+}
+
 export default function UsersPage() {
-  const { data, loading, refetch } = useQuery<{ users: { nodes: User[] } }>(GET_USERS)
+  const { data, loading, error: queryError, refetch } = useQuery<{ users: { nodes: User[] } }>(GET_USERS)
+  const isMobile = useIsMobile()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState({ email: '', name: '', password: '', role: 'viewer' })
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [roleUpdating, setRoleUpdating] = useState<string | null>(null)
-  const [confirmRole, setConfirmRole] = useState<{ user: User; newRole: string } | null>(null)
+  const [confirmRole, setConfirmRole] = useState<{ user: User; newRole: typeof ROLE_OPTIONS[number] } | null>(null)
 
   const users: User[] = data?.users?.nodes || []
 
@@ -88,7 +125,7 @@ export default function UsersPage() {
     }
   }
 
-  function onRoleSelect(user: User, newRole: string) {
+  function onRoleSelect(user: User, newRole: typeof ROLE_OPTIONS[number]) {
     if (newRole === user.role) return
     setConfirmRole({ user, newRole })
   }
@@ -98,8 +135,70 @@ export default function UsersPage() {
     confirmRole.user.role === 'admin' &&
     confirmRole.newRole !== 'admin'
 
+  const renderLoading = () => (
+    <div className="text-center py-8 text-muted-foreground">加载中...</div>
+  )
+
+  const renderEmpty = () => (
+    <div className="text-center py-8 text-muted-foreground">暂无数据</div>
+  )
+
+  const renderMobile = () => (
+    <div className="space-y-3">
+      {users.map((u) => (
+        <div key={u.id} className="rounded-lg border p-4 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-medium truncate" title={u.name}>{u.name}</p>
+              <p className="text-xs text-muted-foreground truncate" title={u.email}>{u.email}</p>
+            </div>
+            <StatusBadge status={u.status} className="shrink-0" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground">角色</Label>
+            <RoleSelect user={u} disabled={roleUpdating === u.id} onChange={onRoleSelect} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+
+  const renderDesktop = () => (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>姓名</TableHead>
+          <TableHead>邮箱</TableHead>
+          <TableHead>角色</TableHead>
+          <TableHead>状态</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {users.map((u) => (
+          <TableRow key={u.id}>
+            <TableCell className="font-medium">{u.name}</TableCell>
+            <TableCell className="max-w-[200px] truncate" title={u.email}>{u.email}</TableCell>
+            <TableCell className="whitespace-nowrap">
+              <RoleSelect user={u} disabled={roleUpdating === u.id} onChange={onRoleSelect} />
+            </TableCell>
+            <TableCell className="whitespace-nowrap">
+              <StatusBadge status={u.status} />
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+
+  const renderContent = () => {
+    if (loading) return renderLoading()
+    if (queryError) return <div className="text-center py-8 text-destructive">加载失败，请稍后重试</div>
+    if (users.length === 0) return renderEmpty()
+    return isMobile ? renderMobile() : renderDesktop()
+  }
+
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-4 md:p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">用户管理</h1>
         <Button onClick={() => setDialogOpen(true)}>
@@ -108,47 +207,7 @@ export default function UsersPage() {
         </Button>
       </div>
 
-      {loading ? (
-        <div className="text-center py-8 text-muted-foreground">加载中...</div>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>姓名</TableHead>
-              <TableHead>邮箱</TableHead>
-              <TableHead>角色</TableHead>
-              <TableHead>状态</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {users.map((u) => (
-              <TableRow key={u.id}>
-                <TableCell className="font-medium">{u.name}</TableCell>
-                <TableCell>{u.email}</TableCell>
-                <TableCell>
-                  <select
-                    value={u.role}
-                    disabled={roleUpdating === u.id}
-                    onChange={(e) => onRoleSelect(u, e.target.value)}
-                    className="border rounded px-2 py-1 text-sm bg-background"
-                  >
-                    {ROLE_OPTIONS.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
-                </TableCell>
-                <TableCell>
-                  <Badge variant={u.status === 'active' ? 'default' : 'destructive'}>
-                    {u.status}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+      {renderContent()}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
