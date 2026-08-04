@@ -41,7 +41,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     }
     
     // Click "保存" button
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
@@ -75,7 +75,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
       await maturityField.fill('发展中');
     }
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Verify new capability appears in table
@@ -104,7 +104,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
       await maturityField.fill('初始');
     }
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created capability and click edit button
@@ -135,7 +135,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     }
     
     // Click "保存" button
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
@@ -157,7 +157,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('待删除能力');
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这个将被删除');
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created capability
@@ -189,7 +189,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     
     // Test Case 1: Empty required fields
     // Try to submit with empty name field
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     
     // Should show validation error or prevent submission
     await expect(page.getByRole('dialog')).toBeVisible(); // Dialog should stay open
@@ -233,7 +233,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
       await maturityField.fill('发展中');
     }
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Read
@@ -247,7 +247,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('更新后的CRUD测试');
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     await expect(page.getByText('更新后的CRUD测试')).toBeVisible({ timeout: 10000 });

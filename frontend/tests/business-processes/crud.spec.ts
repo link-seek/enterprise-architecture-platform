@@ -46,7 +46,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     }
     
     // Click "保存" button
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
@@ -95,7 +95,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
       await costField.fill('5000');
     }
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Verify new process appears in table
@@ -142,7 +142,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
       await costField.fill('2000');
     }
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created process and click edit button
@@ -183,7 +183,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     }
     
     // Click "保存" button
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
@@ -213,7 +213,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('待删除流程');
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这个将被删除');
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created process
@@ -251,7 +251,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     const cycleTimeField = page.getByRole('spinbutton', { name: /周期时间|Cycle Time/ }).or(page.getByRole('textbox', { name: /周期时间|Cycle Time/ }));
     if (await cycleTimeField.isVisible()) {
       await cycleTimeField.fill('-10');
-      await page.getByRole('button', { name: /保存|Save/ }).click();
+      await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
       
       // Should show validation error
       await expect(page.getByRole('dialog')).toBeVisible(); // Dialog should stay open
@@ -270,7 +270,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     const costField = page.getByRole('spinbutton', { name: /成本|Cost/ }).or(page.getByRole('textbox', { name: /成本|Cost/ }));
     if (await costField.isVisible()) {
       await costField.fill('-100');
-      await page.getByRole('button', { name: /保存|Save/ }).click();
+      await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
       
       // Should show validation error
       await expect(page.getByRole('dialog')).toBeVisible();
@@ -282,7 +282,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     // Test Case 3: Non-numeric values in numeric fields
     if (await cycleTimeField.isVisible()) {
       await cycleTimeField.fill('not-a-number');
-      await page.getByRole('button', { name: /保存|Save/ }).click();
+      await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
       
       // Should show validation error
       await expect(page.getByRole('dialog')).toBeVisible();
@@ -317,7 +317,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
       await costField.fill('10000');
     }
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Read
@@ -349,7 +349,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
       await editSlaField.fill('99.99');
     }
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     await expect(page.getByText('更新后的CRUD流程')).toBeVisible({ timeout: 10000 });

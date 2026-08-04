@@ -137,16 +137,16 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: 
               <Input id="version-input" value={version} onChange={e => setVersion(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>状态</Label>
-              <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={status} onChange={e => setStatus(e.target.value)}>
+              <Label htmlFor="vs-status">状态</Label>
+              <select id="vs-status" className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={status} onChange={e => setStatus(e.target.value)}>
                 <option value="active">active</option>
                 <option value="archived">archived</option>
               </select>
             </div>
           </div>
           <div className="space-y-2">
-            <Label>重要性</Label>
-            <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={importance} onChange={e => setImportance(e.target.value)}>
+            <Label htmlFor="vs-importance">重要性</Label>
+            <select id="vs-importance" className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={importance} onChange={e => setImportance(e.target.value)}>
               <option value="Critical">Critical</option>
               <option value="High">High</option>
               <option value="Medium">Medium</option>
