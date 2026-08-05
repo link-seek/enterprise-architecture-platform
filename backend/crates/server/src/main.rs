@@ -4,6 +4,7 @@ mod api_doc;
 mod config;
 mod graphql;
 mod middleware;
+mod seed_dogfood;
 mod state;
 
 #[tokio::main]

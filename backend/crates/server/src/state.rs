@@ -65,6 +65,10 @@ impl AppState {
         // user its owner so existing/backfilled data has an editable home.
         seed_test_space(&db).await?;
 
+        // Dogfood: model the EAP platform's own development flow as a two-layer
+        // (business + application) architecture inside the test space. Idempotent.
+        crate::seed_dogfood::seed_dogfood(&db).await?;
+
         let cache = Cache::builder()
             .time_to_live(std::time::Duration::from_secs(300))
             .max_capacity(10_000)
