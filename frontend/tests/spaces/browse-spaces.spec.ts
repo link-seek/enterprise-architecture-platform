@@ -54,7 +54,7 @@ test.describe('Spaces - Browse Space Content', () => {
     await expect(page).toHaveURL(/\/architectures\/value-streams\/.+/);
 
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 5000 });
-    await expect(page.getByText(/名称|描述|版本|状态/)).toBeVisible();
+    await expect(page.getByText(/名称|描述|版本|状态/).first()).toBeVisible();
 
     const backButton = page.getByRole('button', { name: '返回列表' });
     if (await backButton.isVisible()) {
