@@ -16,9 +16,9 @@ test.describe('Value Stream Management - Version Control', () => {
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
-    await statusField.fill('active');
+    await statusField.selectOption('active');
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created value stream
@@ -68,9 +68,9 @@ test.describe('Value Stream Management - Version Control', () => {
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
-    await statusField.fill('active');
+    await statusField.selectOption('active');
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created value stream (status: "active")
@@ -91,7 +91,7 @@ test.describe('Value Stream Management - Version Control', () => {
       await expect(page.getByText(/确认归档|Confirm archive/)).toBeVisible();
       
       // Confirm archive action
-      await page.getByRole('button', { name: /确认|Confirm/ }).click();
+      await page.getByRole('button', { name: /确认|归档|Confirm|Archive/ }).click();
       
       // Verify dialog closes
       await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
@@ -157,9 +157,9 @@ test.describe('Value Stream Management - Version Control', () => {
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
-    await statusField.fill('active');
+    await statusField.selectOption('active');
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the value stream
@@ -205,9 +205,9 @@ test.describe('Value Stream Management - Version Control', () => {
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
-    await statusField.fill('active');
+    await statusField.selectOption('active');
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the value stream
@@ -233,7 +233,7 @@ test.describe('Value Stream Management - Version Control', () => {
       await restoreButton.click();
       
       // Confirm restore if needed
-      const confirmButton = page.getByRole('button', { name: /确认|Confirm/ });
+      const confirmButton = page.getByRole('button', { name: /确认|归档|Confirm|Archive/ });
       if (await confirmButton.isVisible()) {
         await confirmButton.click();
       }

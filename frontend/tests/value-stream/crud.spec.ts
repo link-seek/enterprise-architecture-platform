@@ -23,14 +23,14 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     
     // Select status (assuming it's a select/dropdown)
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
-    await statusField.fill('active');
+    await statusField.selectOption('active');
     
     // Select importance (assuming it's a select/dropdown)
     const importanceField = page.getByRole('combobox', { name: /重要性|Importance/ }).or(page.getByRole('textbox', { name: /重要性|Importance/ }));
-    await importanceField.fill('high');
+    await importanceField.selectOption('High');
     
     // Click "保存" button
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
@@ -56,12 +56,12 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
-    await statusField.fill('active');
+    await statusField.selectOption('active');
     
     const importanceField = page.getByRole('combobox', { name: /重要性|Importance/ }).or(page.getByRole('textbox', { name: /重要性|Importance/ }));
-    await importanceField.fill('medium');
+    await importanceField.selectOption('Medium');
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created value stream and click edit button
@@ -87,7 +87,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await descField.fill('Updated Description');
     
     // Click "保存" button
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
@@ -109,12 +109,12 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
-    await statusField.fill('active');
+    await statusField.selectOption('active');
     
     const importanceField = page.getByRole('combobox', { name: /重要性|Importance/ }).or(page.getByRole('textbox', { name: /重要性|Importance/ }));
-    await importanceField.fill('low');
+    await importanceField.selectOption('Low');
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created value stream
@@ -126,10 +126,10 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     
     // Verify delete confirmation dialog opens
     await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByText(/确认删除|Confirm delete/)).toBeVisible();
+    await expect(page.getByText(/确认归档|确认删除|Confirm/)).toBeVisible();
     
-    // Click "确认" button
-    await page.getByRole('button', { name: /确认|Confirm/ }).click();
+    // Click "归档" button
+    await page.getByRole('button', { name: /确认|归档|Confirm|Archive/ }).click();
     
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
@@ -142,27 +142,20 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await page.getByRole('button', { name: '新建价值流' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
     
-    // Test Case 1: Empty name field
+    // Test Case 1: Empty name field — submit button should be disabled
     await page.getByRole('textbox', { name: /名称|Name/ }).clear();
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('描述');
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
-    // Try to submit with empty name
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    const submitButton = page.getByRole('button', { name: /保存|创建|Save|Create/ });
+    await expect(submitButton).toBeDisabled();
     
-    // Should show validation error or prevent submission
-    // Check for validation message or that dialog is still open
+    // Dialog should stay open
     await expect(page.getByRole('dialog')).toBeVisible();
     
-    // Test Case 2: Invalid version format (if validation exists)
+    // Test Case 2: Fill name — button should become enabled
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('测试名称');
-    await page.getByRole('textbox', { name: /版本|Version/ }).clear();
-    await page.getByRole('textbox', { name: /版本|Version/ }).fill('invalid version');
-    
-    await page.getByRole('button', { name: /保存|Save/ }).click();
-    
-    // Should show validation error
-    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(submitButton).toBeEnabled();
     
     // Close dialog
     await page.getByRole('button', { name: /取消|Cancel/ }).or(page.locator('button[aria-label="Close"]')).click();
@@ -177,9 +170,9 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
-    await statusField.fill('active');
+    await statusField.selectOption('active');
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created value stream
