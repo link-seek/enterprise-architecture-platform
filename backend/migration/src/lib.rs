@@ -43,6 +43,8 @@ mod m20250101_000040_create_application_process_steps;
 mod m20250101_000041_create_process_realizations;
 mod m20250101_000042_create_capability_realizations;
 mod m20250101_000043_create_step_realizations;
+mod m20250101_000044_enrich_value_stream_stage;
+mod m20250101_000045_backfill_entity_owners;
 
 pub struct Migrator;
 
@@ -93,6 +95,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000041_create_process_realizations::Migration),
             Box::new(m20250101_000042_create_capability_realizations::Migration),
             Box::new(m20250101_000043_create_step_realizations::Migration),
+            Box::new(m20250101_000044_enrich_value_stream_stage::Migration),
+            Box::new(m20250101_000045_backfill_entity_owners::Migration),
         ]
     }
 }

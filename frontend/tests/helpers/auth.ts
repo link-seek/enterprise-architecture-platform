@@ -16,9 +16,17 @@ export const SPACE_BASE = `/spaces/${TEST_SPACE_ID}/architectures`;
  * After login, verifies redirect to the space-scoped value-streams page.
  */
 export async function login(page: Page) {
+  await loginAs(page, TEST_EMAIL, TEST_PASSWORD);
+}
+
+/**
+ * Login as a specific user via the UI (used by ownership tests that need to
+ * switch between two space members).
+ */
+export async function loginAs(page: Page, email: string, password: string) {
   await page.goto('/login');
-  await page.fill('input[type="email"]', TEST_EMAIL);
-  await page.fill('input[type="password"]', TEST_PASSWORD);
+  await page.fill('input[type="email"]', email);
+  await page.fill('input[type="password"]', password);
   await page.press('input[type="password"]', 'Enter');
   // Login success: sidebar visible (environment-agnostic)
   await expect(page.getByRole('link', { name: '价值流' })).toBeVisible({ timeout: 10000 });

@@ -1,16 +1,26 @@
 import { useQuery } from '@apollo/client/react'
+import { gql } from '@apollo/client'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Link, useParams } from 'react-router-dom'
-import { Plus, Pencil, Trash2, History, GitBranch, MoreVertical, type LucideIcon } from 'lucide-react'
+import { Plus, Pencil, Trash2, History, GitBranch, MoreVertical, UserRoundCog, type LucideIcon } from 'lucide-react'
 import { useState, useCallback, memo } from 'react'
 import { ValueStreamCrudDialog, ValueStreamDeleteDialog } from './crud'
 import { VersionHistoryDialog, CreateVersionDialog, ArchiveButton, GET_VALUE_STREAMS } from './version-control'
+import { TransferOwnershipDialog } from './transfer-ownership-dialog'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { useIsMobile } from '@/hooks/use-media-query'
+
+const TRANSFER_VALUE_STREAM_OWNERSHIP = gql`
+  mutation ValueStreamTransferOwnership($id: String!, $newOwnerId: String!) {
+    valueStreamTransferOwnership(id: $id, newOwnerId: $newOwnerId) {
+      id ownerId
+    }
+  }
+`
 
 interface ValueStream {
   id: string
@@ -20,6 +30,8 @@ interface ValueStream {
   status: string
   importance: string
   logicalId: string
+  ownerId?: string | null
+  endDeliverable?: string | null
 }
 
 interface ValueStreamsQuery {
@@ -54,18 +66,24 @@ function ActionButton({ action }: { action: ValueStreamAction }) {
   )
 }
 
-function buildActions(vs: ValueStream, onEdit: (vs: ValueStream) => void, onVersion: (vs: ValueStream) => void, onHistory: (vs: ValueStream) => void, onDelete: (vs: ValueStream) => void): ValueStreamAction[] {
-  return [
-    { icon: Pencil, label: '编辑', onClick: () => onEdit(vs) },
-    { icon: GitBranch, label: '新版本', onClick: () => onVersion(vs) },
+function buildActions(vs: ValueStream, isOwned: boolean, onEdit: (vs: ValueStream) => void, onVersion: (vs: ValueStream) => void, onHistory: (vs: ValueStream) => void, onDelete: (vs: ValueStream) => void, onTransfer: (vs: ValueStream) => void): ValueStreamAction[] {
+  const actions: ValueStreamAction[] = [
     { icon: History, label: '历史', onClick: () => onHistory(vs) },
-    { icon: Trash2, label: '删除', onClick: () => onDelete(vs), destructive: true },
   ]
+  if (isOwned) {
+    actions.unshift(
+      { icon: Pencil, label: '编辑', onClick: () => onEdit(vs) },
+      { icon: GitBranch, label: '新版本', onClick: () => onVersion(vs) },
+      { icon: UserRoundCog, label: '转移所有权', onClick: () => onTransfer(vs) },
+      { icon: Trash2, label: '删除', onClick: () => onDelete(vs), destructive: true },
+    )
+  }
+  return actions
 }
 
-const ValueStreamList = memo(function ValueStreamList({ nodes, canEdit, isMobile, detailBase, spaceId, onEdit, onDelete, onVersion, onHistory }: {
+const ValueStreamList = memo(function ValueStreamList({ nodes, isOwned, isMobile, detailBase, spaceId, onEdit, onDelete, onVersion, onHistory, onTransfer }: {
   nodes: ValueStream[]
-  canEdit: boolean
+  isOwned: (vs: ValueStream) => boolean
   isMobile: boolean
   detailBase: string
   spaceId: string
@@ -73,17 +91,22 @@ const ValueStreamList = memo(function ValueStreamList({ nodes, canEdit, isMobile
   onDelete: (vs: ValueStream) => void
   onVersion: (vs: ValueStream) => void
   onHistory: (vs: ValueStream) => void
+  onTransfer: (vs: ValueStream) => void
 }) {
   if (isMobile) {
     return (
       <div className="space-y-3">
         {nodes.map((vs) => {
-          const actions = buildActions(vs, onEdit, onVersion, onHistory, onDelete)
+          const owned = isOwned(vs)
+          const actions = buildActions(vs, owned, onEdit, onVersion, onHistory, onDelete, onTransfer)
           return (
           <div key={vs.id} className="rounded-lg border p-4 space-y-2">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="font-medium truncate" title={vs.name}>{vs.name}</p>
+                {vs.endDeliverable && (
+                  <p className="text-xs text-muted-foreground truncate" title={vs.endDeliverable}>交付物: {vs.endDeliverable}</p>
+                )}
                 {vs.description && (
                   <p className="text-xs text-muted-foreground truncate" title={vs.description}>{vs.description}</p>
                 )}
@@ -98,7 +121,7 @@ const ValueStreamList = memo(function ValueStreamList({ nodes, canEdit, isMobile
                 {/* 移动端使用 outline 增强触摸可见性，桌面端使用 ghost 保持简洁 */}
                 <Button variant="outline" size="sm">查看</Button>
               </Link>
-              {canEdit && (
+              {owned && (
                 <div className="flex items-center gap-1">
                   {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
                   <DropdownMenu>
@@ -133,6 +156,7 @@ const ValueStreamList = memo(function ValueStreamList({ nodes, canEdit, isMobile
       <TableHeader>
         <TableRow>
           <TableHead>名称</TableHead>
+          <TableHead>最终交付物</TableHead>
           <TableHead>版本</TableHead>
           <TableHead>状态</TableHead>
           <TableHead>操作</TableHead>
@@ -140,13 +164,15 @@ const ValueStreamList = memo(function ValueStreamList({ nodes, canEdit, isMobile
       </TableHeader>
       <TableBody>
         {nodes.map((vs) => {
-          const actions = buildActions(vs, onEdit, onVersion, onHistory, onDelete)
+          const owned = isOwned(vs)
+          const actions = buildActions(vs, owned, onEdit, onVersion, onHistory, onDelete, onTransfer)
           return (
           <TableRow key={vs.id}>
             <TableCell className="font-medium">
               {vs.name}
               <span className="ml-2 text-xs text-muted-foreground">{vs.description}</span>
             </TableCell>
+            <TableCell>{vs.endDeliverable || '-'}</TableCell>
             <TableCell>
               <Badge variant="secondary" className="font-mono">{vs.businessVersion}</Badge>
             </TableCell>
@@ -158,7 +184,7 @@ const ValueStreamList = memo(function ValueStreamList({ nodes, canEdit, isMobile
                 <Link to={`${detailBase}/${vs.id}`}>
                   <Button variant="ghost" size="sm">查看</Button>
                 </Link>
-                {canEdit && (
+                {owned && (
                   <>
                     {actions.filter((a) => !a.destructive).map((action) => (
                       <ActionButton key={action.label} action={action} />
@@ -181,7 +207,7 @@ const ValueStreamList = memo(function ValueStreamList({ nodes, canEdit, isMobile
 
 export default function ValueStreams() {
   const { spaceId } = useParams<{ spaceId: string }>()
-  const { canEdit } = useSpaceMembership(spaceId)
+  const { canEdit, isEntityOwner } = useSpaceMembership(spaceId)
   const isMobile = useIsMobile()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<ValueStream | null>(null)
@@ -190,6 +216,7 @@ export default function ValueStreams() {
   const [historyLogicalId, setHistoryLogicalId] = useState<string | null>(null)
   const [versionOpen, setVersionOpen] = useState(false)
   const [versionItem, setVersionItem] = useState<ValueStream | null>(null)
+  const [transferItem, setTransferItem] = useState<ValueStream | null>(null)
 
   const { data, loading, error } = useQuery<ValueStreamsQuery>(GET_VALUE_STREAMS, {
     variables: { spaceId },
@@ -200,6 +227,7 @@ export default function ValueStreams() {
   const handleDelete = useCallback((vs: ValueStream) => setDeleting(vs), [])
   const handleVersion = useCallback((vs: ValueStream) => { setVersionItem(vs); setVersionOpen(true) }, [])
   const handleHistory = useCallback((vs: ValueStream) => { setHistoryLogicalId(vs.logicalId); setHistoryOpen(true) }, [])
+  const handleTransfer = useCallback((vs: ValueStream) => setTransferItem(vs), [])
 
   if (!spaceId) {
     return (
@@ -232,7 +260,7 @@ export default function ValueStreams() {
             <>
               <ValueStreamList
                 nodes={data.valueStreamsBySpace ?? EMPTY_VALUE_STREAMS}
-                canEdit={canEdit}
+                isOwned={(vs) => isEntityOwner(vs.ownerId)}
                 isMobile={isMobile}
                 detailBase={detailBase}
                 spaceId={spaceId}
@@ -240,6 +268,7 @@ export default function ValueStreams() {
                 onDelete={handleDelete}
                 onVersion={handleVersion}
                 onHistory={handleHistory}
+                onTransfer={handleTransfer}
               />
               <div className="flex items-center justify-between mt-4">
                 <p className="text-sm text-muted-foreground">共 {data.valueStreamsBySpace?.length ?? 0} 条</p>
@@ -253,6 +282,15 @@ export default function ValueStreams() {
       <ValueStreamDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
       <VersionHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} spaceId={spaceId} logicalId={historyLogicalId} />
       <CreateVersionDialog open={versionOpen} onOpenChange={setVersionOpen} currentItem={versionItem} spaceId={spaceId} />
+      <TransferOwnershipDialog
+        open={!!transferItem}
+        onOpenChange={(v) => { if (!v) setTransferItem(null) }}
+        entityId={transferItem?.id ?? null}
+        spaceId={spaceId}
+        entityLabel="价值流"
+        mutation={TRANSFER_VALUE_STREAM_OWNERSHIP}
+        refetchQueries={[{ query: GET_VALUE_STREAMS, variables: { spaceId } }]}
+      />
     </div>
   )
 }

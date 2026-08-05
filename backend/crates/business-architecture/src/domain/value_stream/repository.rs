@@ -24,6 +24,19 @@ pub trait ValueStreamRepository: Send + Sync + 'static {
         page: u64,
         per_page: u64,
     ) -> Result<(Vec<ValueStream>, u64), DomainError>;
+    /// Load the non-deleted stages of a value stream, ordered by sequence.
+    async fn find_stages_by_value_stream(
+        &self,
+        vs_id: Uuid,
+    ) -> Result<Vec<ValueStreamStage>, DomainError>;
+    /// Atomically archive `current`, insert `new_version`, and copy the given
+    /// stages to the new version — all inside a single transaction.
+    async fn save_version_atomic(
+        &self,
+        current: &ValueStream,
+        new_version: &ValueStream,
+        new_stages: &[ValueStreamStage],
+    ) -> Result<(), DomainError>;
 }
 
 #[async_trait]

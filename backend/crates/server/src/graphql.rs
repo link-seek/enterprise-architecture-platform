@@ -488,6 +488,50 @@ async fn ensure_space_edit_access(
         .map_err(domain_err_to_graphql)
 }
 
+/// Require the actor to be the entity's owner (or a global admin).
+/// Space editors who are not the entity owner are rejected even though they
+/// pass `ensure_space_edit_access` — entity-level ownership protects the
+/// "I built this, nobody else should edit it" guarantee.
+async fn ensure_entity_owner_or_admin(
+    ctx: &async_graphql::dynamic::ResolverContext<'_>,
+    owner_id: Option<Uuid>,
+) -> async_graphql::Result<()> {
+    let claims = require_claims(ctx)?;
+    if claims.user_role().is_admin() {
+        return Ok(());
+    }
+    if owner_id == Some(claims.user_id) {
+        return Ok(());
+    }
+    Err(domain_err_to_graphql(DomainError::NotEntityOwner))
+}
+
+/// Require `user_id` to be a member (any role) of `space_id`, or return a
+/// "not a member" GraphQL error. Used to validate `transferOwnership` targets.
+async fn ensure_space_member(
+    ctx: &async_graphql::dynamic::ResolverContext<'_>,
+    db: &DatabaseConnection,
+    space_id: Uuid,
+    user_id: Uuid,
+) -> async_graphql::Result<()> {
+    let claims = require_claims(ctx)?;
+    if claims.user_role().is_admin() {
+        return Ok(());
+    }
+    let service = space_service(db);
+    let membership = service
+        .my_membership(space_id, user_id)
+        .await
+        .map_err(domain_err_to_graphql)?;
+    if membership.is_none() {
+        return Err(graphql_err_with_code(
+            &DomainError::NotSpaceMember,
+            "FORBIDDEN_SPACE_NOT_MEMBER",
+        ));
+    }
+    Ok(())
+}
+
 /// Register custom ValueStream mutations that go through the domain model.
 /// These replace seaography's auto-generated CRUD mutations for value_stream.
 ///
@@ -520,14 +564,20 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 };
                 let triggering_event = ctx.args.get("triggeringEvent").and_then(|v| v.string().ok()).map(|s| s.to_owned());
                 let end_deliverable = ctx.args.get("endDeliverable").and_then(|v| v.string().ok()).map(|s| s.to_owned());
-                let owner_id = ctx.args.get("ownerId").and_then(|v| v.string().ok()).and_then(|s| Uuid::parse_str(s).ok());
+                let performance_metrics = parse_string_string_map_arg(&ctx, "performanceMetrics")?;
 
                 ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                // The creator automatically becomes the entity owner; a
+                // client-supplied ownerId is ignored (transfer is only allowed
+                // via the dedicated transferOwnership mutations).
+                let claims = require_claims(&ctx)?;
+                let owner_id = Some(claims.user_id);
 
                 let repo = SeaOrmValueStreamRepo::new(db.clone());
                 let service = ValueStreamService::new(repo);
                 let vs = service
-                    .create(space_id, name, description, business_version, importance, stakeholders, triggering_event, end_deliverable, owner_id)
+                    .create(space_id, name, description, business_version, importance, stakeholders, triggering_event, end_deliverable, owner_id, performance_metrics)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
 
@@ -544,7 +594,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("stakeholders", TypeRef::named_nn_list(TypeRef::STRING)))
     .argument(InputValue::new("triggeringEvent", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("endDeliverable", TypeRef::named(TypeRef::STRING)))
-    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)));
+    .argument(InputValue::new("performanceMetrics", TypeRef::named(TypeRef::STRING)));
 
     builder.mutations.push(create_field);
 
@@ -586,24 +636,22 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     Some(v) => v.string().ok().map(|s| Some(s.to_owned())),
                     None => None,
                 };
-                let owner_id = match ctx.args.get("ownerId") {
-                    Some(v) if v.is_null() => Some(None),
-                    Some(v) => v.string().ok().and_then(|s| Uuid::parse_str(s).ok()).map(|u| Some(u)),
-                    None => None,
-                };
+                // Absent → no change; explicit null → clear (empty map).
+                let performance_metrics = parse_string_string_map_arg(&ctx, "performanceMetrics")?;
 
                 let repo = SeaOrmValueStreamRepo::new(db.clone());
-                // Enforce space-level ACL: look up the target's space before mutating.
+                // Enforce space-level ACL + entity ownership before mutating.
                 let existing = repo
                     .find_by_id(id)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?
                     .ok_or_else(|| async_graphql::Error::new("Value stream not found."))?;
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
 
                 let service = ValueStreamService::new(repo);
                 let vs = service
-                    .update(id, name, description, importance, stakeholders, triggering_event, end_deliverable, owner_id)
+                    .update(id, name, description, importance, stakeholders, triggering_event, end_deliverable, None, performance_metrics)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
 
@@ -619,7 +667,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("stakeholders", TypeRef::named_nn_list(TypeRef::STRING)))
     .argument(InputValue::new("triggeringEvent", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("endDeliverable", TypeRef::named(TypeRef::STRING)))
-    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)));
+    .argument(InputValue::new("performanceMetrics", TypeRef::named(TypeRef::STRING)));
 
     builder.mutations.push(update_field);
 
@@ -638,13 +686,14 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     .map_err(|e| async_graphql::Error::new(format!("Invalid UUID: {e}")))?;
 
                 let repo = SeaOrmValueStreamRepo::new(db.clone());
-                // Enforce space-level ACL before archiving.
+                // Enforce space-level ACL + entity ownership before archiving.
                 let existing = repo
                     .find_by_id(id)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?
                     .ok_or_else(|| async_graphql::Error::new("Value stream not found."))?;
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
 
                 let service = ValueStreamService::new(repo);
                 service
@@ -679,13 +728,14 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 let new_description = ctx.args.get("newDescription").and_then(|v| v.string().ok()).map(|s| s.to_owned());
 
                 let repo = SeaOrmValueStreamRepo::new(db.clone());
-                // Enforce space-level ACL before creating a new version.
+                // Enforce space-level ACL + entity ownership before versioning.
                 let existing = repo
                     .find_by_id(current_id)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?
                     .ok_or_else(|| async_graphql::Error::new("Value stream not found."))?;
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
 
                 let service = ValueStreamService::new(repo);
                 let vs = service
@@ -704,6 +754,46 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("newDescription", TypeRef::named(TypeRef::STRING)));
 
     builder.mutations.push(create_version_field);
+
+    // ── valueStreamTransferOwnership ─────────────────────────────────
+    // Only the current owner (or an admin) may transfer. The target must be
+    // a member of the same space. The new owner is set as `owner_id` of the
+    // value stream; stages continue to follow the parent value stream's owner.
+    let transfer_field = Field::new(
+        "valueStreamTransferOwnership",
+        TypeRef::named_nn("ValueStreams"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Update)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+                let new_owner_id = parse_uuid_arg(&ctx, "newOwnerId")?;
+
+                let repo = SeaOrmValueStreamRepo::new(db.clone());
+                let existing = repo
+                    .find_by_id(id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Value stream not found."))?;
+                ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
+                ensure_space_member(&ctx, db, existing.space_id, new_owner_id).await?;
+
+                let service = ValueStreamService::new(repo);
+                let vs = service
+                    .transfer_ownership(id, new_owner_id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                let model = domain_vs_to_model(&vs);
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("newOwnerId", TypeRef::named_nn(TypeRef::STRING)));
+
+    builder.mutations.push(transfer_field);
 }
 
 // ============================================================================
@@ -809,7 +899,8 @@ fn domain_err_to_graphql(e: DomainError) -> async_graphql::Error {
         DomainError::AuditLogFailed(_) => "AUDIT_LOG_FAILED",
         DomainError::InvalidTransition { .. } | DomainError::CannotModifyArchived { .. }
         | DomainError::CannotReferenceArchived | DomainError::AlreadyMember
-        | DomainError::CannotRemoveLastOwner | DomainError::NotOwner => "FORBIDDEN",
+        | DomainError::CannotRemoveLastOwner | DomainError::NotOwner
+        | DomainError::NotEntityOwner => "FORBIDDEN",
     };
     // Database and audit-log errors may contain sensitive internal details
     // (SQL fragments, table/column names, constraint names, repository error
@@ -1040,10 +1131,14 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
                     Some(v) => parse_enum::<CapabilityStatus>(&v)?,
                     None => CapabilityStatus::Active,
                 };
-                let owner_id = ctx.args.get("ownerId").and_then(|v| v.string().ok()).and_then(|s| Uuid::parse_str(s).ok());
                 let metrics = parse_string_string_map_arg(&ctx, "metrics")?;
 
                 ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                // The creator automatically becomes the entity owner; transfer
+                // is only allowed via capabilityTransferOwnership.
+                let claims = require_claims(&ctx)?;
+                let owner_id = Some(claims.user_id);
 
                 let now = chrono::Utc::now();
                 let am = business_capability::ActiveModel {
@@ -1083,7 +1178,6 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("businessValue", TypeRef::named_nn("BusinessValueRatingEnum")))
     .argument(InputValue::new("cost", TypeRef::named("CostRatingEnum")))
     .argument(InputValue::new("capabilityStatus", TypeRef::named("CapabilityStatusEnum")))
-    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("metrics", TypeRef::named(TypeRef::STRING)));
     builder.mutations.push(create);
 
@@ -1103,6 +1197,7 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?
                     .ok_or_else(|| async_graphql::Error::new("Capability not found."))?;
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
 
                 let mut am: business_capability::ActiveModel = existing.into();
                 if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) {
@@ -1126,9 +1221,6 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
                 if let Some(v) = get_enum_arg(&ctx, "capabilityStatus") {
                     am.capability_status = Set(parse_enum::<CapabilityStatus>(&v)?);
                 }
-                if let Some(v) = ctx.args.get("ownerId").and_then(|v| v.string().ok()) {
-                    am.owner_id = Set(Uuid::parse_str(v).ok());
-                }
                 if let Some(metrics) = parse_string_string_map_arg(&ctx, "metrics")? {
                     am.metrics = Set(Some(metrics));
                 }
@@ -1149,7 +1241,6 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("businessValue", TypeRef::named("BusinessValueRatingEnum")))
     .argument(InputValue::new("cost", TypeRef::named("CostRatingEnum")))
     .argument(InputValue::new("capabilityStatus", TypeRef::named("CapabilityStatusEnum")))
-    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("metrics", TypeRef::named(TypeRef::STRING)));
     builder.mutations.push(update);
 
@@ -1169,6 +1260,7 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?
                     .ok_or_else(|| async_graphql::Error::new("Capability not found."))?;
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
 
                 business_capability::Entity::delete_by_id(id)
                     .exec(db)
@@ -1180,6 +1272,41 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
     )
     .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
     builder.mutations.push(delete);
+
+    // ── capabilityTransferOwnership ──────────────────────────────────
+    let transfer = Field::new(
+        "capabilityTransferOwnership",
+        TypeRef::named_nn("BusinessCapabilities"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Update)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+                let new_owner_id = parse_uuid_arg(&ctx, "newOwnerId")?;
+
+                let existing = business_capability::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Capability not found."))?;
+                ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
+                ensure_space_member(&ctx, db, existing.space_id, new_owner_id).await?;
+
+                let mut am: business_capability::ActiveModel = existing.into();
+                am.owner_id = Set(Some(new_owner_id));
+                am.updated_at = Set(chrono::Utc::now());
+                let model = am
+                    .update(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("newOwnerId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(transfer);
 }
 
 // ============================================================================
@@ -1214,9 +1341,12 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                     Some(v) => Some(parse_enum::<MaturityLevel>(&v)?),
                     None => None,
                 };
-                let owner_id = ctx.args.get("ownerId").and_then(|v| v.string().ok()).and_then(|s| Uuid::parse_str(s).ok());
-
                 ensure_space_edit_access(&ctx, db, space_id).await?;
+
+                // The creator automatically becomes the entity owner; transfer
+                // is only allowed via processTransferOwnership.
+                let claims = require_claims(&ctx)?;
+                let owner_id = Some(claims.user_id);
 
                 let now = chrono::Utc::now();
                 let am = business_process::ActiveModel {
@@ -1254,8 +1384,7 @@ fn register_process_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("cycleTime", TypeRef::named(TypeRef::INT)))
     .argument(InputValue::new("costPerTransaction", TypeRef::named(TypeRef::FLOAT)))
     .argument(InputValue::new("automationLevel", TypeRef::named("AutomationLevelEnum")))
-    .argument(InputValue::new("maturity", TypeRef::named("MaturityLevelEnum")))
-    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)));
+    .argument(InputValue::new("maturity", TypeRef::named("MaturityLevelEnum")));
     builder.mutations.push(create);
 
     // ── processUpdate ────────────────────────────────────────────────
@@ -1274,6 +1403,7 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?
                     .ok_or_else(|| async_graphql::Error::new("Process not found."))?;
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
 
                 let mut am: business_process::ActiveModel = existing.into();
                 if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) {
@@ -1297,9 +1427,6 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                 if let Some(v) = get_enum_arg(&ctx, "maturity") {
                     am.maturity = Set(Some(parse_enum::<MaturityLevel>(&v)?));
                 }
-                if let Some(v) = ctx.args.get("ownerId").and_then(|v| v.string().ok()) {
-                    am.owner_id = Set(Uuid::parse_str(v).ok());
-                }
                 am.updated_at = Set(chrono::Utc::now());
                 let model = am
                     .update(db)
@@ -1316,8 +1443,7 @@ fn register_process_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("cycleTime", TypeRef::named(TypeRef::INT)))
     .argument(InputValue::new("costPerTransaction", TypeRef::named(TypeRef::FLOAT)))
     .argument(InputValue::new("automationLevel", TypeRef::named("AutomationLevelEnum")))
-    .argument(InputValue::new("maturity", TypeRef::named("MaturityLevelEnum")))
-    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)));
+    .argument(InputValue::new("maturity", TypeRef::named("MaturityLevelEnum")));
     builder.mutations.push(update);
 
     // ── processDelete ────────────────────────────────────────────────
@@ -1336,6 +1462,7 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?
                     .ok_or_else(|| async_graphql::Error::new("Process not found."))?;
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
 
                 business_process::Entity::delete_by_id(id)
                     .exec(db)
@@ -1347,6 +1474,41 @@ fn register_process_domain_mutations(builder: &mut Builder) {
     )
     .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
     builder.mutations.push(delete);
+
+    // ── processTransferOwnership ─────────────────────────────────────
+    let transfer = Field::new(
+        "processTransferOwnership",
+        TypeRef::named_nn("BusinessProcesses"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Update)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+                let new_owner_id = parse_uuid_arg(&ctx, "newOwnerId")?;
+
+                let existing = business_process::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Process not found."))?;
+                ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
+                ensure_space_member(&ctx, db, existing.space_id, new_owner_id).await?;
+
+                let mut am: business_process::ActiveModel = existing.into();
+                am.owner_id = Set(Some(new_owner_id));
+                am.updated_at = Set(chrono::Utc::now());
+                let model = am
+                    .update(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(model)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("newOwnerId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(transfer);
 }
 // ============================================================================
 // Custom Sub-Entity Domain Mutations (space-level ACL enforced)
@@ -1401,6 +1563,50 @@ async fn space_of_stage(db: &DatabaseConnection, stage_id: Uuid) -> async_graphq
         .map_err(|e| async_graphql::Error::new(e.to_string()))?
         .ok_or_else(|| async_graphql::Error::new("Value stream stage not found."))?;
     space_of_value_stream(db, stage.value_stream_id).await
+}
+
+/// Resolve the `owner_id` of a business process (for sub-entity ownership checks).
+async fn owner_of_process(db: &DatabaseConnection, process_id: Uuid) -> async_graphql::Result<Option<Uuid>> {
+    use sea_orm::EntityTrait;
+    let p = business_process::Entity::find_by_id(process_id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Process not found."))?;
+    Ok(p.owner_id)
+}
+
+/// Resolve the `owner_id` of a value stream (for sub-entity ownership checks).
+async fn owner_of_value_stream(db: &DatabaseConnection, vs_id: Uuid) -> async_graphql::Result<Option<Uuid>> {
+    use sea_orm::EntityTrait;
+    let vs = value_stream::Entity::find_by_id(vs_id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Value stream not found."))?;
+    Ok(vs.owner_id)
+}
+
+/// Resolve the `owner_id` of a capability (for sub-entity ownership checks).
+async fn owner_of_capability(db: &DatabaseConnection, cap_id: Uuid) -> async_graphql::Result<Option<Uuid>> {
+    use sea_orm::EntityTrait;
+    let c = business_capability::Entity::find_by_id(cap_id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Capability not found."))?;
+    Ok(c.owner_id)
+}
+
+/// Resolve the `owner_id` of the parent value stream of a stage.
+async fn owner_of_stage_parent(db: &DatabaseConnection, stage_id: Uuid) -> async_graphql::Result<Option<Uuid>> {
+    use sea_orm::EntityTrait;
+    let stage = value_stream_stage::Entity::find_by_id(stage_id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Value stream stage not found."))?;
+    owner_of_value_stream(db, stage.value_stream_id).await
 }
 
 /// Resolve the `space_id` of an application component.
@@ -1510,6 +1716,8 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                 let process_id = parse_uuid_arg(&ctx, "processId")?;
                 let space_id = space_of_process(db, process_id).await?;
                 ensure_space_edit_access(&ctx, db, space_id).await?;
+                let process_owner = owner_of_process(db, process_id).await?;
+                ensure_entity_owner_or_admin(&ctx, process_owner).await?;
 
                 let name = ctx.args.try_get("name")?.string()?.to_owned();
                 let description = ctx
@@ -1578,6 +1786,8 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     .ok_or_else(|| async_graphql::Error::new("Process step not found."))?;
                 let space_id = space_of_process(db, existing.process_id).await?;
                 ensure_space_edit_access(&ctx, db, space_id).await?;
+                let process_owner = owner_of_process(db, existing.process_id).await?;
+                ensure_entity_owner_or_admin(&ctx, process_owner).await?;
 
                 let mut am: process_step::ActiveModel = existing.into();
                 if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) {
@@ -1643,6 +1853,8 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     .ok_or_else(|| async_graphql::Error::new("Process step not found."))?;
                 let space_id = space_of_process(db, existing.process_id).await?;
                 ensure_space_edit_access(&ctx, db, space_id).await?;
+                let process_owner = owner_of_process(db, existing.process_id).await?;
+                ensure_entity_owner_or_admin(&ctx, process_owner).await?;
 
                 process_step::Entity::delete_by_id(id)
                     .exec(db)
@@ -1667,6 +1879,9 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                 let value_stream_id = parse_uuid_arg(&ctx, "valueStreamId")?;
                 let space_id = space_of_value_stream(db, value_stream_id).await?;
                 ensure_space_edit_access(&ctx, db, space_id).await?;
+                // Sub-entity writes follow the parent value stream's owner.
+                let vs_owner = owner_of_value_stream(db, value_stream_id).await?;
+                ensure_entity_owner_or_admin(&ctx, vs_owner).await?;
 
                 let name = ctx.args.try_get("name")?.string()?.to_owned();
                 let sequence_order: i32 = ctx.args.try_get("sequenceOrder")?.i64()? as i32;
@@ -1680,15 +1895,68 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     .get("output")
                     .and_then(|v| v.string().ok())
                     .map(|s| s.to_owned());
+                let description = ctx
+                    .args
+                    .get("description")
+                    .and_then(|v| v.string().ok())
+                    .map(|s| s.to_owned());
+                let entry_criteria = ctx
+                    .args
+                    .get("entryCriteria")
+                    .and_then(|v| v.string().ok())
+                    .map(|s| s.to_owned());
+                let exit_criteria = ctx
+                    .args
+                    .get("exitCriteria")
+                    .and_then(|v| v.string().ok())
+                    .map(|s| s.to_owned());
+                let owner_id = ctx
+                    .args
+                    .get("ownerId")
+                    .and_then(|v| v.string().ok())
+                    .and_then(|s| Uuid::parse_str(s).ok());
+                let objective_metrics = parse_string_string_map_arg(&ctx, "objectiveMetrics")?;
+                let key_metrics = parse_string_string_map_arg(&ctx, "keyMetrics")?;
+
+                // Domain rule: sequence_order must be unique within the value stream.
+                let repo = SeaOrmValueStreamRepo::new(db.clone());
+                let existing_stages = repo
+                    .find_stages_by_value_stream(value_stream_id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                let stage = business_architecture::domain::value_stream::entity::ValueStreamStage::create(
+                    Uuid::now_v7(),
+                    value_stream_id,
+                    name,
+                    sequence_order,
+                    input,
+                    output,
+                    description,
+                    objective_metrics,
+                    entry_criteria,
+                    exit_criteria,
+                    owner_id,
+                    key_metrics,
+                    chrono::Utc::now(),
+                );
+                stage
+                    .ensure_sequence_order_unique(&existing_stages)
+                    .map_err(domain_err_to_graphql)?;
 
                 let now = chrono::Utc::now();
                 let am = value_stream_stage::ActiveModel {
-                    id: Set(Uuid::now_v7()),
-                    name: Set(name),
-                    sequence_order: Set(sequence_order),
-                    input: Set(input),
-                    output: Set(output),
-                    value_stream_id: Set(value_stream_id),
+                    id: Set(stage.id),
+                    name: Set(stage.name),
+                    sequence_order: Set(stage.sequence_order),
+                    input: Set(stage.input.clone()),
+                    output: Set(stage.output.clone()),
+                    description: Set(stage.description.clone()),
+                    objective_metrics: Set(Some(stage.objective_metrics.clone())),
+                    entry_criteria: Set(stage.entry_criteria.clone()),
+                    exit_criteria: Set(stage.exit_criteria.clone()),
+                    owner_id: Set(stage.owner_id),
+                    key_metrics: Set(Some(stage.key_metrics.clone())),
+                    value_stream_id: Set(stage.value_stream_id),
                     created_at: Set(now),
                     updated_at: Set(now),
                     deleted_at: NotSet,
@@ -1705,7 +1973,13 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("sequenceOrder", TypeRef::named_nn(TypeRef::INT)))
     .argument(InputValue::new("input", TypeRef::named(TypeRef::STRING)))
-    .argument(InputValue::new("output", TypeRef::named(TypeRef::STRING)));
+    .argument(InputValue::new("output", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("objectiveMetrics", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("entryCriteria", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("exitCriteria", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("keyMetrics", TypeRef::named(TypeRef::STRING)));
     builder.mutations.push(create);
 
     // ── valueStreamStageUpdate ───────────────────────────────────────
@@ -1723,15 +1997,21 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?
                     .ok_or_else(|| async_graphql::Error::new("Value stream stage not found."))?;
-                let space_id = space_of_value_stream(db, existing.value_stream_id).await?;
+                let vs_id = existing.value_stream_id;
+                let space_id = space_of_value_stream(db, vs_id).await?;
                 ensure_space_edit_access(&ctx, db, space_id).await?;
+                // Sub-entity writes follow the parent value stream's owner.
+                let vs_owner = owner_of_value_stream(db, vs_id).await?;
+                ensure_entity_owner_or_admin(&ctx, vs_owner).await?;
 
-                let mut am: value_stream_stage::ActiveModel = existing.into();
+                let mut am: value_stream_stage::ActiveModel = existing.clone().into();
                 if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) {
                     am.name = Set(v.to_owned());
                 }
+                let mut new_sequence_order = None;
                 if let Some(v) = ctx.args.get("sequenceOrder").and_then(|v| v.i64().ok()).map(|v| v as i32) {
                     am.sequence_order = Set(v);
+                    new_sequence_order = Some(v);
                 }
                 match ctx.args.get("input") {
                     Some(v) if v.is_null() => am.input = Set(None),
@@ -1751,6 +2031,62 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     }
                     None => {}
                 }
+                match ctx.args.get("description") {
+                    Some(v) if v.is_null() => am.description = Set(None),
+                    Some(v) => {
+                        if let Ok(s) = v.string() {
+                            am.description = Set(Some(s.to_owned()));
+                        }
+                    }
+                    None => {}
+                }
+                if let Some(metrics) = parse_string_string_map_arg(&ctx, "objectiveMetrics")? {
+                    am.objective_metrics = Set(Some(metrics));
+                }
+                match ctx.args.get("entryCriteria") {
+                    Some(v) if v.is_null() => am.entry_criteria = Set(None),
+                    Some(v) => {
+                        if let Ok(s) = v.string() {
+                            am.entry_criteria = Set(Some(s.to_owned()));
+                        }
+                    }
+                    None => {}
+                }
+                match ctx.args.get("exitCriteria") {
+                    Some(v) if v.is_null() => am.exit_criteria = Set(None),
+                    Some(v) => {
+                        if let Ok(s) = v.string() {
+                            am.exit_criteria = Set(Some(s.to_owned()));
+                        }
+                    }
+                    None => {}
+                }
+                if let Some(v) = ctx.args.get("ownerId").and_then(|v| v.string().ok()) {
+                    if v.is_empty() {
+                        am.owner_id = Set(None);
+                    } else {
+                        am.owner_id = Set(Uuid::parse_str(v).ok());
+                    }
+                }
+                if let Some(metrics) = parse_string_string_map_arg(&ctx, "keyMetrics")? {
+                    am.key_metrics = Set(Some(metrics));
+                }
+
+                // Domain rule: sequence_order must stay unique within the value stream.
+                if let Some(order) = new_sequence_order {
+                    let repo = SeaOrmValueStreamRepo::new(db.clone());
+                    let siblings = repo
+                        .find_stages_by_value_stream(vs_id)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    let mut candidate: business_architecture::domain::value_stream::entity::ValueStreamStage =
+                        existing.into();
+                    candidate.sequence_order = order;
+                    candidate
+                        .ensure_sequence_order_unique(&siblings)
+                        .map_err(domain_err_to_graphql)?;
+                }
+
                 am.updated_at = Set(chrono::Utc::now());
                 let model = am
                     .update(db)
@@ -1764,7 +2100,13 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("sequenceOrder", TypeRef::named(TypeRef::INT)))
     .argument(InputValue::new("input", TypeRef::named(TypeRef::STRING)))
-    .argument(InputValue::new("output", TypeRef::named(TypeRef::STRING)));
+    .argument(InputValue::new("output", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("objectiveMetrics", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("entryCriteria", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("exitCriteria", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("ownerId", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("keyMetrics", TypeRef::named(TypeRef::STRING)));
     builder.mutations.push(update);
 
     // ── valueStreamStageDelete ───────────────────────────────────────
@@ -1784,6 +2126,9 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     .ok_or_else(|| async_graphql::Error::new("Value stream stage not found."))?;
                 let space_id = space_of_value_stream(db, existing.value_stream_id).await?;
                 ensure_space_edit_access(&ctx, db, space_id).await?;
+                // Sub-entity writes follow the parent value stream's owner.
+                let vs_owner = owner_of_value_stream(db, existing.value_stream_id).await?;
+                ensure_entity_owner_or_admin(&ctx, vs_owner).await?;
 
                 value_stream_stage::Entity::delete_by_id(id)
                     .exec(db)
@@ -1816,6 +2161,10 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     ));
                 }
                 ensure_space_edit_access(&ctx, db, cap_space).await?;
+                // Linking mutates both parents' relationship graphs: the actor
+                // must own the capability and the process (or be an admin).
+                ensure_entity_owner_or_admin(&ctx, owner_of_capability(db, capability_id).await?).await?;
+                ensure_entity_owner_or_admin(&ctx, owner_of_process(db, process_id).await?).await?;
 
                 let am = capability_process::ActiveModel {
                     capability_id: Set(capability_id),
@@ -1851,6 +2200,8 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     .ok_or_else(|| async_graphql::Error::new("Capability-process link not found."))?;
                 let space_id = space_of_capability(db, existing.capability_id).await?;
                 ensure_space_edit_access(&ctx, db, space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, owner_of_capability(db, existing.capability_id).await?).await?;
+                ensure_entity_owner_or_admin(&ctx, owner_of_process(db, existing.process_id).await?).await?;
 
                 capability_process::Entity::delete_by_id((capability_id, process_id))
                     .exec(db)
@@ -1884,6 +2235,10 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     ));
                 }
                 ensure_space_edit_access(&ctx, db, stage_space).await?;
+                // The stage follows its parent value stream's owner; linking
+                // also mutates the capability's relationship graph.
+                ensure_entity_owner_or_admin(&ctx, owner_of_stage_parent(db, stage_id).await?).await?;
+                ensure_entity_owner_or_admin(&ctx, owner_of_capability(db, capability_id).await?).await?;
 
                 let am = stage_capability::ActiveModel {
                     stage_id: Set(stage_id),
@@ -1919,6 +2274,8 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     .ok_or_else(|| async_graphql::Error::new("Stage-capability link not found."))?;
                 let space_id = space_of_stage(db, existing.stage_id).await?;
                 ensure_space_edit_access(&ctx, db, space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, owner_of_stage_parent(db, existing.stage_id).await?).await?;
+                ensure_entity_owner_or_admin(&ctx, owner_of_capability(db, existing.capability_id).await?).await?;
 
                 stage_capability::Entity::delete_by_id((stage_id, capability_id))
                     .exec(db)

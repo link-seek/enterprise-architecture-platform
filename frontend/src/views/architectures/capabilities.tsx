@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Plus, Pencil, Trash2, Loader2, MoreVertical } from 'lucide-react'
+import { Plus, Pencil, Trash2, Loader2, MoreVertical, UserRoundCog } from 'lucide-react'
 import { useState, useEffect, useCallback, memo } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -13,11 +13,20 @@ import { Label } from '@/components/ui/label'
 import { useParams } from 'react-router-dom'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { useIsMobile } from '@/hooks/use-media-query'
+import { TransferOwnershipDialog } from './transfer-ownership-dialog'
 
 const GET_CAPABILITIES = gql`
   query GetCapabilities($spaceId: String!) {
     businessCapabilitiesBySpace(spaceId: $spaceId) {
-      id name description level maturity businessValue status
+      id name description level maturity businessValue status ownerId
+    }
+  }
+`
+
+const TRANSFER_CAPABILITY_OWNERSHIP = gql`
+  mutation CapabilityTransferOwnership($id: String!, $newOwnerId: String!) {
+    capabilityTransferOwnership(id: $id, newOwnerId: $newOwnerId) {
+      id ownerId
     }
   }
 `
@@ -43,6 +52,7 @@ const DELETE_CAPABILITY = gql`
 interface Capability {
   id: string; name: string; description: string
   level: string; maturity: string; businessValue: string; status: string
+  ownerId?: string | null
 }
 
 interface CapabilitiesQuery {
@@ -51,12 +61,13 @@ interface CapabilitiesQuery {
 
 const EMPTY_CAPABILITIES: Capability[] = []
 
-const CapabilityList = memo(function CapabilityList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
+const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer }: {
   nodes: Capability[]
-  canEdit: boolean
+  isOwned: (cap: Capability) => boolean
   isMobile: boolean
   onEdit: (cap: Capability) => void
   onDelete: (cap: Capability) => void
+  onTransfer: (cap: Capability) => void
 }) {
   if (nodes.length === 0) {
     return <div className="text-center py-8 text-muted-foreground">暂无数据</div>
@@ -65,7 +76,9 @@ const CapabilityList = memo(function CapabilityList({ nodes, canEdit, isMobile, 
   if (isMobile) {
     return (
       <div className="space-y-3">
-        {nodes.map((cap) => (
+        {nodes.map((cap) => {
+          const owned = isOwned(cap)
+          return (
           <div key={cap.id} className="rounded-lg border p-4 space-y-2">
             <div className="flex items-start justify-between gap-2">
               <p className="font-medium break-words">{cap.name}</p>
@@ -76,7 +89,7 @@ const CapabilityList = memo(function CapabilityList({ nodes, canEdit, isMobile, 
               <Badge variant="secondary">{cap.maturity}</Badge>
               <Badge variant="secondary">{cap.businessValue}</Badge>
             </div>
-            {canEdit && (
+            {owned && (
               <div className="flex justify-end pt-1">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -88,6 +101,9 @@ const CapabilityList = memo(function CapabilityList({ nodes, canEdit, isMobile, 
                     <DropdownMenuItem onClick={() => onEdit(cap)}>
                       <Pencil className="h-4 w-4 mr-2" />编辑
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onTransfer(cap)}>
+                      <UserRoundCog className="h-4 w-4 mr-2" />转移所有权
+                    </DropdownMenuItem>
                     <DropdownMenuItem className="text-destructive" onClick={() => onDelete(cap)}>
                       <Trash2 className="h-4 w-4 mr-2" />删除
                     </DropdownMenuItem>
@@ -96,7 +112,8 @@ const CapabilityList = memo(function CapabilityList({ nodes, canEdit, isMobile, 
               </div>
             )}
           </div>
-        ))}
+          )
+        })}
       </div>
     )
   }
@@ -110,31 +127,37 @@ const CapabilityList = memo(function CapabilityList({ nodes, canEdit, isMobile, 
           <TableHead>成熟度</TableHead>
           <TableHead>业务价值</TableHead>
           <TableHead>状态</TableHead>
-          {canEdit && <TableHead>操作</TableHead>}
+          <TableHead>操作</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {nodes.map((cap) => (
+        {nodes.map((cap) => {
+          const owned = isOwned(cap)
+          return (
           <TableRow key={cap.id}>
             <TableCell className="font-medium break-words">{cap.name}</TableCell>
             <TableCell>{cap.level}</TableCell>
             <TableCell>{cap.maturity}</TableCell>
             <TableCell>{cap.businessValue}</TableCell>
             <TableCell><Badge variant="outline">{cap.status}</Badge></TableCell>
-            {canEdit && (
-              <TableCell>
+            <TableCell>
+              {owned && (
                 <div className="flex gap-1">
                   <Button variant="ghost" size="sm" aria-label="编辑" onClick={() => onEdit(cap)}>
                     <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="sm" aria-label="转移所有权" onClick={() => onTransfer(cap)}>
+                    <UserRoundCog className="h-3.5 w-3.5" />
                   </Button>
                   <Button variant="ghost" size="sm" aria-label="删除" onClick={() => onDelete(cap)}>
                     <Trash2 className="h-3.5 w-3.5 text-destructive" />
                   </Button>
                 </div>
-              </TableCell>
-            )}
+              )}
+            </TableCell>
           </TableRow>
-        ))}
+          )
+        })}
       </TableBody>
     </Table>
   )
@@ -142,15 +165,17 @@ const CapabilityList = memo(function CapabilityList({ nodes, canEdit, isMobile, 
 
 export default function Capabilities() {
   const { spaceId } = useParams<{ spaceId: string }>()
-  const { canEdit } = useSpaceMembership(spaceId)
+  const { canEdit, isEntityOwner } = useSpaceMembership(spaceId)
   const isMobile = useIsMobile()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Capability | null>(null)
   const [deleting, setDeleting] = useState<Capability | null>(null)
+  const [transferItem, setTransferItem] = useState<Capability | null>(null)
   const { data, loading, error } = useQuery<CapabilitiesQuery>(GET_CAPABILITIES, { variables: { spaceId }, skip: !spaceId })
 
   const handleEdit = useCallback((cap: Capability) => { setEditing(cap); setDialogOpen(true) }, [])
   const handleDelete = useCallback((cap: Capability) => setDeleting(cap), [])
+  const handleTransfer = useCallback((cap: Capability) => setTransferItem(cap), [])
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -170,16 +195,26 @@ export default function Capabilities() {
           {data && (
             <CapabilityList
               nodes={data.businessCapabilitiesBySpace ?? EMPTY_CAPABILITIES}
-              canEdit={canEdit}
+              isOwned={(cap) => isEntityOwner(cap.ownerId)}
               isMobile={isMobile}
               onEdit={handleEdit}
               onDelete={handleDelete}
+              onTransfer={handleTransfer}
             />
           )}
         </CardContent>
       </Card>
       <CapabilityCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} />
       <CapabilityDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
+      <TransferOwnershipDialog
+        open={!!transferItem}
+        onOpenChange={(v) => { if (!v) setTransferItem(null) }}
+        entityId={transferItem?.id ?? null}
+        spaceId={spaceId}
+        entityLabel="能力"
+        mutation={TRANSFER_CAPABILITY_OWNERSHIP}
+        refetchQueries={[{ query: GET_CAPABILITIES, variables: { spaceId } }]}
+      />
     </div>
   )
 }

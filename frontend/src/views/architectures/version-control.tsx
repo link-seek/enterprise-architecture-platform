@@ -16,7 +16,7 @@ import { Loader2, Archive } from 'lucide-react'
 const GET_VALUE_STREAM_VERSIONS = gql`
   query GetValueStreamVersions($spaceId: String!, $logicalId: String!) {
     valueStreamsBySpaceAndLogicalId(spaceId: $spaceId, logicalId: $logicalId) {
-      id name description businessVersion status createdAt updatedAt
+      id name description businessVersion status ownerId triggeringEvent endDeliverable stakeholders performanceMetrics createdAt updatedAt
     }
   }
 `
@@ -38,7 +38,7 @@ const CREATE_VERSION = gql`
 const GET_VALUE_STREAMS = gql`
   query GetValueStreamsForVersion($spaceId: String!) {
     valueStreamsBySpace(spaceId: $spaceId) {
-      id name description businessVersion status importance logicalId spaceId
+      id name description businessVersion status importance logicalId spaceId ownerId triggeringEvent endDeliverable stakeholders performanceMetrics
     }
   }
 `

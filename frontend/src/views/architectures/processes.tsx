@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Plus, Pencil, Trash2, Loader2, MoreVertical } from 'lucide-react'
+import { Plus, Pencil, Trash2, Loader2, MoreVertical, UserRoundCog } from 'lucide-react'
 import { useState, useEffect, useCallback } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -13,11 +13,20 @@ import { Label } from '@/components/ui/label'
 import { useParams } from 'react-router-dom'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { useIsMobile } from '@/hooks/use-media-query'
+import { TransferOwnershipDialog } from './transfer-ownership-dialog'
 
 const GET_PROCESSES = gql`
   query GetProcesses($spaceId: String!) {
     businessProcessesBySpace(spaceId: $spaceId) {
-      id name description sla cycleTime costPerTransaction status
+      id name description sla cycleTime costPerTransaction status ownerId
+    }
+  }
+`
+
+const TRANSFER_PROCESS_OWNERSHIP = gql`
+  mutation ProcessTransferOwnership($id: String!, $newOwnerId: String!) {
+    processTransferOwnership(id: $id, newOwnerId: $newOwnerId) {
+      id ownerId
     }
   }
 `
@@ -43,18 +52,20 @@ const DELETE_PROCESS = gql`
 interface Process {
   id: string; name: string; description: string
   sla: string | null; cycleTime: number | null; costPerTransaction: number | null; status: string
+  ownerId?: string | null
 }
 
 interface ProcessesQuery {
   businessProcessesBySpace?: Process[]
 }
 
-function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
+function ProcessList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer }: {
   nodes: Process[]
-  canEdit: boolean
+  isOwned: (p: Process) => boolean
   isMobile: boolean
   onEdit: (p: Process) => void
   onDelete: (p: Process) => void
+  onTransfer: (p: Process) => void
 }) {
   if (nodes.length === 0) {
     return <div className="text-center py-8 text-muted-foreground">暂无数据</div>
@@ -63,7 +74,9 @@ function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
   if (isMobile) {
     return (
       <div className="space-y-3">
-        {nodes.map((p) => (
+        {nodes.map((p) => {
+          const owned = isOwned(p)
+          return (
           <div key={p.id} className="rounded-lg border p-4 space-y-2">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
@@ -77,7 +90,7 @@ function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
               <span>周期: {p.cycleTime ?? '-'}</span>
               <span>成本: {p.costPerTransaction ?? '-'}</span>
             </div>
-            {canEdit && (
+            {owned && (
               <div className="flex justify-end pt-1">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -89,6 +102,9 @@ function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
                     <DropdownMenuItem onClick={() => onEdit(p)}>
                       <Pencil className="h-4 w-4 mr-2" />编辑
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onTransfer(p)}>
+                      <UserRoundCog className="h-4 w-4 mr-2" />转移所有权
+                    </DropdownMenuItem>
                     <DropdownMenuItem className="text-destructive" onClick={() => onDelete(p)}>
                       <Trash2 className="h-4 w-4 mr-2" />删除
                     </DropdownMenuItem>
@@ -97,7 +113,8 @@ function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
               </div>
             )}
           </div>
-        ))}
+          )
+        })}
       </div>
     )
   }
@@ -112,11 +129,13 @@ function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
           <TableHead>周期(天)</TableHead>
           <TableHead>单次成本</TableHead>
           <TableHead>状态</TableHead>
-          {canEdit && <TableHead>操作</TableHead>}
+          <TableHead>操作</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {nodes.map((p) => (
+        {nodes.map((p) => {
+          const owned = isOwned(p)
+          return (
           <TableRow key={p.id}>
             <TableCell className="font-medium">{p.name}</TableCell>
             <TableCell className="text-muted-foreground">{p.description}</TableCell>
@@ -124,20 +143,24 @@ function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
             <TableCell>{p.cycleTime ?? '-'}</TableCell>
             <TableCell>{p.costPerTransaction ?? '-'}</TableCell>
             <TableCell><Badge variant="outline">{p.status}</Badge></TableCell>
-            {canEdit && (
-              <TableCell>
+            <TableCell>
+              {owned && (
                 <div className="flex gap-1">
                   <Button variant="ghost" size="sm" onClick={() => onEdit(p)} aria-label="编辑">
                     <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => onTransfer(p)} aria-label="转移所有权">
+                    <UserRoundCog className="h-3.5 w-3.5" />
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => onDelete(p)} aria-label="删除">
                     <Trash2 className="h-3.5 w-3.5 text-destructive" />
                   </Button>
                 </div>
-              </TableCell>
-            )}
+              )}
+            </TableCell>
           </TableRow>
-        ))}
+          )
+        })}
       </TableBody>
     </Table>
   )
@@ -145,15 +168,17 @@ function ProcessList({ nodes, canEdit, isMobile, onEdit, onDelete }: {
 
 export default function Processes() {
   const { spaceId } = useParams<{ spaceId: string }>()
-  const { canEdit } = useSpaceMembership(spaceId)
+  const { canEdit, isEntityOwner } = useSpaceMembership(spaceId)
   const isMobile = useIsMobile()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Process | null>(null)
   const [deleting, setDeleting] = useState<Process | null>(null)
+  const [transferItem, setTransferItem] = useState<Process | null>(null)
   const { data, loading, error } = useQuery<ProcessesQuery>(GET_PROCESSES, { variables: { spaceId }, skip: !spaceId })
 
   const handleEdit = useCallback((p: Process) => { setEditing(p); setDialogOpen(true) }, [])
   const handleDelete = useCallback((p: Process) => setDeleting(p), [])
+  const handleTransfer = useCallback((p: Process) => setTransferItem(p), [])
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -173,16 +198,26 @@ export default function Processes() {
           {data && (
             <ProcessList
               nodes={data.businessProcessesBySpace ?? []}
-              canEdit={canEdit}
+              isOwned={(p) => isEntityOwner(p.ownerId)}
               isMobile={isMobile}
               onEdit={handleEdit}
               onDelete={handleDelete}
+              onTransfer={handleTransfer}
             />
           )}
         </CardContent>
       </Card>
       <ProcessCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} />
       <ProcessDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
+      <TransferOwnershipDialog
+        open={!!transferItem}
+        onOpenChange={(v) => { if (!v) setTransferItem(null) }}
+        entityId={transferItem?.id ?? null}
+        spaceId={spaceId}
+        entityLabel="流程"
+        mutation={TRANSFER_PROCESS_OWNERSHIP}
+        refetchQueries={[{ query: GET_PROCESSES, variables: { spaceId } }]}
+      />
     </div>
   )
 }
