@@ -28,7 +28,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: auto-fix-${{ inputs.pr_number }}
+  group: fix-agent
   cancel-in-progress: false
 
 jobs:
