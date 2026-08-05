@@ -13,7 +13,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: fix-issue-${{ github.event.issue.number }}
+  group: fix-agent
   cancel-in-progress: false
 
 jobs:
