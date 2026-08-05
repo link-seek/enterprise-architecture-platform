@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
+use shared_common::value_objects::StringStringMap;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
@@ -12,6 +13,12 @@ pub struct Model {
     pub sequence_order: i32,
     pub input: Option<String>,
     pub output: Option<String>,
+    pub description: Option<String>,
+    pub objective_metrics: Option<StringStringMap>,
+    pub entry_criteria: Option<String>,
+    pub exit_criteria: Option<String>,
+    pub owner_id: Option<Uuid>,
+    pub key_metrics: Option<StringStringMap>,
     pub value_stream_id: Uuid,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

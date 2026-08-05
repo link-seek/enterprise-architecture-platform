@@ -69,6 +69,12 @@ impl From<value_stream_stage::Model> for ValueStreamStage {
             sequence_order: m.sequence_order,
             input: m.input,
             output: m.output,
+            description: m.description,
+            objective_metrics: m.objective_metrics.unwrap_or_default(),
+            entry_criteria: m.entry_criteria,
+            exit_criteria: m.exit_criteria,
+            owner_id: m.owner_id,
+            key_metrics: m.key_metrics.unwrap_or_default(),
             value_stream_id: m.value_stream_id,
             created_at: m.created_at,
             updated_at: m.updated_at,
@@ -275,6 +281,95 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
         let vss = models.into_iter().map(Into::into).collect();
         Ok((vss, total))
     }
+
+    async fn find_stages_by_value_stream(
+        &self,
+        vs_id: Uuid,
+    ) -> Result<Vec<ValueStreamStage>, DomainError> {
+        let models = value_stream_stage::Entity::find()
+            .filter(value_stream_stage::Column::ValueStreamId.eq(vs_id))
+            .filter(value_stream_stage::Column::DeletedAt.is_null())
+            .order_by_asc(value_stream_stage::Column::SequenceOrder)
+            .all(&self.db)
+            .await?;
+        Ok(models.into_iter().map(Into::into).collect())
+    }
+
+    async fn save_version_atomic(
+        &self,
+        current: &ValueStream,
+        new_version: &ValueStream,
+        new_stages: &[ValueStreamStage],
+    ) -> Result<(), DomainError> {
+        let txn = self.db.begin().await?;
+
+        // 1. Archive the current version.
+        let current_model = value_stream::Entity::find_by_id(current.id)
+            .one(&txn)
+            .await?
+            .ok_or(DomainError::ValueStreamNotFound)?;
+        let mut current_active: value_stream::ActiveModel = current_model.into();
+        current_active.status = Set(LifecycleStatus::Archived);
+        current_active.updated_at = Set(current.updated_at);
+        current_active.update(&txn).await.map_err(|e| {
+            DomainError::Database(format!("save_version_atomic: archive current version: {e}"))
+        })?;
+
+        // 2. Insert the new version.
+        let new_active = value_stream::ActiveModel {
+            id: Set(new_version.id),
+            logical_id: Set(new_version.logical_id),
+            business_version: Set(new_version.business_version.clone()),
+            status: Set(new_version.status),
+            name: Set(new_version.name.clone()),
+            description: Set(new_version.description.clone()),
+            triggering_event: Set(new_version.triggering_event.clone()),
+            end_deliverable: Set(new_version.end_deliverable.clone()),
+            owner_id: Set(new_version.owner_id),
+            importance: Set(new_version.importance),
+            stakeholders: Set(new_version.stakeholders.clone()),
+            performance_metrics: Set(new_version.performance_metrics.clone()),
+            created_by: Set(new_version.created_by),
+            updated_by: Set(new_version.updated_by),
+            created_at: Set(new_version.created_at),
+            updated_at: Set(new_version.updated_at),
+            deleted_at: Set(new_version.deleted_at),
+            space_id: Set(new_version.space_id),
+        };
+        new_active.insert(&txn).await.map_err(|e| {
+            DomainError::Database(format!("save_version_atomic: insert new version: {e}"))
+        })?;
+
+        // 3. Copy stages to the new version.
+        for stage in new_stages {
+            let active = value_stream_stage::ActiveModel {
+                id: Set(stage.id),
+                name: Set(stage.name.clone()),
+                sequence_order: Set(stage.sequence_order),
+                input: Set(stage.input.clone()),
+                output: Set(stage.output.clone()),
+                description: Set(stage.description.clone()),
+                objective_metrics: Set(Some(stage.objective_metrics.clone())),
+                entry_criteria: Set(stage.entry_criteria.clone()),
+                exit_criteria: Set(stage.exit_criteria.clone()),
+                owner_id: Set(stage.owner_id),
+                key_metrics: Set(Some(stage.key_metrics.clone())),
+                value_stream_id: Set(stage.value_stream_id),
+                created_at: Set(stage.created_at),
+                updated_at: Set(stage.updated_at),
+                deleted_at: Set(stage.deleted_at),
+            };
+            active.insert(&txn).await.map_err(|e| {
+                DomainError::Database(format!(
+                    "save_version_atomic: insert stage {}: {e}",
+                    stage.id
+                ))
+            })?;
+        }
+
+        txn.commit().await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -302,6 +397,12 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
             active.sequence_order = Set(stage.sequence_order);
             active.input = Set(stage.input.clone());
             active.output = Set(stage.output.clone());
+            active.description = Set(stage.description.clone());
+            active.objective_metrics = Set(Some(stage.objective_metrics.clone()));
+            active.entry_criteria = Set(stage.entry_criteria.clone());
+            active.exit_criteria = Set(stage.exit_criteria.clone());
+            active.owner_id = Set(stage.owner_id);
+            active.key_metrics = Set(Some(stage.key_metrics.clone()));
             active.updated_at = Set(stage.updated_at);
             active.deleted_at = Set(stage.deleted_at);
             active.update(&self.db).await?
@@ -312,6 +413,12 @@ impl ValueStreamStageRepository for SeaOrmValueStreamRepo {
                 sequence_order: Set(stage.sequence_order),
                 input: Set(stage.input.clone()),
                 output: Set(stage.output.clone()),
+                description: Set(stage.description.clone()),
+                objective_metrics: Set(Some(stage.objective_metrics.clone())),
+                entry_criteria: Set(stage.entry_criteria.clone()),
+                exit_criteria: Set(stage.exit_criteria.clone()),
+                owner_id: Set(stage.owner_id),
+                key_metrics: Set(Some(stage.key_metrics.clone())),
                 value_stream_id: Set(stage.value_stream_id),
                 created_at: Set(stage.created_at),
                 updated_at: Set(stage.updated_at),

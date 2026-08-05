@@ -14,6 +14,8 @@ pub enum DomainError {
     CannotReferenceArchived,
     #[error("only owner or admin can modify")]
     NotOwner,
+    #[error("only the entity owner or admin can modify this resource")]
+    NotEntityOwner,
     #[error("space not found")]
     SpaceNotFound,
     #[error("not a member of this space")]
