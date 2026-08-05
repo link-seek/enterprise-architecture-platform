@@ -12,6 +12,10 @@ permissions:
   issues: write
   actions: write
 
+concurrency:
+  group: fix-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   fix:
     if: |
