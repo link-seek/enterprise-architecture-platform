@@ -19,16 +19,8 @@ test.describe('Error Handling - Network Errors', () => {
     for (const pageInfo of pages) {
       await page.goto(pageInfo.path);
       
-      // Check for loading state (if implemented)
-      const loadingIndicator = page.getByText('加载中...');
-      if (await loadingIndicator.isVisible()) {
-        await expect(loadingIndicator).toBeVisible();
-        // Wait for loading to complete
-        await expect(loadingIndicator).not.toBeVisible({ timeout: 10000 });
-      }
-      
-      // Verify data loads successfully
-      await expect(page.getByRole('heading', { name: pageInfo.name })).toBeVisible();
+      // Wait for the page heading to appear (indicates loading is complete)
+      await expect(page.getByRole('heading', { name: pageInfo.name })).toBeVisible({ timeout: 10000 });
       
       // Check for empty state if no data
       // The table might show "No data" or similar message
@@ -183,10 +175,10 @@ test.describe('Error Handling - Network Errors', () => {
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
-    await statusField.fill('active');
+    await statusField.selectOption('active');
     
     // Submit form
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     
     // Verify error messages displayed to user
     const errorMessage = page.getByText(/Mutation failed|Validation error|保存失败|Save failed/i);
@@ -221,9 +213,9 @@ test.describe('Error Handling - Network Errors', () => {
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
-    await statusField.fill('active');
+    await statusField.selectOption('active');
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     
     // Verify user redirected to login
     await expect(page).toHaveURL('/login', { timeout: 10000 });
@@ -244,7 +236,7 @@ test.describe('Error Handling - Network Errors', () => {
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
-    await statusField.fill('active');
+    await statusField.selectOption('active');
     
     // Simulate network disconnection before submission
     await page.route('**/graphql', async route => {
@@ -252,7 +244,7 @@ test.describe('Error Handling - Network Errors', () => {
     });
     
     // Submit form
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     
     // Verify operation fails gracefully
     const errorMessage = page.getByText(/网络错误|Network error|连接失败|Failed to connect/i);

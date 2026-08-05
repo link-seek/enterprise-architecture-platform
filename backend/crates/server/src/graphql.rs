@@ -1800,7 +1800,7 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
     // Join table: both parents must exist and live in the same space.
     let create = Field::new(
         "capabilityProcessCreate",
-        TypeRef::named_nn("BusinessCapabilityProcesses"),
+        TypeRef::named_nn("CapabilityProcesses"),
         |ctx| {
             FieldFuture::new(async move {
                 check_value_stream_auth(&ctx, OperationType::Create)?;
@@ -1868,7 +1868,7 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
     // Join table: stage (→ value stream) and capability must share a space.
     let create = Field::new(
         "stageCapabilityCreate",
-        TypeRef::named_nn("ValueStreamStageCapabilities"),
+        TypeRef::named_nn("StageCapabilities"),
         |ctx| {
             FieldFuture::new(async move {
                 check_value_stream_auth(&ctx, OperationType::Create)?;
@@ -3264,7 +3264,7 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     // capabilityProcessesByCapability
     let cp_by_cap = Field::new(
         "capabilityProcessesByCapability",
-        TypeRef::named_nn_list_nn("BusinessCapabilityProcesses"),
+        TypeRef::named_nn_list_nn("CapabilityProcesses"),
         |ctx| {
             FieldFuture::new(async move {
                 let db = ctx.data::<DatabaseConnection>()?;
@@ -3293,7 +3293,7 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     // stageCapabilitiesByStage
     let sc_by_stage = Field::new(
         "stageCapabilitiesByStage",
-        TypeRef::named_nn_list_nn("ValueStreamStageCapabilities"),
+        TypeRef::named_nn_list_nn("StageCapabilities"),
         |ctx| {
             FieldFuture::new(async move {
                 let db = ctx.data::<DatabaseConnection>()?;
@@ -3725,4 +3725,25 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
         .finish()?;
 
     Ok(schema)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use migration::MigratorTrait;
+
+    /// Regression guard for the deploy-script failure caused by a custom
+    /// query/mutation referencing a type name that seaography does not
+    /// register (e.g. `BusinessCapabilityProcesses` vs the actual
+    /// `CapabilityProcesses` derived from `table_name`). `finish()` returns
+    /// `Err` for such mismatches, crashing the backend at startup.
+    #[tokio::test]
+    async fn build_graphql_schema_succeeds_against_migrated_sqlite() {
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        migration::Migrator::up(&db, None).await.unwrap();
+
+        build_graphql_schema(&db)
+            .await
+            .expect("GraphQL schema must build; a referenced type name is not registered");
+    }
 }

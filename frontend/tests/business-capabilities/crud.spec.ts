@@ -20,7 +20,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     
     // Verify create dialog opens
     await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByRole('heading', { name: /新建业务能力|Create Business Capability/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /新建能力|新建业务能力|Create Business Capability/ })).toBeVisible();
     
     // Fill in form with test data
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('测试业务能力');
@@ -38,7 +38,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     }
     
     // Click "保存" button
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
@@ -102,7 +102,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
       await maturityField.fill('初始');
     }
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created capability and click edit button
@@ -155,7 +155,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('待删除能力');
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这个将被删除');
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created capability
@@ -170,7 +170,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     await expect(page.getByText(/确认删除|Confirm delete/)).toBeVisible();
     
     // Click "确认" button
-    await page.getByRole('button', { name: /确认|Confirm/ }).click();
+    await page.getByRole('button', { name: /确认|删除|Confirm|Delete/ }).click();
     
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
@@ -186,9 +186,10 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
     
     // Test Case 1: Empty required fields
-    // Try to submit with empty name field
-    await page.getByRole('button', { name: /保存|Save/ }).click();
-    
+    // Try to submit with empty name field — the submit button is disabled when name is empty
+    const submitButton = page.getByRole('button', { name: /保存|创建|Save|Create/ });
+    await expect(submitButton).toBeDisabled();
+
     // Should show validation error or prevent submission
     await expect(page.getByRole('dialog')).toBeVisible(); // Dialog should stay open
     
@@ -231,7 +232,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
       await maturityField.fill('发展中');
     }
     
-    await page.getByRole('button', { name: /保存|Save/ }).click();
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Read
@@ -255,7 +256,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     await updatedRow.getByRole('button').filter({ has: page.locator('svg[data-icon="trash-2"]') }).click();
     
     await expect(page.getByRole('dialog')).toBeVisible();
-    await page.getByRole('button', { name: /确认|Confirm/ }).click();
+    await page.getByRole('button', { name: /确认|删除|Confirm|Delete/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Verify removal
