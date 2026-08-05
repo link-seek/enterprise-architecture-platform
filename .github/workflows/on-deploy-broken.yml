@@ -34,7 +34,7 @@ jobs:
             -f "inputs[head-sha]=deploy-broken" \
             -f "inputs[l2-round]=1" \
             -f "inputs[revert-last]=false" \
-            || echo "Failed to dispatch L2"
+            || { echo "Failed to dispatch L2"; exit 1; }
 
       - name: Comment on issue
         env:
