@@ -1,16 +1,11 @@
 // spec: specs/eap-test-plan.md
 import { test, expect } from '@playwright/test';
+import { login } from '../helpers/auth';
 
 test.describe('Spaces - CRUD Main Flow', () => {
   test.beforeEach(async ({ page }) => {
-    // Login before each test
-    await page.goto('/login');
-    await page.getByRole('textbox', { name: '邮箱' }).fill('test@example.com');
-    await page.getByRole('textbox', { name: '密码' }).fill('testpassword123');
-    await page.getByRole('button', { name: '登录' }).click();
-    await expect(page).toHaveURL(
-      '/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams',
-    );
+    // Login before each test (env-driven credentials for multi-environment reuse)
+    await login(page);
 
     // Go to the spaces list page.
     await page.goto('/spaces');

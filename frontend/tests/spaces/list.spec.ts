@@ -1,18 +1,11 @@
 // spec: specs/eap-test-plan.md
 import { test, expect } from '@playwright/test';
-
-const TEST_SPACE_ID = '00000000-0000-0000-0000-000000000010';
+import { login, TEST_SPACE_ID } from '../helpers/auth';
 
 test.describe('Spaces - Browse Spaces Main Flow', () => {
   test.beforeEach(async ({ page }) => {
-    // Login before each test
-    await page.goto('/login');
-    await page.getByRole('textbox', { name: '邮箱' }).fill('test@example.com');
-    await page.getByRole('textbox', { name: '密码' }).fill('testpassword123');
-    await page.getByRole('button', { name: '登录' }).click();
-    await expect(page).toHaveURL(
-      `/spaces/${TEST_SPACE_ID}/architectures/value-streams`,
-    );
+    // Login before each test (env-driven credentials for multi-environment reuse)
+    await login(page);
   });
 
   test('Happy Path - Browse spaces list and enter a space', async ({ page }) => {
