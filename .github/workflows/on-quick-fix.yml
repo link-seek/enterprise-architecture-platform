@@ -107,6 +107,7 @@ jobs:
             }
           }
           EOF
+          echo "opencode.json" >> .gitignore
 
       - name: Run opencode quick-fix
         id: opencode-run
