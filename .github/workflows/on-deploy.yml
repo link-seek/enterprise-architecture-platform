@@ -1,12 +1,18 @@
 name: On Deploy
 
 on:
+  registry_package:
+    types: [published, updated]
   workflow_dispatch:
     inputs:
       image-tag:
-        description: 'Image tag'
+        description: 'Image tag (for manual test)'
         required: true
         type: string
+
+concurrency:
+  group: deploy-eap
+  cancel-in-progress: true
 
 permissions:
   packages: read
@@ -15,10 +21,33 @@ permissions:
   actions: write
 
 jobs:
+  resolve-tag:
+    if: github.event_name == 'registry_package' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.extract.outputs.tag }}
+    steps:
+      - name: Extract image%TAG%
+        id: extract
+        run: |
+          if [ -n "${{ inputs.image-tag }}" ]; then
+            echo "tag=${{ inputs.image-tag }}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          TAG='${{ github.event.registry_package.package_version.container_metadata.tag.name }}'
+          echo "Resolved tag from container_metadata: $TAG"
+          if [ -z "$TAG" ] || [ "$TAG" = "latest" ]; then
+            echo "No deployable tag found (tag='$TAG'), skipping deploy"
+            exit 0
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
   deploy:
+    needs: resolve-tag
+    if: needs.resolve-tag.outputs.tag != ''
     uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@main
     with:
-      image-tag: ${{ inputs.image-tag }}
+      image-tag: ${{ needs.resolve-tag.outputs.tag }}
     secrets:
       ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
       ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
