@@ -1,14 +1,8 @@
 name: On Deploy
 
-# 能力: deploy
-# 触发: 镜像发布 / deploy-broken issue / 手动
-# 策略: 全部委托 L1 deploy.yml 决定
-
 on:
   registry_package:
     types: [published, updated]
-  issues:
-    types: [opened, reopened]
   workflow_dispatch:
     inputs:
       image-tag:
@@ -27,7 +21,6 @@ permissions:
   actions: write
 
 jobs:
-  # ── 正常部署: registry_package / workflow_dispatch ──
   resolve-tag:
     if: github.event_name == 'registry_package' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -55,12 +48,4 @@ jobs:
     uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@main
     with:
       image-tag: ${{ needs.resolve-tag.outputs.tag }}
-    secrets: inherit
-
-  # ── deploy-broken issue: 委托 L1 分类处理 ──
-  handle-deploy-broken:
-    if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'deploy-broken')
-    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@main
-    with:
-      deploy-broken-issue: ${{ github.event.issue.number }}
     secrets: inherit
