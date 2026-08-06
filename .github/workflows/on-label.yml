@@ -28,5 +28,7 @@ jobs:
 
   deploy-broken:
     if: github.event_name == 'issues' && github.event.label.name == 'deploy-broken'
-    uses: link-seek/issue-resolver-l1/.github/workflows/deploy-broken-handler.yml@main
+    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@main
+    with:
+      deploy-broken-issue: ${{ github.event.issue.number }}
     secrets: inherit
