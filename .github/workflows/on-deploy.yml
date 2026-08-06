@@ -1,4 +1,8 @@
-name: On Deploy
+name: Sync and Deploy
+
+# 触发: GHCR 镜像发布 (registry_package)
+# Payload: github.event.registry_package.package_version.container_metadata.tag.name
+# 薄壳: 调用流程仓的 deploy.yml reusable workflow
 
 on:
   registry_package:
@@ -18,22 +22,22 @@ permissions:
   packages: read
   contents: read
   issues: write
-  actions: write
 
 jobs:
   resolve-tag:
-    if: github.event_name == 'registry_package' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.extract.outputs.tag }}
     steps:
-      - name: Extract image%TAG%
+      - name: Extract image tag from registry_package payload
         id: extract
         run: |
+          # workflow_dispatch: tag 从 input 取
           if [ -n "${{ inputs.image-tag }}" ]; then
             echo "tag=${{ inputs.image-tag }}" >> $GITHUB_OUTPUT
             exit 0
           fi
+          # registry_package: 从 container_metadata.tag.name 取 tag
           TAG='${{ github.event.registry_package.package_version.container_metadata.tag.name }}'
           echo "Resolved tag from container_metadata: $TAG"
           if [ -z "$TAG" ] || [ "$TAG" = "latest" ]; then
@@ -48,6 +52,16 @@ jobs:
     uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@main
     with:
       image-tag: ${{ needs.resolve-tag.outputs.tag }}
+      runner-label: eap-prod
+      ghcr-image: ghcr.io/link-seek/eap-backend
+      acr-registry: crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com
+      acr-namespace: eap-app
+      acr-repo: backend
+      frontend-url: https://www.xieyucheng.top
+      api-url: https://api.xieyucheng.top
+      issue-repo: link-seek/enterprise-architecture-platform
+      deploy-script: scripts/deploy/deploy.sh
+      consumer-repo: link-seek/enterprise-architecture-platform
     secrets:
       ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
       ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
@@ -57,6 +71,3 @@ jobs:
       SMOKE_TEST_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
       PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
       APP_JWT__SECRET: ${{ secrets.APP_JWT__SECRET }}
-      APP_ID: ${{ secrets.APP_ID }}
-      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
-      GHCR_PAT: ${{ secrets.GHCR_PAT }}
