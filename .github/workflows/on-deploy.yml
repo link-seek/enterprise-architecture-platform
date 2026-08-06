@@ -8,8 +8,26 @@ on:
         required: true
         type: string
 
+permissions:
+  packages: read
+  contents: read
+  issues: write
+  actions: write
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "tag=${{ inputs.image-tag }}"
+  deploy:
+    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@main
+    with:
+      image-tag: ${{ inputs.image-tag }}
+    secrets:
+      ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+      ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+      APP_SEED_ADMIN_EMAIL: ${{ secrets.APP_SEED_ADMIN_EMAIL }}
+      APP_SEED_ADMIN_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
+      SMOKE_TEST_EMAIL: ${{ secrets.APP_SEED_ADMIN_EMAIL }}
+      SMOKE_TEST_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+      APP_JWT__SECRET: ${{ secrets.APP_JWT__SECRET }}
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+      GHCR_PAT: ${{ secrets.GHCR_PAT }}
