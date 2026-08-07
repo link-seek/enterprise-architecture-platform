@@ -61,6 +61,8 @@ jobs:
       api-url: https://api.xieyucheng.top
       issue-repo: link-seek/enterprise-architecture-platform
       deploy-script: scripts/deploy/deploy.sh
+      backup-script: scripts/deploy/backup.sh
+      rollback-script: scripts/deploy/rollback.sh
       consumer-repo: link-seek/enterprise-architecture-platform
     secrets:
       ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
