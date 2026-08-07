@@ -1,5 +1,5 @@
 // spec: specs/eap-test-plan.md
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../helpers/graphql-aware';
 import { login, SPACE_BASE } from '../helpers/auth';
 
 test.describe('Business Processes Management - CRUD Operations', () => {
@@ -12,7 +12,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     await expect(page).toHaveURL(`${SPACE_BASE}/processes`);
   });
 
-  test('Happy Path - Create Business Process', async ({ page }) => {
+  test('Happy Path - Create Business Process', { tag: '@regression' }, async ({ page }) => {
     // Click "新建业务流程" button
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await expect(createButton).toBeVisible();
@@ -68,7 +68,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     }
   });
 
-  test('Happy Path - Read Business Process @smoke', async ({ page }) => {
+  test('Happy Path - Read Business Process', { tag: '@regression' }, async ({ page }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `读取测试流程_${Date.now()}`;
     // Create a process to read
@@ -118,7 +118,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     }
   });
 
-  test('Happy Path - Update Business Process', async ({ page }) => {
+  test('Happy Path - Update Business Process', { tag: '@regression' }, async ({ page }) => {
     // Create a process to update
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
@@ -204,7 +204,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     }
   });
 
-  test('Happy Path - Delete Business Process', async ({ page }) => {
+  test('Happy Path - Delete Business Process', { tag: '@regression' }, async ({ page }) => {
     // Create a process to delete
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
@@ -236,7 +236,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     await expect(page.getByText('待删除流程')).not.toBeVisible({ timeout: 10000 });
   });
 
-  test('Edge Case - Numeric Input Validation', async ({ page }) => {
+  test('Edge Case - Numeric Input Validation', { tag: '@regression' }, async ({ page }) => {
     // Click "新建业务流程" button
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
@@ -292,7 +292,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
-  test('Full CRUD Cycle with Numeric Fields', async ({ page }) => {
+  test('Full CRUD Cycle with Numeric Fields', { tag: '@regression' }, async ({ page }) => {
     // Create
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();

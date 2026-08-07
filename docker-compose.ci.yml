@@ -11,6 +11,10 @@ services:
       - APP_SERVER__PORT=8080
       - APP_SERVER__RATE_LIMIT__PER_SECOND=100
       - APP_SERVER__RATE_LIMIT__BURST_SIZE=1000
+      - APP_SEED_EDITOR_EMAIL=test@example.com
+      - APP_SEED_EDITOR_PASSWORD=testpassword123
+      - APP_SEED_STRANGER_EMAIL=stranger@test.com
+      - APP_SEED_STRANGER_PASSWORD=stranger123456
     healthcheck:
       test: ["NONE"]
 

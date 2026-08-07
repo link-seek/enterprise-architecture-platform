@@ -3,6 +3,7 @@ use std::sync::Arc;
 use argon2::password_hash::{rand_core::OsRng, PasswordHasher, SaltString};
 use argon2::Argon2;
 use moka::future::Cache;
+use sea_orm::ConnectionTrait;
 use sea_orm::DatabaseConnection;
 use migration::MigratorTrait;
 use shared_common::enums::UserRole;
@@ -64,6 +65,12 @@ impl AppState {
         // Ensure the seeded "测试空间" (test space) exists and make the admin
         // user its owner so existing/backfilled data has an editable home.
         seed_test_space(&db).await?;
+
+        // Seed fixed role accounts (editor = test space Editor member,
+        // stranger = registered non-member) for E2E permission tests. Works in
+        // all environments: env set → seed, local/dev → default, production →
+        // skip if unset. Idempotent.
+        seed_fixed_role_accounts(&db).await?;
 
         // Dogfood: model the EAP platform's own development flow as a two-layer
         // (business + application) architecture inside the test space. Idempotent.
@@ -140,18 +147,19 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
         let _ = db.execute_unprepared(&insert).await;
     }
 
-    // Seed E2E test users and add them as space members (editor role) so that
-    // tests can create/update/delete entities within the test space. These are
-    // only seeded in local/dev environments to avoid leaking test accounts into
-    // production.
+    // Seed E2E test users and add them as space members so that tests can
+    // create/update/delete entities within the test space. e2e3@test.com is the
+    // space owner (used by `login()` in permission tests); test@example.com is
+    // an editor. These are only seeded in local/dev environments to avoid
+    // leaking test accounts into production.
     let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
     if app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev") {
         let test_users = [
-            ("test@example.com", "测试用户", "testpassword123"),
-            ("e2e3@test.com", "E2E Test 3", "e2e123456"),
+            ("test@example.com", "测试用户", "testpassword123", "editor"),
+            ("e2e3@test.com", "E2E Test 3", "e2e123456", "owner"),
         ];
         let repo = SeaOrmUserRepo::new(db.clone());
-        for (email, name, password) in test_users {
+        for (email, name, password, member_role) in test_users {
             let user_id = if let Some(existing) = repo.find_by_email(email).await? {
                 existing.id
             } else {
@@ -173,7 +181,7 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
             let user_blob = uuid_to_sqlite_blob(&user_id);
             let insert = format!(
                 r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
-                   VALUES ({space},{user},'editor','{now}','{now}')
+                   VALUES ({space},{user},'{member_role}','{now}','{now}')
                    ON CONFLICT ("space_id","user_id") DO NOTHING"#,
                 space = space_blob,
                 user = user_blob,
@@ -231,5 +239,137 @@ async fn seed_admin(db: &DatabaseConnection) -> anyhow::Result<()> {
     } else {
         tracing::debug!("Seed admin skipped: {} already exists", email);
     }
+    Ok(())
+}
+
+/// Seed the fixed-role accounts used by E2E permission tests:
+/// - **editor**: registered `Architect`, added to the test space as an `Editor`
+///   member (can edit content but not manage members/archive the space).
+/// - **stranger**: registered `Architect`, **not** a member of any space.
+///
+/// Mirrors `seed_admin`: env-driven (`APP_SEED_EDITOR_*` / `APP_SEED_STRANGER_*`),
+/// idempotent (`find_by_email`), production requires a password ≥ 8 chars, and
+/// unset env in production simply skips (zero breakage).
+async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()> {
+    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
+    let is_local = app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev");
+
+    let test_space_id =
+        Uuid::parse_str(migration::m20250101_000029_add_space_id_to_business_entities::TEST_SPACE_ID)
+            .expect("TEST_SPACE_ID must be a valid UUID");
+    let space_blob = uuid_to_sqlite_blob(&test_space_id);
+    let repo = SeaOrmUserRepo::new(db.clone());
+
+    // Helper to resolve-or-create a user and return its id.
+    let resolve_or_create = |email: String,
+                             name: String,
+                             password: String,
+                             repo: SeaOrmUserRepo| {
+        let repo = repo;
+        async move {
+            if let Some(existing) = repo.find_by_email(&email).await? {
+                return Ok::<_, anyhow::Error>(existing.id);
+            }
+            let salt = SaltString::generate(&mut OsRng);
+            let hash = Argon2::default()
+                .hash_password(password.as_bytes(), &salt)
+                .map_err(|e| anyhow::anyhow!("password hash error: {e}"))?
+                .to_string();
+            let user = User::new(email, name, hash, UserRole::Architect);
+            let saved = repo.save(&user).await?;
+            Ok(saved.id)
+        }
+    };
+
+    // --- Editor ---
+    let editor_email = std::env::var("APP_SEED_EDITOR_EMAIL");
+    let editor_password = std::env::var("APP_SEED_EDITOR_PASSWORD");
+    match (editor_email, editor_password) {
+        (Ok(email), Ok(password)) => {
+            if password.len() < 8 {
+                anyhow::bail!("APP_SEED_EDITOR_PASSWORD must be at least 8 characters");
+            }
+            let name =
+                std::env::var("APP_SEED_EDITOR_NAME").unwrap_or_else(|_| "Editor".to_string());
+            let user_id = resolve_or_create(email, name, password, repo.clone()).await?;
+            // Add as Editor member of the test space (idempotent).
+            let now = chrono::Utc::now().to_rfc3339();
+            let user_blob = uuid_to_sqlite_blob(&user_id);
+            let insert = format!(
+                r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
+                   VALUES ({space},{user},'editor','{now}','{now}')
+                   ON CONFLICT ("space_id","user_id") DO NOTHING"#,
+                space = space_blob,
+                user = user_blob,
+                now = now
+            );
+            let _ = db.execute_unprepared(&insert).await;
+        }
+        (Ok(_), Err(_)) | (Err(_), Ok(_)) => {
+            tracing::warn!(
+                "APP_SEED_EDITOR_EMAIL and APP_SEED_EDITOR_PASSWORD must both be set; \
+                 skipping editor seed"
+            );
+        }
+        (Err(_), Err(_)) if is_local => {
+            // Local/dev default: test@example.com / testpassword123.
+            let user_id = resolve_or_create(
+                "test@example.com".to_string(),
+                "测试用户".to_string(),
+                "testpassword123".to_string(),
+                repo.clone(),
+            )
+            .await?;
+            let now = chrono::Utc::now().to_rfc3339();
+            let user_blob = uuid_to_sqlite_blob(&user_id);
+            let insert = format!(
+                r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
+                   VALUES ({space},{user},'editor','{now}','{now}')
+                   ON CONFLICT ("space_id","user_id") DO NOTHING"#,
+                space = space_blob,
+                user = user_blob,
+                now = now
+            );
+            let _ = db.execute_unprepared(&insert).await;
+        }
+        (Err(_), Err(_)) => {
+            tracing::debug!("No editor seed configured; skipping (production, env unset)");
+        }
+    }
+
+    // --- Stranger ---
+    let stranger_email = std::env::var("APP_SEED_STRANGER_EMAIL");
+    let stranger_password = std::env::var("APP_SEED_STRANGER_PASSWORD");
+    match (stranger_email, stranger_password) {
+        (Ok(email), Ok(password)) => {
+            if password.len() < 8 {
+                anyhow::bail!("APP_SEED_STRANGER_PASSWORD must be at least 8 characters");
+            }
+            let name =
+                std::env::var("APP_SEED_STRANGER_NAME").unwrap_or_else(|_| "Stranger".to_string());
+            // Create only — deliberately NOT added to any space.
+            let _ = resolve_or_create(email, name, password, repo.clone()).await?;
+        }
+        (Ok(_), Err(_)) | (Err(_), Ok(_)) => {
+            tracing::warn!(
+                "APP_SEED_STRANGER_EMAIL and APP_SEED_STRANGER_PASSWORD must both be set; \
+                 skipping stranger seed"
+            );
+        }
+        (Err(_), Err(_)) if is_local => {
+            // Local/dev default: stranger@test.com / stranger123456 (no space membership).
+            let _ = resolve_or_create(
+                "stranger@test.com".to_string(),
+                "Stranger".to_string(),
+                "stranger123456".to_string(),
+                repo.clone(),
+            )
+            .await?;
+        }
+        (Err(_), Err(_)) => {
+            tracing::debug!("No stranger seed configured; skipping (production, env unset)");
+        }
+    }
+
     Ok(())
 }
