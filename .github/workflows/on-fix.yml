@@ -1,0 +1,82 @@
+name: On Fix
+
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: fix-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  # fix-me label on issue -> fix.yml (issue mode)
+  fix-issue-label:
+    if: |
+      github.event_name == 'issues' &&
+      github.event.label.name == 'fix-me'
+    uses: link-seek/issue-resolver-l1/.github/workflows/fix.yml@main
+    with:
+      issue-number: ${{ github.event.issue.number }}
+    secrets: inherit
+
+  # @agent comment on issue -> fix.yml (issue mode)
+  fix-issue-comment:
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request == null &&
+      contains(github.event.comment.body, '@agent') &&
+      contains('OWNER,MEMBER,COLLABORATOR', github.event.comment.author_association)
+    uses: link-seek/issue-resolver-l1/.github/workflows/fix.yml@main
+    with:
+      issue-number: ${{ github.event.issue.number }}
+    secrets: inherit
+
+  # @agent comment on PR -> fetch PR info first
+  get-pr-info:
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '@agent') &&
+      contains('OWNER,MEMBER,COLLABORATOR', github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    outputs:
+      head-branch: ${{ steps.pr-info.outputs.head-branch }}
+      head-sha: ${{ steps.pr-info.outputs.head-sha }}
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Get PR info
+        id: pr-info
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          HEAD_BRANCH=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER --jq '.head.ref')
+          HEAD_SHA=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER --jq '.head.sha')
+          echo "head-branch=$HEAD_BRANCH" >> $GITHUB_OUTPUT
+          echo "head-sha=$HEAD_SHA" >> $GITHUB_OUTPUT
+
+  # @agent comment on PR -> fix.yml (PR mode)
+  fix-pr-comment:
+    needs: [get-pr-info]
+    if: |
+      needs.get-pr-info.result == 'success'
+    uses: link-seek/issue-resolver-l1/.github/workflows/fix.yml@main
+    with:
+      pr-number: ${{ github.event.issue.number }}
+      head-branch: ${{ needs.get-pr-info.outputs.head-branch }}
+      head-sha: ${{ needs.get-pr-info.outputs.head-sha }}
+    secrets: inherit
