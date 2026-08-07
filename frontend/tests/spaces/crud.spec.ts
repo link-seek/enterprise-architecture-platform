@@ -1,5 +1,5 @@
 // spec: specs/eap-test-plan.md
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../helpers/graphql-aware';
 import { login } from '../helpers/auth';
 
 test.describe('Spaces - CRUD Main Flow', () => {
@@ -12,7 +12,7 @@ test.describe('Spaces - CRUD Main Flow', () => {
     await expect(page.getByRole('heading', { name: '所有空间' })).toBeVisible();
   });
 
-  test('Happy Path - Create, edit, and archive a space', async ({ page }) => {
+  test('Happy Path - Create, edit, and archive a space', { tag: '@regression' }, async ({ page }) => {
     const spaceName = `E2E空间_${Date.now()}`;
     const editedName = `${spaceName}_已编辑`;
 

@@ -1,6 +1,6 @@
 // spec: specs/eap-test-plan.md
-import { test, expect } from '@playwright/test';
-import { login } from '../helpers/auth';
+import { test, expect } from '../helpers/graphql-aware';
+import { login, SPACE_BASE } from '../helpers/auth';
 
 test.describe('Error Handling - Network Errors', () => {
   test.beforeEach(async ({ page }) => {
@@ -8,12 +8,12 @@ test.describe('Error Handling - Network Errors', () => {
     await login(page);
   });
 
-  test('Data Loading States', async ({ page }) => {
+  test('Data Loading States', { tag: '@smoke' }, async ({ page }) => {
     // Navigate to each main page and observe loading states
     const pages = [
-      { path: '/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams', name: '价值流' },
-      { path: '/spaces/00000000-0000-0000-0000-000000000010/architectures/capabilities', name: '业务能力' },
-      { path: '/spaces/00000000-0000-0000-0000-000000000010/architectures/processes', name: '业务流程' },
+      { path: '${SPACE_BASE}/value-streams', name: '价值流' },
+      { path: '${SPACE_BASE}/capabilities', name: '业务能力' },
+      { path: '${SPACE_BASE}/processes', name: '业务流程' },
     ];
 
     for (const pageInfo of pages) {
@@ -34,9 +34,9 @@ test.describe('Error Handling - Network Errors', () => {
     }
   });
 
-  test('API Failure Handling - Value Streams Page', async ({ page }) => {
+  test('API Failure Handling - Value Streams Page', { tag: '@regression' }, async ({ page }) => {
     // Navigate to value streams page
-    await page.goto('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
+    await page.goto('${SPACE_BASE}/value-streams');
     
     // Simulate network failure by blocking API calls
     await page.route('**/graphql', async route => {
@@ -67,12 +67,12 @@ test.describe('Error Handling - Network Errors', () => {
     }
   });
 
-  test('Empty States Handling', async ({ page }) => {
+  test('Empty States Handling', { tag: '@smoke' }, async ({ page }) => {
     // This test assumes we can clear data or the system has no data
     // For now, we'll just verify the UI handles empty states gracefully
     
     // Navigate to value streams page
-    await page.goto('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
+    await page.goto('${SPACE_BASE}/value-streams');
     
     // Check for empty state messaging
     const emptyState = page.getByText(/暂无数据|No data|Empty/);
@@ -95,9 +95,9 @@ test.describe('Error Handling - Network Errors', () => {
     }
   });
 
-  test('GraphQL Query Error Handling', async ({ page }) => {
+  test('GraphQL Query Error Handling', { tag: '@regression' }, async ({ page }) => {
     // Navigate to value streams page
-    await page.goto('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
+    await page.goto('${SPACE_BASE}/value-streams');
     
     // Simulate GraphQL query error by returning error response
     await page.route('**/graphql', async route => {
@@ -131,12 +131,12 @@ test.describe('Error Handling - Network Errors', () => {
     // Verify user can retry or navigate away
     // Check for retry button or navigation still works
     await page.getByRole('link', { name: '业务能力' }).click();
-    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/capabilities');
+    await expect(page).toHaveURL('${SPACE_BASE}/capabilities');
   });
 
-  test('GraphQL Mutation Error Handling', async ({ page }) => {
+  test('GraphQL Mutation Error Handling', { tag: '@regression' }, async ({ page }) => {
     // Navigate to value streams page
-    await page.goto('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
+    await page.goto('${SPACE_BASE}/value-streams');
     
     // Simulate GraphQL mutation error
     await page.route('**/graphql', async route => {
@@ -194,7 +194,7 @@ test.describe('Error Handling - Network Errors', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
-  test('Session Expiry During Operation', async ({ page }) => {
+  test('Session Expiry During Operation', { tag: '@regression' }, async ({ page }) => {
     // Start a create operation
     await page.getByRole('button', { name: '新建价值流' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -224,7 +224,7 @@ test.describe('Error Handling - Network Errors', () => {
     await expect(page.getByText(/会话已过期|Session expired|请重新登录/i)).toBeVisible();
   });
 
-  test('Network Interruption During Operation', async ({ page }) => {
+  test('Network Interruption During Operation', { tag: '@regression' }, async ({ page }) => {
     // Start a data-intensive operation
     await page.getByRole('button', { name: '新建价值流' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -265,7 +265,7 @@ test.describe('Error Handling - Network Errors', () => {
     }
   });
 
-  test('Browser Back/Forward Navigation During Operations', async ({ page }) => {
+  test('Browser Back/Forward Navigation During Operations', { tag: '@regression' }, async ({ page }) => {
     // Open create dialog
     await page.getByRole('button', { name: '新建价值流' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -294,7 +294,7 @@ test.describe('Error Handling - Network Errors', () => {
     // Test with browser forward navigation
     await page.goForward();
     // Should return to value streams page
-    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
+    await expect(page).toHaveURL('${SPACE_BASE}/value-streams');
     
     // Test refresh during operation
     await page.getByRole('button', { name: '新建价值流' }).click();
@@ -308,6 +308,6 @@ test.describe('Error Handling - Network Errors', () => {
     // After refresh, dialog should be closed
     await expect(page.getByRole('dialog')).not.toBeVisible();
     // Should be on value streams page
-    await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
+    await expect(page).toHaveURL('${SPACE_BASE}/value-streams');
   });
 });

@@ -7,6 +7,14 @@ export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || 'e2e3@test.com';
 export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || 'e2e123456';
 export const TEST_NAME = process.env.E2E_TEST_NAME || 'E2E Test 3';
 
+// Fixed role accounts — seeded by the backend (APP_SEED_EDITOR_* / APP_SEED_STRANGER_*).
+// Editor: registered Architect + test space Editor member.
+// Stranger: registered Architect, NOT a member of the test space.
+export const EDITOR_EMAIL = process.env.E2E_EDITOR_EMAIL || 'test@example.com';
+export const EDITOR_PASSWORD = process.env.E2E_EDITOR_PASSWORD || 'testpassword123';
+export const STRANGER_EMAIL = process.env.E2E_STRANGER_EMAIL || 'stranger@test.com';
+export const STRANGER_PASSWORD = process.env.E2E_STRANGER_PASSWORD || 'stranger123456';
+
 // Test space id — env-driven, mirrors backend migration TEST_SPACE_ID.
 export const TEST_SPACE_ID = process.env.E2E_TEST_SPACE_ID || '00000000-0000-0000-0000-000000000010';
 export const SPACE_BASE = `/spaces/${TEST_SPACE_ID}/architectures`;
@@ -17,6 +25,20 @@ export const SPACE_BASE = `/spaces/${TEST_SPACE_ID}/architectures`;
  */
 export async function login(page: Page) {
   await loginAs(page, TEST_EMAIL, TEST_PASSWORD);
+}
+
+/**
+ * Login as the fixed editor account (test space Editor member).
+ */
+export async function loginAsEditor(page: Page) {
+  await loginAs(page, EDITOR_EMAIL, EDITOR_PASSWORD);
+}
+
+/**
+ * Login as the fixed stranger account (registered, non-member of the test space).
+ */
+export async function loginAsStranger(page: Page) {
+  await loginAs(page, STRANGER_EMAIL, STRANGER_PASSWORD);
 }
 
 /**

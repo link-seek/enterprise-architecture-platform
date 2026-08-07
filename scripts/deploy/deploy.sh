@@ -5,6 +5,8 @@ set -euo pipefail
 # 环境变量由 deploy-pipeline.yml 注入:
 #   IMAGE_TAG, ACR_REGISTRY, ACR_NAMESPACE, ACR_REPO
 #   APP_SEED_ADMIN_EMAIL, APP_SEED_ADMIN_PASSWORD (from GitHub Secrets)
+#   APP_SEED_EDITOR_EMAIL, APP_SEED_EDITOR_PASSWORD (from GitHub Secrets)
+#   APP_SEED_STRANGER_EMAIL, APP_SEED_STRANGER_PASSWORD (from GitHub Secrets)
 
 CONTAINER_NAME="eap-backend"
 IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPO}:${IMAGE_TAG}"
@@ -29,7 +31,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStartPre=-/usr/bin/podman rm -f ${CONTAINER_NAME}
-ExecStart=/usr/bin/podman run --name ${CONTAINER_NAME} --network=host -v /opt/eap/data:/app/data -e APP_ENV=production -e APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc -e APP_SEED_ADMIN_EMAIL=${APP_SEED_ADMIN_EMAIL} -e APP_SEED_ADMIN_PASSWORD=${APP_SEED_ADMIN_PASSWORD} -e RUST_LOG=info,sqlx::pool=warn ${IMAGE}
+ExecStart=/usr/bin/podman run --name ${CONTAINER_NAME} --network=host -v /opt/eap/data:/app/data -e APP_ENV=production -e APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc -e APP_SEED_ADMIN_EMAIL=${APP_SEED_ADMIN_EMAIL} -e APP_SEED_ADMIN_PASSWORD=${APP_SEED_ADMIN_PASSWORD} -e APP_SEED_EDITOR_EMAIL=${APP_SEED_EDITOR_EMAIL} -e APP_SEED_EDITOR_PASSWORD=${APP_SEED_EDITOR_PASSWORD} -e APP_SEED_STRANGER_EMAIL=${APP_SEED_STRANGER_EMAIL} -e APP_SEED_STRANGER_PASSWORD=${APP_SEED_STRANGER_PASSWORD} -e RUST_LOG=info,sqlx::pool=warn ${IMAGE}
 ExecStop=/usr/bin/podman stop ${CONTAINER_NAME}
 Restart=always
 RestartSec=5

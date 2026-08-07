@@ -23,6 +23,7 @@ impl From<user::Model> for User {
     }
 }
 
+#[derive(Clone)]
 pub struct SeaOrmUserRepo {
     db: DatabaseConnection,
 }

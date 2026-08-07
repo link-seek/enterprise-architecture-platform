@@ -1,5 +1,5 @@
 // spec: specs/eap-test-plan.md
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../helpers/graphql-aware';
 import { login, SPACE_BASE } from '../helpers/auth';
 
 test.describe('Business Capabilities Management - CRUD Operations', () => {
@@ -12,7 +12,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     await expect(page).toHaveURL(`${SPACE_BASE}/capabilities`);
   });
 
-  test('Happy Path - Create Business Capability', async ({ page }) => {
+  test('Happy Path - Create Business Capability', { tag: '@regression' }, async ({ page }) => {
     // Click "新建业务能力" button
     const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await expect(createButton).toBeVisible();
@@ -59,7 +59,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     }
   });
 
-  test('Happy Path - Read Business Capability @smoke', async ({ page }) => {
+  test('Happy Path - Read Business Capability', { tag: '@regression' }, async ({ page }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `读取测试能力_${Date.now()}`;
     // First create a capability to read
@@ -89,7 +89,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     }
   });
 
-  test('Happy Path - Update Business Capability', async ({ page }) => {
+  test('Happy Path - Update Business Capability', { tag: '@regression' }, async ({ page }) => {
     // Create a capability to update
     const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
@@ -147,7 +147,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     }
   });
 
-  test('Happy Path - Delete Business Capability', async ({ page }) => {
+  test('Happy Path - Delete Business Capability', { tag: '@regression' }, async ({ page }) => {
     // Create a capability to delete
     const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
@@ -179,7 +179,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     await expect(page.getByText('待删除能力')).not.toBeVisible({ timeout: 10000 });
   });
 
-  test('Edge Case - Form Validation', async ({ page }) => {
+  test('Edge Case - Form Validation', { tag: '@regression' }, async ({ page }) => {
     // Click "新建业务能力" button
     const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
@@ -219,7 +219,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
-  test('Full CRUD Cycle', async ({ page }) => {
+  test('Full CRUD Cycle', { tag: '@regression' }, async ({ page }) => {
     // Create
     const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
