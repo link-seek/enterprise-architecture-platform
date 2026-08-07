@@ -1,5 +1,5 @@
 // spec: specs/eap-test-plan.md
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../helpers/graphql-aware';
 import { login } from '../helpers/auth';
 
 test.describe('Value Stream Management - Version Control', () => {
@@ -8,7 +8,7 @@ test.describe('Value Stream Management - Version Control', () => {
     await login(page);
   });
 
-  test('Happy Path - Create New Version', async ({ page }) => {
+  test('Happy Path - Create New Version', { tag: '@regression' }, async ({ page }) => {
     // First, create a value stream to version
     await page.getByRole('button', { name: '新建价值流' }).click();
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('版本控制测试');
@@ -60,7 +60,7 @@ test.describe('Value Stream Management - Version Control', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
-  test('Happy Path - Archive Value Stream', async ({ page }) => {
+  test('Happy Path - Archive Value Stream', { tag: '@regression' }, async ({ page }) => {
     // Create an active value stream
     await page.getByRole('button', { name: '新建价值流' }).click();
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('待归档测试');
@@ -114,7 +114,7 @@ test.describe('Value Stream Management - Version Control', () => {
     }
   });
 
-  test('Version History Dialog Functionality @smoke', async ({ page }) => {
+  test('Version History Dialog Functionality', { tag: '@regression' }, async ({ page }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `历史测试_${Date.now()}`;
     // Create a value stream with multiple versions
@@ -149,7 +149,7 @@ test.describe('Value Stream Management - Version Control', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
-  test('Create Version Validation', async ({ page }) => {
+  test('Create Version Validation', { tag: '@regression' }, async ({ page }) => {
     // Create a value stream
     await page.getByRole('button', { name: '新建价值流' }).click();
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('版本验证测试');
@@ -196,7 +196,7 @@ test.describe('Value Stream Management - Version Control', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
-  test('Restore Previous Version', async ({ page }) => {
+  test('Restore Previous Version', { tag: '@regression' }, async ({ page }) => {
     // This test assumes there's a restore functionality
     // Create a value stream with multiple versions
     await page.getByRole('button', { name: '新建价值流' }).click();
