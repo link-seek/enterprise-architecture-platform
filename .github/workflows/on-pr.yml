@@ -1,0 +1,29 @@
+name: PR CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        description: 'PR number to run CI for'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  pr-ci:
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' && inputs.pr-number != '')
+    uses: link-seek/issue-resolver-l1/.github/workflows/pr-ci.yml@main
+    with:
+      enable-backend-tests: true
+      enable-frontend-tests: true
+      enable-integration: true
+      # auto-fix 分支跑全部 E2E，人工 PR 只跑 smoke
+      e2e-filter: ${{ startsWith(github.event.pull_request.head.ref, 'agent/') && '' || '--grep @smoke' }}
+      frontend-build-env: '["VITE_API_URL=https://api.xieyucheng.top/api"]'
+    secrets: inherit
