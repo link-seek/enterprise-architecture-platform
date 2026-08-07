@@ -13,10 +13,12 @@ on:
         description: 'Image tag (for manual test)'
         required: true
         type: string
+  issues:
+    types: [labeled]
 
 concurrency:
-  group: deploy-eap
-  cancel-in-progress: true
+  group: deploy-${{ github.event.issue.number || 'eap' }}
+  cancel-in-progress: false
 
 permissions:
   packages: read
@@ -25,6 +27,21 @@ permissions:
   actions: write
 
 jobs:
+  # deploy-broken label -> L1 deploy.yml (broken handling mode)
+  deploy-broken:
+    if: |
+      github.event_name == 'issues' &&
+      github.event.label.name == 'deploy-broken'
+    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@main
+    with:
+      deploy-broken-issue: ${{ github.event.issue.number }}
+      issue-repo: link-seek/enterprise-architecture-platform
+      consumer-repo: link-seek/enterprise-architecture-platform
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+
   resolve-tag:
     if: github.event_name == 'registry_package' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
