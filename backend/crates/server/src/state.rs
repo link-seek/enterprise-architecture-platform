@@ -131,15 +131,30 @@ async fn resolve_or_create_user(
     match repo.save(&user).await {
         Ok(saved) => Ok((saved.id, true)),
         Err(e) => {
+            // Only retry on unique-constraint conflict (concurrent insert
+            // race). For other failures (connection lost, disk full, etc.)
+            // propagate immediately so we don't mask the real problem.
+            let is_unique_conflict = matches!(
+                &e,
+                user_management::domain::error::DomainError::Database(s)
+                    if s.to_lowercase().contains("unique")
+            );
+            if !is_unique_conflict {
+                return Err(anyhow::anyhow!("failed to create user {email}: {e}"));
+            }
             // Race: another instance inserted the same email concurrently.
             // Retry find_by_email; if found, reuse; otherwise propagate.
-            if let Some(existing) = repo.find_by_email(email).await? {
-                tracing::warn!(
-                    "User {email} was created concurrently; reusing existing account"
-                );
-                Ok((existing.id, false))
-            } else {
-                Err(anyhow::anyhow!("failed to create user {email}: {e}"))
+            match repo.find_by_email(email).await {
+                Ok(Some(existing)) => {
+                    tracing::warn!(
+                        "User {email} was created concurrently; reusing existing account"
+                    );
+                    Ok((existing.id, false))
+                }
+                Ok(None) => Err(anyhow::anyhow!("failed to create user {email}: {e}")),
+                Err(find_err) => Err(anyhow::anyhow!(
+                    "failed to create user {email}: {e}; retry find_by_email also failed: {find_err}"
+                )),
             }
         }
     }
@@ -147,19 +162,28 @@ async fn resolve_or_create_user(
 
 /// Idempotently upsert a space member row, updating the role if the
 /// membership already exists (so e.g. an `editor` is upgraded to `owner`).
+/// Protects against accidental downgrade: an existing `owner` is never
+/// overwritten by a lower-privilege role (e.g. `editor`).
 async fn upsert_space_member(
     db: &DatabaseConnection,
     space_blob: &str,
     user_id: Uuid,
     member_role: &str,
 ) -> anyhow::Result<()> {
+    // Whitelist member_role to prevent SQL injection via format!.
+    let allowed_roles = ["owner", "editor", "viewer"];
+    if !allowed_roles.contains(&member_role) {
+        anyhow::bail!("invalid member role: {member_role}");
+    }
     let now = chrono::Utc::now().to_rfc3339();
     let user_blob = uuid_to_sqlite_blob(&user_id);
     let insert = format!(
         r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
            VALUES ({space},{user},'{member_role}','{now}','{now}')
            ON CONFLICT ("space_id","user_id") DO UPDATE SET
-             "role" = excluded."role",
+             "role" = CASE WHEN "space_members"."role" = 'owner' AND excluded."role" != 'owner'
+                           THEN "space_members"."role"
+                           ELSE excluded."role" END,
              "updated_at" = excluded."updated_at""#,
         space = space_blob,
         user = user_blob,
@@ -205,15 +229,14 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
         upsert_space_member(db, &space_blob, admin_id, "owner").await?;
     }
 
-    // Seed E2E test users and add them as space members so that tests can
-    // create/update/delete entities within the test space. e2e3@test.com is the
-    // space owner (used by `login()` in permission tests); test@example.com is
-    // an editor. These are only seeded in local/dev environments to avoid
-    // leaking test accounts into production.
+    // Seed E2E test owner user and add as space member so that permission
+    // tests can exercise the owner path. test@example.com (editor) is seeded
+    // by seed_fixed_role_accounts to avoid duplicate seeding. These are only
+    // seeded in local/dev environments to avoid leaking test accounts into
+    // production.
     let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
     if app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev") {
         let test_users = [
-            ("test@example.com", "测试用户", "testpassword123", "editor"),
             ("e2e3@test.com", "E2E Test 3", "e2e123456", "owner"),
         ];
         let repo = SeaOrmUserRepo::new(db.clone());

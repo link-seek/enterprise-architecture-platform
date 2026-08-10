@@ -11,6 +11,7 @@ set -euo pipefail
 CONTAINER_NAME="eap-backend"
 IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPO}:${IMAGE_TAG}"
 SERVICE_FILE="/etc/systemd/system/eap-backend.service"
+ENV_FILE="/opt/eap/eap-backend.env"
 
 echo "=== Deploying ${IMAGE} ==="
 
@@ -19,6 +20,23 @@ podman pull "$IMAGE"
 # Stop existing service
 systemctl stop eap-backend 2>/dev/null || true
 podman rm -f "$CONTAINER_NAME" 2>/dev/null || true
+
+# Generate a restricted-permission env file so that seed passwords are not
+# exposed in the systemd unit file or in the process list (ps / /proc).
+# Optional seed vars default to empty so the backend gracefully skips seeding
+# when GitHub Secrets are not configured (consistent with state.rs logic).
+cat > "$ENV_FILE" << EOF
+APP_ENV=production
+APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc
+APP_SEED_ADMIN_EMAIL=${APP_SEED_ADMIN_EMAIL}
+APP_SEED_ADMIN_PASSWORD=${APP_SEED_ADMIN_PASSWORD}
+APP_SEED_EDITOR_EMAIL=${APP_SEED_EDITOR_EMAIL:-}
+APP_SEED_EDITOR_PASSWORD=${APP_SEED_EDITOR_PASSWORD:-}
+APP_SEED_STRANGER_EMAIL=${APP_SEED_STRANGER_EMAIL:-}
+APP_SEED_STRANGER_PASSWORD=${APP_SEED_STRANGER_PASSWORD:-}
+RUST_LOG=info,sqlx::pool=warn
+EOF
+chmod 600 "$ENV_FILE"
 
 # Create systemd service that runs podman in foreground
 # This avoids conmon dying and leaving the container unresponsive
@@ -31,7 +49,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStartPre=-/usr/bin/podman rm -f ${CONTAINER_NAME}
-ExecStart=/usr/bin/podman run --name ${CONTAINER_NAME} --network=host -v /opt/eap/data:/app/data -e APP_ENV=production -e APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc -e APP_SEED_ADMIN_EMAIL=${APP_SEED_ADMIN_EMAIL} -e APP_SEED_ADMIN_PASSWORD=${APP_SEED_ADMIN_PASSWORD} -e APP_SEED_EDITOR_EMAIL=${APP_SEED_EDITOR_EMAIL} -e APP_SEED_EDITOR_PASSWORD=${APP_SEED_EDITOR_PASSWORD} -e APP_SEED_STRANGER_EMAIL=${APP_SEED_STRANGER_EMAIL} -e APP_SEED_STRANGER_PASSWORD=${APP_SEED_STRANGER_PASSWORD} -e RUST_LOG=info,sqlx::pool=warn ${IMAGE}
+ExecStart=/usr/bin/podman run --name ${CONTAINER_NAME} --network=host -v /opt/eap/data:/app/data --env-file ${ENV_FILE} ${IMAGE}
 ExecStop=/usr/bin/podman stop ${CONTAINER_NAME}
 Restart=always
 RestartSec=5
