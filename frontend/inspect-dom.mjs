@@ -1,0 +1,40 @@
+import { chromium } from '@playwright/test';
+const browser = await chromium.launch();
+const page = await browser.newPage();
+await page.goto('http://localhost:80/login');
+await page.fill('input[type="email"]', 'e2e3@test.com');
+await page.fill('input[type="password"]', 'e2e123456');
+await page.press('input[type="password"]', 'Enter');
+await page.waitForURL('**/spaces/**', { timeout: 15000 });
+await page.goto('http://localhost:80/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
+await page.waitForLoadState('networkidle');
+const rows = page.locator('table tbody tr');
+const n = await rows.count();
+console.log('rows:', n);
+if (n > 0) {
+  const first = rows.first();
+  const btns = first.getByRole('button');
+  console.log('first row buttons:', await btns.allTextContents());
+  console.log('btn count:', await btns.count());
+  const html = await first.innerHTML();
+  console.log('FIRST ROW HTML:\n', html.slice(0, 2000));
+}
+console.log('create btn:', await page.getByRole('button', { name: '新建价值流' }).count());
+console.log('heading 价值流 count:', await page.getByRole('heading', { name: '价值流' }).count());
+// create a value stream
+await page.getByRole('button', { name: '新建价值流' }).click();
+await page.getByRole('dialog').waitFor({ state: 'visible' });
+console.log('dialog heading:', await page.getByRole('heading').allTextContents());
+await page.getByRole('textbox', { name: /名称|Name/ }).fill('INSPECT-TEST-VS');
+await page.getByRole('textbox', { name: /描述|Description/ }).fill('desc');
+await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
+await page.getByRole('combobox', { name: /状态|Status/ }).selectOption('active');
+await page.getByRole('combobox', { name: /重要性|Importance/ }).selectOption('High');
+await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
+await page.getByRole('dialog').waitFor({ state: 'hidden', timeout: 10000 });
+const row = page.locator('tr').filter({ hasText: 'INSPECT-TEST-VS' });
+await row.waitFor({ state: 'visible' });
+console.log('new row buttons:', await row.getByRole('button').allTextContents());
+const html = await row.innerHTML();
+console.log('NEW ROW HTML:\n', html.slice(0, 2500));
+await browser.close();

@@ -26,9 +26,9 @@ test.describe('Space Permission Enforcement', () => {
     await expect(page.getByRole('button', { name: '登录以编辑' })).toBeVisible();
 
     // Edit / archive / members buttons are not visible.
-    await expect(page.getByRole('button', { name: '编辑' })).not.toBeVisible();
-    await expect(page.getByRole('button', { name: '归档' })).not.toBeVisible();
-    await expect(page.getByRole('button', { name: '成员' })).not.toBeVisible();
+    await expect(page.getByRole('button', { name: '编辑', exact: true })).not.toBeVisible();
+    await expect(page.getByRole('button', { name: '归档', exact: true })).not.toBeVisible();
+    await expect(page.getByRole('button', { name: '成员', exact: true })).not.toBeVisible();
   });
 
   test('Non-member cannot see edit buttons', { tag: '@smoke' }, async ({ page }) => {
@@ -37,9 +37,9 @@ test.describe('Space Permission Enforcement', () => {
     await expect(page.getByText('加载中')).not.toBeVisible({ timeout: 10000 });
 
     // Non-member does not see edit / archive / members buttons.
-    await expect(page.getByRole('button', { name: '编辑' })).not.toBeVisible();
-    await expect(page.getByRole('button', { name: '归档' })).not.toBeVisible();
-    await expect(page.getByRole('button', { name: '成员' })).not.toBeVisible();
+    await expect(page.getByRole('button', { name: '编辑', exact: true })).not.toBeVisible();
+    await expect(page.getByRole('button', { name: '归档', exact: true })).not.toBeVisible();
+    await expect(page.getByRole('button', { name: '成员', exact: true })).not.toBeVisible();
   });
 
   test('Editor can see edit but not archive/members', { tag: '@smoke' }, async ({ page }) => {
@@ -48,11 +48,11 @@ test.describe('Space Permission Enforcement', () => {
     await expect(page.getByText('加载中')).not.toBeVisible({ timeout: 10000 });
 
     // Editor sees the edit button (canEdit = true).
-    await expect(page.getByRole('button', { name: '编辑' })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('button', { name: '编辑', exact: true })).toBeVisible({ timeout: 10000 });
 
     // Editor does NOT see archive or members (owner-only).
-    await expect(page.getByRole('button', { name: '归档' })).not.toBeVisible();
-    await expect(page.getByRole('button', { name: '成员' })).not.toBeVisible();
+    await expect(page.getByRole('button', { name: '归档', exact: true })).not.toBeVisible();
+    await expect(page.getByRole('button', { name: '成员', exact: true })).not.toBeVisible();
   });
 
   test('Owner can see edit/archive/members', { tag: '@smoke' }, async ({ page }) => {
@@ -61,8 +61,8 @@ test.describe('Space Permission Enforcement', () => {
     await expect(page.getByText('加载中')).not.toBeVisible({ timeout: 10000 });
 
     // Owner sees all three action buttons.
-    await expect(page.getByRole('button', { name: '编辑' })).toBeVisible({ timeout: 10000 });
-    await expect(page.getByRole('button', { name: '归档' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '成员' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '编辑', exact: true })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('button', { name: '归档', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '成员', exact: true })).toBeVisible();
   });
 });

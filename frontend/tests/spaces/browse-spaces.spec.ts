@@ -73,9 +73,10 @@ test.describe('Spaces - Browse Space Content', () => {
     // non-negative integer count.
     const statLabels = ['价值流', '业务能力', '业务流程'];
     for (const label of statLabels) {
-      const card = page.locator('div', { hasText: label }).filter({ has: page.getByRole('link') }).first();
+      const card = page.getByRole('link', { name: new RegExp(`^${label} \\d+`) }).first();
+      await expect(card).toBeVisible({ timeout: 10000 });
       const numberText = card.locator('p.text-3xl');
-      await expect(numberText).toBeVisible({ timeout: 10000 });
+      await expect(numberText).toBeVisible();
       const value = await numberText.textContent();
       const parsed = parseInt(value ?? '', 10);
       expect(parsed).toBeGreaterThanOrEqual(0);
