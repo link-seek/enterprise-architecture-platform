@@ -101,13 +101,81 @@ fn uuid_to_sqlite_blob(uuid: &Uuid) -> String {
     s
 }
 
+/// Resolve a user by email, creating a new `Architect` account if not found.
+///
+/// Handles the check-then-act race on `users.email` unique index: if a
+/// concurrent insert wins the race, `save` fails with a unique-constraint
+/// violation, so we retry `find_by_email` and return the existing user.
+/// Returns `(user_id, was_created)` so callers can decide whether to grant
+/// membership (e.g. skip for pre-existing users in production).
+async fn resolve_or_create_user(
+    repo: &SeaOrmUserRepo,
+    email: &str,
+    name: &str,
+    password: &str,
+) -> anyhow::Result<(Uuid, bool)> {
+    if let Some(existing) = repo.find_by_email(email).await? {
+        return Ok((existing.id, false));
+    }
+    let salt = SaltString::generate(&mut OsRng);
+    let hash = Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .map_err(|e| anyhow::anyhow!("password hash error: {e}"))?
+        .to_string();
+    let user = User::new(
+        email.to_string(),
+        name.to_string(),
+        hash,
+        UserRole::Architect,
+    );
+    match repo.save(&user).await {
+        Ok(saved) => Ok((saved.id, true)),
+        Err(e) => {
+            // Race: another instance inserted the same email concurrently.
+            // Retry find_by_email; if found, reuse; otherwise propagate.
+            if let Some(existing) = repo.find_by_email(email).await? {
+                tracing::warn!(
+                    "User {email} was created concurrently; reusing existing account"
+                );
+                Ok((existing.id, false))
+            } else {
+                Err(anyhow::anyhow!("failed to create user {email}: {e}"))
+            }
+        }
+    }
+}
+
+/// Idempotently upsert a space member row, updating the role if the
+/// membership already exists (so e.g. an `editor` is upgraded to `owner`).
+async fn upsert_space_member(
+    db: &DatabaseConnection,
+    space_blob: &str,
+    user_id: Uuid,
+    member_role: &str,
+) -> anyhow::Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let user_blob = uuid_to_sqlite_blob(&user_id);
+    let insert = format!(
+        r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
+           VALUES ({space},{user},'{member_role}','{now}','{now}')
+           ON CONFLICT ("space_id","user_id") DO UPDATE SET
+             "role" = excluded."role",
+             "updated_at" = excluded."updated_at""#,
+        space = space_blob,
+        user = user_blob,
+        now = now
+    );
+    db.execute_unprepared(&insert)
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to upsert space member: {e}"))?;
+    Ok(())
+}
+
 /// Idempotently ensure the test space exists (created by migration with a
 /// fixed UUID) and, if an admin user is present, make that admin its owner.
 /// Also seeds the E2E test users as space members (editor role) so that
 /// integration/E2E tests can exercise the edit path instead of read-only mode.
 async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
-    use sea_orm::ConnectionTrait;
-
     let test_space_id =
         Uuid::parse_str(migration::m20250101_000029_add_space_id_to_business_entities::TEST_SPACE_ID)
             .expect("TEST_SPACE_ID must be a valid UUID");
@@ -134,17 +202,7 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
     // which compare against binary blobs — can actually match these rows.
     let space_blob = uuid_to_sqlite_blob(&test_space_id);
     if let Some(admin_id) = admin_id {
-        let user_blob = uuid_to_sqlite_blob(&admin_id);
-        let now = chrono::Utc::now().to_rfc3339();
-        let insert = format!(
-            r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
-               VALUES ({space},{user},'owner','{now}','{now}')
-               ON CONFLICT ("space_id","user_id") DO NOTHING"#,
-            space = space_blob,
-            user = user_blob,
-            now = now
-        );
-        let _ = db.execute_unprepared(&insert).await;
+        upsert_space_member(db, &space_blob, admin_id, "owner").await?;
     }
 
     // Seed E2E test users and add them as space members so that tests can
@@ -160,34 +218,8 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
         ];
         let repo = SeaOrmUserRepo::new(db.clone());
         for (email, name, password, member_role) in test_users {
-            let user_id = if let Some(existing) = repo.find_by_email(email).await? {
-                existing.id
-            } else {
-                let salt = SaltString::generate(&mut OsRng);
-                let hash = Argon2::default()
-                    .hash_password(password.as_bytes(), &salt)
-                    .map_err(|e| anyhow::anyhow!("password hash error: {e}"))?
-                    .to_string();
-                let user = User::new(
-                    email.to_string(),
-                    name.to_string(),
-                    hash,
-                    UserRole::Architect,
-                );
-                let saved = repo.save(&user).await?;
-                saved.id
-            };
-            let now = chrono::Utc::now().to_rfc3339();
-            let user_blob = uuid_to_sqlite_blob(&user_id);
-            let insert = format!(
-                r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
-                   VALUES ({space},{user},'{member_role}','{now}','{now}')
-                   ON CONFLICT ("space_id","user_id") DO NOTHING"#,
-                space = space_blob,
-                user = user_blob,
-                now = now
-            );
-            let _ = db.execute_unprepared(&insert).await;
+            let (user_id, _) = resolve_or_create_user(&repo, email, name, password).await?;
+            upsert_space_member(db, &space_blob, user_id, member_role).await?;
         }
     }
     Ok(())
@@ -260,27 +292,6 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
     let space_blob = uuid_to_sqlite_blob(&test_space_id);
     let repo = SeaOrmUserRepo::new(db.clone());
 
-    // Helper to resolve-or-create a user and return its id.
-    let resolve_or_create = |email: String,
-                             name: String,
-                             password: String,
-                             repo: SeaOrmUserRepo| {
-        let repo = repo;
-        async move {
-            if let Some(existing) = repo.find_by_email(&email).await? {
-                return Ok::<_, anyhow::Error>(existing.id);
-            }
-            let salt = SaltString::generate(&mut OsRng);
-            let hash = Argon2::default()
-                .hash_password(password.as_bytes(), &salt)
-                .map_err(|e| anyhow::anyhow!("password hash error: {e}"))?
-                .to_string();
-            let user = User::new(email, name, hash, UserRole::Architect);
-            let saved = repo.save(&user).await?;
-            Ok(saved.id)
-        }
-    };
-
     // --- Editor ---
     let editor_email = std::env::var("APP_SEED_EDITOR_EMAIL");
     let editor_password = std::env::var("APP_SEED_EDITOR_PASSWORD");
@@ -291,19 +302,20 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
             }
             let name =
                 std::env::var("APP_SEED_EDITOR_NAME").unwrap_or_else(|_| "Editor".to_string());
-            let user_id = resolve_or_create(email, name, password, repo.clone()).await?;
-            // Add as Editor member of the test space (idempotent).
-            let now = chrono::Utc::now().to_rfc3339();
-            let user_blob = uuid_to_sqlite_blob(&user_id);
-            let insert = format!(
-                r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
-                   VALUES ({space},{user},'editor','{now}','{now}')
-                   ON CONFLICT ("space_id","user_id") DO NOTHING"#,
-                space = space_blob,
-                user = user_blob,
-                now = now
-            );
-            let _ = db.execute_unprepared(&insert).await;
+            let (user_id, was_created) =
+                resolve_or_create_user(&repo, &email, &name, &password).await?;
+            // Only grant test-space membership for newly created users, or
+            // always in local/dev. In production, reusing an existing user
+            // (e.g. a real account that happens to share the seed email)
+            // without verifying its password would grant unearned membership.
+            if was_created || is_local {
+                upsert_space_member(db, &space_blob, user_id, "editor").await?;
+            } else {
+                tracing::warn!(
+                    "Editor seed email {email} already exists in production; \
+                     skipping membership grant to avoid unearned access"
+                );
+            }
         }
         (Ok(_), Err(_)) | (Err(_), Ok(_)) => {
             tracing::warn!(
@@ -313,24 +325,14 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
         }
         (Err(_), Err(_)) if is_local => {
             // Local/dev default: test@example.com / testpassword123.
-            let user_id = resolve_or_create(
-                "test@example.com".to_string(),
-                "测试用户".to_string(),
-                "testpassword123".to_string(),
-                repo.clone(),
+            let (user_id, _) = resolve_or_create_user(
+                &repo,
+                "test@example.com",
+                "测试用户",
+                "testpassword123",
             )
             .await?;
-            let now = chrono::Utc::now().to_rfc3339();
-            let user_blob = uuid_to_sqlite_blob(&user_id);
-            let insert = format!(
-                r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
-                   VALUES ({space},{user},'editor','{now}','{now}')
-                   ON CONFLICT ("space_id","user_id") DO NOTHING"#,
-                space = space_blob,
-                user = user_blob,
-                now = now
-            );
-            let _ = db.execute_unprepared(&insert).await;
+            upsert_space_member(db, &space_blob, user_id, "editor").await?;
         }
         (Err(_), Err(_)) => {
             tracing::debug!("No editor seed configured; skipping (production, env unset)");
@@ -348,7 +350,7 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
             let name =
                 std::env::var("APP_SEED_STRANGER_NAME").unwrap_or_else(|_| "Stranger".to_string());
             // Create only — deliberately NOT added to any space.
-            let _ = resolve_or_create(email, name, password, repo.clone()).await?;
+            let _ = resolve_or_create_user(&repo, &email, &name, &password).await?;
         }
         (Ok(_), Err(_)) | (Err(_), Ok(_)) => {
             tracing::warn!(
@@ -358,11 +360,11 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
         }
         (Err(_), Err(_)) if is_local => {
             // Local/dev default: stranger@test.com / stranger123456 (no space membership).
-            let _ = resolve_or_create(
-                "stranger@test.com".to_string(),
-                "Stranger".to_string(),
-                "stranger123456".to_string(),
-                repo.clone(),
+            let _ = resolve_or_create_user(
+                &repo,
+                "stranger@test.com",
+                "Stranger",
+                "stranger123456",
             )
             .await?;
         }
