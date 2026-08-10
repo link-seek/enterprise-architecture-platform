@@ -88,17 +88,12 @@ impl AppState {
     }
 }
 
-/// Format a `Uuid` as a SQLite hex blob literal (`X'...'`), matching how
-/// SeaORM stores `Uuid` columns in SQLite (16-byte binary blob).
-fn uuid_to_sqlite_blob(uuid: &Uuid) -> String {
-    use std::fmt::Write;
-    let mut s = String::with_capacity(35);
-    s.push_str("X'");
-    for b in uuid.as_bytes() {
-        write!(s, "{b:02x}").unwrap();
-    }
-    s.push('\'');
-    s
+/// Parse the compile-time `TEST_SPACE_ID` constant into a `Uuid`.
+/// Centralised so both `seed_test_space` and `seed_fixed_role_accounts`
+/// share a single parse site (and a single panic message if invalid).
+fn test_space_uuid() -> Uuid {
+    Uuid::parse_str(migration::m20250101_000029_add_space_id_to_business_entities::TEST_SPACE_ID)
+        .expect("TEST_SPACE_ID must be a valid UUID")
 }
 
 /// Resolve a user by email, creating a new `Architect` account if not found.
@@ -134,10 +129,13 @@ async fn resolve_or_create_user(
             // Only retry on unique-constraint conflict (concurrent insert
             // race). For other failures (connection lost, disk full, etc.)
             // propagate immediately so we don't mask the real problem.
+            // `DomainError::EmailExists` is set by `user_repo::save` when
+            // sea-orm's typed `sql_err()` detects a `UniqueConstraintViolation`
+            // (portable across SQLite / PostgreSQL / MySQL), avoiding
+            // fragile string matching on error messages.
             let is_unique_conflict = matches!(
                 &e,
-                user_management::domain::error::DomainError::Database(s)
-                    if s.to_lowercase().contains("unique")
+                user_management::domain::error::DomainError::EmailExists
             );
             if !is_unique_conflict {
                 return Err(anyhow::anyhow!("failed to create user {email}: {e}"));
@@ -166,7 +164,7 @@ async fn resolve_or_create_user(
 /// overwritten by a lower-privilege role (e.g. `editor`).
 async fn upsert_space_member(
     db: &DatabaseConnection,
-    space_blob: &str,
+    space_id: &Uuid,
     user_id: Uuid,
     member_role: &str,
 ) -> anyhow::Result<()> {
@@ -176,20 +174,30 @@ async fn upsert_space_member(
         anyhow::bail!("invalid member role: {member_role}");
     }
     let now = chrono::Utc::now().to_rfc3339();
-    let user_blob = uuid_to_sqlite_blob(&user_id);
-    let insert = format!(
+    // Use a parameterised statement so that all values are bound as
+    // parameters rather than interpolated into the SQL string. This
+    // eliminates SQL-injection risk at the database driver level
+    // (space_id / user_id are Uuid blobs, role is a whitelisted string,
+    // now is an RFC-3339 timestamp). `Statement::from_sql_and_values`
+    // converts `?` placeholders to the backend-specific syntax.
+    let stmt = sea_orm::Statement::from_sql_and_values(
+        db.get_database_backend(),
         r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
-           VALUES ({space},{user},'{member_role}','{now}','{now}')
+           VALUES (?, ?, ?, ?, ?)
            ON CONFLICT ("space_id","user_id") DO UPDATE SET
              "role" = CASE WHEN "space_members"."role" = 'owner' AND excluded."role" != 'owner'
                            THEN "space_members"."role"
                            ELSE excluded."role" END,
              "updated_at" = excluded."updated_at""#,
-        space = space_blob,
-        user = user_blob,
-        now = now
+        [
+            sea_orm::Value::Bytes(Some(space_id.as_bytes().to_vec())),
+            sea_orm::Value::Bytes(Some(user_id.as_bytes().to_vec())),
+            member_role.into(),
+            now.clone().into(),
+            now.into(),
+        ],
     );
-    db.execute_unprepared(&insert)
+    db.execute_raw(stmt)
         .await
         .map_err(|e| anyhow::anyhow!("failed to upsert space member: {e}"))?;
     Ok(())
@@ -200,9 +208,7 @@ async fn upsert_space_member(
 /// Also seeds the E2E test users as space members (editor role) so that
 /// integration/E2E tests can exercise the edit path instead of read-only mode.
 async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
-    let test_space_id =
-        Uuid::parse_str(migration::m20250101_000029_add_space_id_to_business_entities::TEST_SPACE_ID)
-            .expect("TEST_SPACE_ID must be a valid UUID");
+    let test_space_id = test_space_uuid();
 
     use sea_orm::FromQueryResult;
     #[derive(FromQueryResult)]
@@ -221,12 +227,8 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
     .await?
     .map(|r| r.id);
 
-    // SeaORM stores Uuid as a 16-byte binary blob in SQLite. Raw SQL must use
-    // X'...' hex literals (not string UUIDs) so that SeaORM entity queries —
-    // which compare against binary blobs — can actually match these rows.
-    let space_blob = uuid_to_sqlite_blob(&test_space_id);
     if let Some(admin_id) = admin_id {
-        upsert_space_member(db, &space_blob, admin_id, "owner").await?;
+        upsert_space_member(db, &test_space_id, admin_id, "owner").await?;
     }
 
     // Seed E2E test owner user and add as space member so that permission
@@ -242,7 +244,7 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
         let repo = SeaOrmUserRepo::new(db.clone());
         for (email, name, password, member_role) in test_users {
             let (user_id, _) = resolve_or_create_user(&repo, email, name, password).await?;
-            upsert_space_member(db, &space_blob, user_id, member_role).await?;
+            upsert_space_member(db, &test_space_id, user_id, member_role).await?;
         }
     }
     Ok(())
@@ -309,10 +311,7 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
     let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
     let is_local = app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev");
 
-    let test_space_id =
-        Uuid::parse_str(migration::m20250101_000029_add_space_id_to_business_entities::TEST_SPACE_ID)
-            .expect("TEST_SPACE_ID must be a valid UUID");
-    let space_blob = uuid_to_sqlite_blob(&test_space_id);
+    let test_space_id = test_space_uuid();
     let repo = SeaOrmUserRepo::new(db.clone());
 
     // --- Editor ---
@@ -332,7 +331,7 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
             // never overwritten by editor). This also recovers from partial
             // failure: if a previous run created the user but membership grant
             // failed, a restart will re-grant membership correctly.
-            upsert_space_member(db, &space_blob, user_id, "editor").await?;
+            upsert_space_member(db, &test_space_id, user_id, "editor").await?;
         }
         (Ok(_), Err(_)) | (Err(_), Ok(_)) => {
             tracing::warn!(
@@ -349,7 +348,7 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
                 "testpassword123",
             )
             .await?;
-            upsert_space_member(db, &space_blob, user_id, "editor").await?;
+            upsert_space_member(db, &test_space_id, user_id, "editor").await?;
         }
         (Err(_), Err(_)) => {
             tracing::debug!("No editor seed configured; skipping (production, env unset)");

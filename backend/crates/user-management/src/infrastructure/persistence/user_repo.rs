@@ -34,6 +34,21 @@ impl SeaOrmUserRepo {
     }
 }
 
+/// Map a `DbErr` to `DomainError`, using sea-orm's typed `sql_err()` to
+/// detect unique-constraint violations (portable across SQLite / PostgreSQL /
+/// MySQL) instead of fragile string matching. Non-unique errors are converted
+/// via the standard `From<DbErr>` impl.
+fn map_unique_violation(e: sea_orm::DbErr) -> DomainError {
+    if matches!(
+        e.sql_err(),
+        Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+    ) {
+        DomainError::EmailExists
+    } else {
+        e.into()
+    }
+}
+
 #[async_trait]
 impl UserRepository for SeaOrmUserRepo {
     async fn find_by_id(&self, id: Uuid) -> Result<Option<User>, DomainError> {
@@ -67,7 +82,10 @@ impl UserRepository for SeaOrmUserRepo {
             active.role = Set(user_entity.role);
             active.status = Set(user_entity.status);
             active.updated_at = Set(user_entity.updated_at);
-            active.update(&self.db).await?
+            match active.update(&self.db).await {
+                Ok(m) => m,
+                Err(e) => return Err(map_unique_violation(e)),
+            }
         } else {
             let active = user::ActiveModel {
                 id: Set(user_entity.id),
@@ -80,7 +98,10 @@ impl UserRepository for SeaOrmUserRepo {
                 updated_at: Set(user_entity.updated_at),
                 deleted_at: Set(None),
             };
-            active.insert(&self.db).await?
+            match active.insert(&self.db).await {
+                Ok(m) => m,
+                Err(e) => return Err(map_unique_violation(e)),
+            }
         };
 
         Ok(result.into())
