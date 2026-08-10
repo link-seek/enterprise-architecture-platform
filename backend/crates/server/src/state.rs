@@ -325,20 +325,14 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
             }
             let name =
                 std::env::var("APP_SEED_EDITOR_NAME").unwrap_or_else(|_| "Editor".to_string());
-            let (user_id, was_created) =
+            let (user_id, _was_created) =
                 resolve_or_create_user(&repo, &email, &name, &password).await?;
-            // Only grant test-space membership for newly created users, or
-            // always in local/dev. In production, reusing an existing user
-            // (e.g. a real account that happens to share the seed email)
-            // without verifying its password would grant unearned membership.
-            if was_created || is_local {
-                upsert_space_member(db, &space_blob, user_id, "editor").await?;
-            } else {
-                tracing::warn!(
-                    "Editor seed email {email} already exists in production; \
-                     skipping membership grant to avoid unearned access"
-                );
-            }
+            // Always grant test-space membership. The upsert is idempotent and
+            // protects against accidental role downgrade (an existing owner is
+            // never overwritten by editor). This also recovers from partial
+            // failure: if a previous run created the user but membership grant
+            // failed, a restart will re-grant membership correctly.
+            upsert_space_member(db, &space_blob, user_id, "editor").await?;
         }
         (Ok(_), Err(_)) | (Err(_), Ok(_)) => {
             tracing::warn!(

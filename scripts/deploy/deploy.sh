@@ -23,20 +23,28 @@ podman rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
 # Generate a restricted-permission env file so that seed passwords are not
 # exposed in the systemd unit file or in the process list (ps / /proc).
-# Optional seed vars default to empty so the backend gracefully skips seeding
-# when GitHub Secrets are not configured (consistent with state.rs logic).
-cat > "$ENV_FILE" << EOF
-APP_ENV=production
-APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc
-APP_SEED_ADMIN_EMAIL=${APP_SEED_ADMIN_EMAIL}
-APP_SEED_ADMIN_PASSWORD=${APP_SEED_ADMIN_PASSWORD}
-APP_SEED_EDITOR_EMAIL=${APP_SEED_EDITOR_EMAIL:-}
-APP_SEED_EDITOR_PASSWORD=${APP_SEED_EDITOR_PASSWORD:-}
-APP_SEED_STRANGER_EMAIL=${APP_SEED_STRANGER_EMAIL:-}
-APP_SEED_STRANGER_PASSWORD=${APP_SEED_STRANGER_PASSWORD:-}
-RUST_LOG=info,sqlx::pool=warn
-EOF
-chmod 600 "$ENV_FILE"
+# Optional seed vars (editor/stranger) are only written when non-empty: the
+# backend treats unset env (std::env::var returns Err) as "skip seeding", but
+# an empty string would be treated as a valid (too-short) password and bail.
+mkdir -p "$(dirname "$ENV_FILE")"
+(
+  umask 077
+  {
+    echo "APP_ENV=production"
+    echo "APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc"
+    printf 'APP_SEED_ADMIN_EMAIL=%s\n' "$APP_SEED_ADMIN_EMAIL"
+    printf 'APP_SEED_ADMIN_PASSWORD=%s\n' "$APP_SEED_ADMIN_PASSWORD"
+    if [[ -n "${APP_SEED_EDITOR_EMAIL:-}" ]]; then
+      printf 'APP_SEED_EDITOR_EMAIL=%s\n' "$APP_SEED_EDITOR_EMAIL"
+      printf 'APP_SEED_EDITOR_PASSWORD=%s\n' "$APP_SEED_EDITOR_PASSWORD"
+    fi
+    if [[ -n "${APP_SEED_STRANGER_EMAIL:-}" ]]; then
+      printf 'APP_SEED_STRANGER_EMAIL=%s\n' "$APP_SEED_STRANGER_EMAIL"
+      printf 'APP_SEED_STRANGER_PASSWORD=%s\n' "$APP_SEED_STRANGER_PASSWORD"
+    fi
+    echo "RUST_LOG=info,sqlx::pool=warn"
+  } > "$ENV_FILE"
+)
 
 # Create systemd service that runs podman in foreground
 # This avoids conmon dying and leaving the container unresponsive
