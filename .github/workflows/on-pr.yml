@@ -24,6 +24,7 @@ jobs:
       enable-frontend-tests: true
       enable-integration: true
       # auto-fix 分支跑全部 E2E，人工 PR 只跑 smoke
-      e2e-filter: ${{ startsWith(github.event.pull_request.head_ref, 'agent/') && '' || '--grep "@smoke|@regression"' }}
+      e2e-filter: ${{ !startsWith(github.event.pull_request.head_ref, 'agent/') && '--grep "@smoke|@regression"' || '' }}
+      e2e-timeout-minutes: ${{ startsWith(github.event.pull_request.head_ref, 'agent/') && 30 || 15 }}
       frontend-build-env: '["VITE_API_URL=https://api.xieyucheng.top/api"]'
     secrets: inherit
