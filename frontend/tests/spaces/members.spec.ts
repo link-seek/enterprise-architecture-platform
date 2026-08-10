@@ -1,6 +1,6 @@
 // spec: issue #311 — 空间成员管理 E2E 测试（含写操作，@regression）
 import { test, expect } from '../helpers/graphql-aware';
-import { login, loginAsEditor, TEST_SPACE_ID, STRANGER_EMAIL } from '../helpers/auth';
+import { login, loginAsEditor, TEST_SPACE_ID, STRANGER_EMAIL, STRANGER_NAME } from '../helpers/auth';
 
 const SPACE_DETAIL_URL = `/spaces/${TEST_SPACE_ID}`;
 
@@ -14,8 +14,9 @@ test.describe('Space Member Management', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByRole('heading', { name: '空间成员' })).toBeVisible();
 
-    // The owner appears in the member list.
-    await expect(page.getByText('拥有者')).toBeVisible({ timeout: 10000 });
+    // The owner appears in the member list (scope to the table to avoid the
+    // role-select combobox option which also contains the text '拥有者').
+    await expect(page.getByRole('table').getByText('拥有者')).toBeVisible({ timeout: 10000 });
   });
 
   test('Owner can add member by email with editor role', { tag: '@regression' }, async ({ page }) => {
@@ -44,15 +45,16 @@ test.describe('Space Member Management', () => {
     await page.getByRole('button', { name: '成员' }).click();
     await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 });
 
-    // Find a non-owner member row and click its remove button (Trash2 icon).
-    const editorRows = page.getByRole('row').filter({ hasText: '编辑者' });
-    const rowCount = await editorRows.count();
-    test.skip(rowCount === 0, 'No non-owner member to remove');
+    // Remove the member added by the previous test (stranger), never the
+    // seeded editor test@example.com — otherwise subsequent permission tests
+    // break because the seeded editor membership is gone.
+    const strangerRow = page.getByRole('dialog').getByRole('row').filter({ hasText: STRANGER_NAME });
+    test.skip((await strangerRow.count()) === 0, 'No stranger member to remove');
 
-    await editorRows.first().getByRole('button').click();
+    await strangerRow.getByRole('button').click();
 
-    // The removed editor row disappears (the editor badge count decreases).
-    await expect(editorRows).toHaveCount(rowCount - 1, { timeout: 10000 });
+    // The removed stranger row disappears.
+    await expect(strangerRow).not.toBeVisible();
   });
 
   test('Add non-existent email shows error', { tag: '@regression' }, async ({ page }) => {

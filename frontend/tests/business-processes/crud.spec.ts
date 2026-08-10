@@ -48,8 +48,9 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
-    // Verify new process appears in table
-    await expect(page.getByText('测试业务流程')).toBeVisible({ timeout: 10000 });
+    // Verify new process appears in table (name cell exact — the description
+    // cell also contains the name text and would cause a strict-mode violation).
+    await expect(page.getByRole('cell', { name: '测试业务流程', exact: true })).toBeVisible({ timeout: 10000 });
     
     // Verify numeric fields formatted correctly
     const row = page.locator('tr').filter({ hasText: '测试业务流程' });
@@ -149,7 +150,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     await expect(row).toBeVisible();
     
     // Click edit (pencil) button
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="pencil"]') }).click();
+    await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-pencil"]') }).click();
     
     // Verify edit dialog opens with pre-filled data
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -220,7 +221,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     await expect(row).toBeVisible();
     
     // Click delete (trash) button
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="trash-2"]') }).click();
+    await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-trash-2"]') }).click();
     
     // Verify delete confirmation dialog opens
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -338,7 +339,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     }
     
     // Update
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="pencil"]') }).click();
+    await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-pencil"]') }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('更新后的CRUD流程');
@@ -355,7 +356,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     
     // Delete
     const updatedRow = page.locator('tr').filter({ hasText: '更新后的CRUD流程' });
-    await updatedRow.getByRole('button').filter({ has: page.locator('svg[data-icon="trash-2"]') }).click();
+    await updatedRow.getByRole('button').filter({ has: page.locator('svg[class*="lucide-trash-2"]') }).click();
     
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.getByRole('button', { name: /确认|删除|Confirm|Delete/ }).click();

@@ -14,6 +14,7 @@ export const EDITOR_EMAIL = process.env.E2E_EDITOR_EMAIL || 'test@example.com';
 export const EDITOR_PASSWORD = process.env.E2E_EDITOR_PASSWORD || 'testpassword123';
 export const STRANGER_EMAIL = process.env.E2E_STRANGER_EMAIL || 'stranger@test.com';
 export const STRANGER_PASSWORD = process.env.E2E_STRANGER_PASSWORD || 'stranger123456';
+export const STRANGER_NAME = process.env.E2E_STRANGER_NAME || 'Stranger';
 
 // Test space id — env-driven, mirrors backend migration TEST_SPACE_ID.
 export const TEST_SPACE_ID = process.env.E2E_TEST_SPACE_ID || '00000000-0000-0000-0000-000000000010';

@@ -20,7 +20,7 @@ test.describe('Error Handling - Network Errors', () => {
       await page.goto(pageInfo.path);
       
       // Wait for the page heading to appear (indicates loading is complete)
-      await expect(page.getByRole('heading', { name: pageInfo.name })).toBeVisible({ timeout: 10000 });
+      await expect(page.getByRole('heading', { name: pageInfo.name, exact: true })).toBeVisible({ timeout: 10000 });
       
       // Check for empty state if no data
       // The table might show "No data" or similar message
@@ -52,7 +52,7 @@ test.describe('Error Handling - Network Errors', () => {
     await expect(errorMessage).toBeVisible({ timeout: 10000 });
     
     // Verify UI doesn't crash
-    await expect(page.getByRole('heading', { name: '价值流' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '价值流', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '新建价值流' })).toBeVisible();
     
     // Verify retry mechanism (if implemented)
@@ -126,7 +126,7 @@ test.describe('Error Handling - Network Errors', () => {
     await expect(errorMessage).toBeVisible({ timeout: 10000 });
     
     // Verify UI doesn't crash
-    await expect(page.getByRole('heading', { name: '价值流' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '价值流', exact: true })).toBeVisible();
     
     // Verify user can retry or navigate away
     // Check for retry button or navigation still works

@@ -36,11 +36,10 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Verify new value stream appears in table
-    await expect(page.getByText('测试价值流')).toBeVisible({ timeout: 10000 });
+    const row = page.locator('tr').filter({ hasText: '测试价值流' });
+    await expect(row).toBeVisible({ timeout: 10000 });
     
     // Verify table shows correct data
-    const row = page.locator('tr').filter({ hasText: '测试价值流' });
-    await expect(row).toBeVisible();
     await expect(row.getByText('v1.0')).toBeVisible();
     await expect(row.getByText('active')).toBeVisible();
     
@@ -69,7 +68,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(row).toBeVisible();
     
     // Click edit (pencil) button
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="pencil"]') }).click();
+    await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-pencil"]') }).click();
     
     // Verify edit dialog opens with pre-filled data
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -93,18 +92,21 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Verify table shows updated data
-    await expect(page.getByText('Updated Name')).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText('Updated Description')).toBeVisible();
+    const updatedRow = page.locator('tr').filter({ hasText: 'Updated Name' });
+    await expect(updatedRow).toBeVisible({ timeout: 10000 });
+    await expect(updatedRow.getByText('Updated Description')).toBeVisible();
     
     // Verify other fields unchanged
-    await expect(page.getByText('v1.0')).toBeVisible();
-    await expect(page.getByText('active')).toBeVisible();
+    await expect(updatedRow.getByText('v1.0')).toBeVisible();
+    await expect(updatedRow.getByText('active')).toBeVisible();
   });
 
   test('Happy Path - Delete Value Stream', { tag: '@regression' }, async ({ page }) => {
-    // First, create a value stream to delete
+    // Use a unique name to avoid strict-mode violations from residual data on repeated runs
+    const name = `待删除价值流_${Date.now()}`;
+    // First, create a value stream to delete (archive)
     await page.getByRole('button', { name: '新建价值流' }).click();
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('待删除价值流');
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这个将被删除');
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
@@ -118,11 +120,11 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created value stream
-    const row = page.locator('tr').filter({ hasText: '待删除价值流' });
+    const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible();
     
     // Click delete (trash) button
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="trash-2"]') }).click();
+    await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-trash-2"]') }).click();
     
     // Verify delete confirmation dialog opens
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -134,8 +136,8 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
-    // Verify value stream removed from table
-    await expect(page.getByText('待删除价值流')).not.toBeVisible({ timeout: 10000 });
+    // Delete is implemented as archive: verify the row's status becomes "archived"
+    await expect(row.getByText('archived')).toBeVisible({ timeout: 10000 });
   });
 
   test('Edge Case - Create Value Stream Validation', { tag: '@regression' }, async ({ page }) => {
@@ -180,7 +182,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(row).toBeVisible();
     
     // Click delete (trash) button
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="trash-2"]') }).click();
+    await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-trash-2"]') }).click();
     
     // Verify delete confirmation dialog opens
     await expect(page.getByRole('dialog')).toBeVisible();
