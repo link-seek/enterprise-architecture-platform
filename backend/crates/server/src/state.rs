@@ -101,8 +101,9 @@ fn test_space_uuid() -> Uuid {
 /// Handles the check-then-act race on `users.email` unique index: if a
 /// concurrent insert wins the race, `save` fails with a unique-constraint
 /// violation, so we retry `find_by_email` and return the existing user.
-/// Returns `(user_id, was_created)` so callers can decide whether to grant
-/// membership (e.g. skip for pre-existing users in production).
+/// Returns `(user_id, was_created)` for informational purposes. Callers
+/// always grant membership via `upsert_space_member`, which is idempotent
+/// and safe for pre-existing users.
 async fn resolve_or_create_user(
     repo: &SeaOrmUserRepo,
     email: &str,
@@ -188,7 +189,9 @@ async fn upsert_space_member(
              "role" = CASE WHEN "space_members"."role" = 'owner' AND excluded."role" != 'owner'
                            THEN "space_members"."role"
                            ELSE excluded."role" END,
-             "updated_at" = excluded."updated_at""#,
+             "updated_at" = CASE WHEN "space_members"."role" = 'owner' AND excluded."role" != 'owner'
+                           THEN "space_members"."updated_at"
+                           ELSE excluded."updated_at" END"#,
         [
             sea_orm::Value::Bytes(Some(space_id.as_bytes().to_vec())),
             sea_orm::Value::Bytes(Some(user_id.as_bytes().to_vec())),
@@ -274,7 +277,7 @@ async fn seed_admin(db: &DatabaseConnection) -> anyhow::Result<()> {
     let name = std::env::var("APP_SEED_ADMIN_NAME")
         .unwrap_or_else(|_| "Admin".to_string());
 
-    if password.len() < 8 {
+    if password.chars().count() < 8 {
         anyhow::bail!("Seed admin password must be at least 8 characters");
     }
 
@@ -319,7 +322,7 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
     let editor_password = std::env::var("APP_SEED_EDITOR_PASSWORD");
     match (editor_email, editor_password) {
         (Ok(email), Ok(password)) => {
-            if password.len() < 8 {
+            if password.chars().count() < 8 {
                 anyhow::bail!("APP_SEED_EDITOR_PASSWORD must be at least 8 characters");
             }
             let name =
@@ -360,7 +363,7 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
     let stranger_password = std::env::var("APP_SEED_STRANGER_PASSWORD");
     match (stranger_email, stranger_password) {
         (Ok(email), Ok(password)) => {
-            if password.len() < 8 {
+            if password.chars().count() < 8 {
                 anyhow::bail!("APP_SEED_STRANGER_PASSWORD must be at least 8 characters");
             }
             let name =

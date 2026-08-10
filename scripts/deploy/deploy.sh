@@ -34,11 +34,11 @@ mkdir -p "$(dirname "$ENV_FILE")"
     echo "APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc"
     printf 'APP_SEED_ADMIN_EMAIL=%s\n' "$APP_SEED_ADMIN_EMAIL"
     printf 'APP_SEED_ADMIN_PASSWORD=%s\n' "$APP_SEED_ADMIN_PASSWORD"
-    if [[ -n "${APP_SEED_EDITOR_EMAIL:-}" ]]; then
+    if [[ -n "${APP_SEED_EDITOR_EMAIL:-}" && -n "${APP_SEED_EDITOR_PASSWORD:-}" ]]; then
       printf 'APP_SEED_EDITOR_EMAIL=%s\n' "$APP_SEED_EDITOR_EMAIL"
       printf 'APP_SEED_EDITOR_PASSWORD=%s\n' "$APP_SEED_EDITOR_PASSWORD"
     fi
-    if [[ -n "${APP_SEED_STRANGER_EMAIL:-}" ]]; then
+    if [[ -n "${APP_SEED_STRANGER_EMAIL:-}" && -n "${APP_SEED_STRANGER_PASSWORD:-}" ]]; then
       printf 'APP_SEED_STRANGER_EMAIL=%s\n' "$APP_SEED_STRANGER_EMAIL"
       printf 'APP_SEED_STRANGER_PASSWORD=%s\n' "$APP_SEED_STRANGER_PASSWORD"
     fi

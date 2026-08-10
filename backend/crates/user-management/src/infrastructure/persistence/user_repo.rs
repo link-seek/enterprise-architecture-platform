@@ -36,17 +36,16 @@ impl SeaOrmUserRepo {
 
 /// Map a `DbErr` to `DomainError`, using sea-orm's typed `sql_err()` to
 /// detect unique-constraint violations (portable across SQLite / PostgreSQL /
-/// MySQL) instead of fragile string matching. Non-unique errors are converted
-/// via the standard `From<DbErr>` impl.
+/// MySQL) instead of fragile string matching. Only email-index violations
+/// are mapped to `EmailExists`; other unique constraints (e.g. primary key)
+/// fall through to the generic `Database` error to avoid misleading messages.
 fn map_unique_violation(e: sea_orm::DbErr) -> DomainError {
-    if matches!(
-        e.sql_err(),
-        Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-    ) {
-        DomainError::EmailExists
-    } else {
-        e.into()
+    if let Some(sea_orm::SqlErr::UniqueConstraintViolation(constraint)) = e.sql_err() {
+        if constraint.contains("email") {
+            return DomainError::EmailExists;
+        }
     }
+    e.into()
 }
 
 #[async_trait]
