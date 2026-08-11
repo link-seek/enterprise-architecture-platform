@@ -23,8 +23,8 @@ jobs:
       enable-backend-tests: true
       enable-frontend-tests: true
       enable-integration: true
-      # 所有分支都跑 @smoke|@regression（增量策略：先修 11 个，再扩到全量）
-      e2e-filter: '--grep "@smoke|@regression"'
+      # auto-fix 分支跑全部 E2E，人工 PR 只跑 smoke
+      e2e-filter: ${{ startsWith(github.event.pull_request.head_ref, 'agent/') && '' || '--grep @smoke' }}
       e2e-timeout-minutes: 30
       frontend-build-env: '["VITE_API_URL=https://api.xieyucheng.top/api"]'
     secrets: inherit
