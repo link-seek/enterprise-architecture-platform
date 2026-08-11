@@ -1,6 +1,6 @@
 services:
   backend:
-    image: rust:1.94-slim
+    image: ghcr.io/link-seek/eap-dev-backend:latest
     working_dir: /app
     volumes:
       - ./backend:/app
@@ -16,7 +16,7 @@ services:
       - APP_SERVER__PORT=8080
       - APP_SERVER__RATE_LIMIT__PER_SECOND=100
       - APP_SERVER__RATE_LIMIT__BURST_SIZE=1000
-    command: bash -c "apt-get update -qq && apt-get install -y -qq curl pkg-config > /dev/null 2>&1 && cargo install cargo-watch --quiet && cargo watch -x 'run -p server'"
+    command: cargo watch -x 'run -p server'
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
       interval: 5s
