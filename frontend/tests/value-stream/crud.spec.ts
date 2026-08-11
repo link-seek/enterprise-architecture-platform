@@ -17,7 +17,8 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('heading', { name: /新建价值流|创建价值流/ })).toBeVisible();
     
     // Fill in form
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('测试价值流');
+    const name = `测试价值流_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这是一个测试价值流');
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
@@ -36,7 +37,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Verify new value stream appears in table
-    const row = page.locator('tr').filter({ hasText: '测试价值流' });
+    const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible({ timeout: 10000 });
     
     // Verify table shows correct data
@@ -50,7 +51,8 @@ test.describe('Value Stream Management - CRUD Operations', () => {
   test('Happy Path - Edit Value Stream', { tag: '@regression' }, async ({ page }) => {
     // First, create a value stream to edit
     await page.getByRole('button', { name: '新建价值流' }).click();
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('原始名称');
+    const originalName = `原始名称_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(originalName);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('原始描述');
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
@@ -64,7 +66,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created value stream and click edit button
-    const row = page.locator('tr').filter({ hasText: '原始名称' });
+    const row = page.locator('tr').filter({ hasText: originalName });
     await expect(row).toBeVisible();
     
     // Click edit (pencil) button
@@ -76,13 +78,14 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     
     // Verify form fields have existing data
     const nameField = page.getByRole('textbox', { name: /名称|Name/ });
-    await expect(nameField).toHaveValue('原始名称');
+    await expect(nameField).toHaveValue(originalName);
     
     const descField = page.getByRole('textbox', { name: /描述|Description/ });
     await expect(descField).toHaveValue('原始描述');
     
     // Modify fields
-    await nameField.fill('Updated Name');
+    const updatedName = `Updated_${Date.now()}`;
+    await nameField.fill(updatedName);
     await descField.fill('Updated Description');
     
     // Click "保存" button
@@ -92,7 +95,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Verify table shows updated data
-    const updatedRow = page.locator('tr').filter({ hasText: 'Updated Name' });
+    const updatedRow = page.locator('tr').filter({ hasText: updatedName });
     await expect(updatedRow).toBeVisible({ timeout: 10000 });
     await expect(updatedRow.getByText('Updated Description')).toBeVisible();
     
@@ -167,7 +170,8 @@ test.describe('Value Stream Management - CRUD Operations', () => {
   test('Edge Case - Delete Confirmation Cancel', { tag: '@regression' }, async ({ page }) => {
     // Create a value stream
     await page.getByRole('button', { name: '新建价值流' }).click();
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('测试取消删除');
+    const cancelName = `测试取消删除_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(cancelName);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('测试取消删除描述');
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
@@ -178,7 +182,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created value stream
-    const row = page.locator('tr').filter({ hasText: '测试取消删除' });
+    const row = page.locator('tr').filter({ hasText: cancelName });
     await expect(row).toBeVisible();
     
     // Click delete (trash) button
@@ -200,7 +204,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
     
     // Verify value stream still in table
-    await expect(page.getByText('测试取消删除')).toBeVisible();
+    await expect(page.getByText(cancelName)).toBeVisible();
   });
 
   test('View Value Stream Details', { tag: '@regression' }, async ({ page }) => {

@@ -34,7 +34,7 @@ services:
     environment:
       - VITE_API_URL=/api
       - VITE_GRAPHQL_URL=/graphql
-      - VITE_BACKEND_HOST=backend
+      - BACKEND_HOST=backend
     depends_on:
       backend:
         condition: service_started

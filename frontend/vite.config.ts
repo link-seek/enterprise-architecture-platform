@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
+const backendTarget = `http://${process.env.BACKEND_HOST || 'localhost'}:8080`
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -15,15 +17,15 @@ export default defineConfig({
     host: '0.0.0.0',
     proxy: {
       '/api': {
-        target: `http://${process.env.VITE_BACKEND_HOST || 'localhost'}:8080`,
+        target: backendTarget,
         changeOrigin: true,
       },
       '/graphql': {
-        target: `http://${process.env.VITE_BACKEND_HOST || 'localhost'}:8080`,
+        target: backendTarget,
         changeOrigin: true,
       },
       '/health': {
-        target: `http://${process.env.VITE_BACKEND_HOST || 'localhost'}:8080`,
+        target: backendTarget,
         changeOrigin: true,
       },
     },
