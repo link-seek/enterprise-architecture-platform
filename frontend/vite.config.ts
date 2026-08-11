@@ -12,17 +12,18 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    host: '0.0.0.0',
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: `http://${process.env.VITE_BACKEND_HOST || 'localhost'}:8080`,
         changeOrigin: true,
       },
       '/graphql': {
-        target: 'http://localhost:8080',
+        target: `http://${process.env.VITE_BACKEND_HOST || 'localhost'}:8080`,
         changeOrigin: true,
       },
       '/health': {
-        target: 'http://localhost:8080',
+        target: `http://${process.env.VITE_BACKEND_HOST || 'localhost'}:8080`,
         changeOrigin: true,
       },
     },
