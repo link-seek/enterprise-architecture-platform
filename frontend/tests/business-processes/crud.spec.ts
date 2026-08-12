@@ -17,53 +17,53 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await expect(createButton).toBeVisible();
     await createButton.click();
-    
+
     // Verify create dialog opens
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByRole('heading', { name: /新建流程|新建业务流程|Create Business Process/ })).toBeVisible();
-    
-    // Fill in form with test data including SLA, cycle time, cost
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('测试业务流程');
+
+    // Fill in form with unique test data
+    const name = `测试业务流程_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这是一个测试业务流程');
-    
+
     // Fill numeric fields if they exist
     const slaField = page.getByRole('spinbutton', { name: /SLA|服务级别协议/ }).or(page.getByRole('textbox', { name: /SLA|服务级别协议/ }));
     if (await slaField.isVisible()) {
       await slaField.fill('99.9');
     }
-    
+
     const cycleTimeField = page.getByRole('spinbutton', { name: /周期时间|Cycle Time/ }).or(page.getByRole('textbox', { name: /周期时间|Cycle Time/ }));
     if (await cycleTimeField.isVisible()) {
       await cycleTimeField.fill('24');
     }
-    
+
     const costField = page.getByRole('spinbutton', { name: /成本|Cost/ }).or(page.getByRole('textbox', { name: /成本|Cost/ }));
     if (await costField.isVisible()) {
       await costField.fill('1000');
     }
-    
+
     // Click "保存" button
     await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
-    
+
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
-    // Verify new process appears in table (name cell exact — the description
-    // cell also contains the name text and would cause a strict-mode violation).
-    await expect(page.getByRole('cell', { name: '测试业务流程', exact: true })).toBeVisible({ timeout: 10000 });
-    
+
+    // Verify new process appears in table
+    await expect(page.getByRole('cell', { name, exact: true })).toBeVisible({ timeout: 10000 });
+
     // Verify numeric fields formatted correctly
-    const row = page.locator('tr').filter({ hasText: '测试业务流程' });
+    const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible();
-    
+
     if (await slaField.isVisible()) {
       await expect(row.getByText('99.9')).toBeVisible();
     }
-    
+
     if (await cycleTimeField.isVisible()) {
       await expect(row.getByText('24')).toBeVisible();
     }
-    
+
     if (await costField.isVisible()) {
       await expect(row.getByText('1000')).toBeVisible();
     }
@@ -123,79 +123,82 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     // Create a process to update
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
-    
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('更新前流程');
+
+    const originalName = `更新前流程_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(originalName);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('更新前描述');
-    
+
     const slaField = page.getByRole('spinbutton', { name: /SLA|服务级别协议/ }).or(page.getByRole('textbox', { name: /SLA|服务级别协议/ }));
     if (await slaField.isVisible()) {
       await slaField.fill('90');
     }
-    
+
     const cycleTimeField = page.getByRole('spinbutton', { name: /周期时间|Cycle Time/ }).or(page.getByRole('textbox', { name: /周期时间|Cycle Time/ }));
     if (await cycleTimeField.isVisible()) {
       await cycleTimeField.fill('72');
     }
-    
+
     const costField = page.getByRole('spinbutton', { name: /成本|Cost/ }).or(page.getByRole('textbox', { name: /成本|Cost/ }));
     if (await costField.isVisible()) {
       await costField.fill('2000');
     }
-    
+
     await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Find the created process and click edit button
-    const row = page.locator('tr').filter({ hasText: '更新前流程' });
+    const row = page.locator('tr').filter({ hasText: originalName });
     await expect(row).toBeVisible();
-    
+
     // Click edit (pencil) button
     await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-pencil"]') }).click();
-    
+
     // Verify edit dialog opens with pre-filled data
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByRole('heading', { name: /编辑|Edit/ })).toBeVisible();
-    
+
     // Verify form fields have existing data
     const nameField = page.getByRole('textbox', { name: /名称|Name/ });
-    await expect(nameField).toHaveValue('更新前流程');
-    
+    await expect(nameField).toHaveValue(originalName);
+
     const descField = page.getByRole('textbox', { name: /描述|Description/ });
     await expect(descField).toHaveValue('更新前描述');
-    
+
     // Modify fields
-    await nameField.fill('更新后流程');
-    await descField.fill('更新后描述');
-    
+    const updatedName = `更新后流程_${Date.now()}`;
+    await nameField.fill(updatedName);
+    const updatedDesc = `更新后描述_${Date.now()}`;
+    await descField.fill(updatedDesc);
+
     if (await slaField.isVisible()) {
       const editSlaField = page.getByRole('spinbutton', { name: /SLA|服务级别协议/ }).or(page.getByRole('textbox', { name: /SLA|服务级别协议/ }));
       await editSlaField.fill('99.5');
     }
-    
+
     if (await cycleTimeField.isVisible()) {
       const editCycleTimeField = page.getByRole('spinbutton', { name: /周期时间|Cycle Time/ }).or(page.getByRole('textbox', { name: /周期时间|Cycle Time/ }));
       await editCycleTimeField.fill('24');
     }
-    
+
     if (await costField.isVisible()) {
       const editCostField = page.getByRole('spinbutton', { name: /成本|Cost/ }).or(page.getByRole('textbox', { name: /成本|Cost/ }));
       await editCostField.fill('3000');
     }
-    
+
     // Click "保存" button
     await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
-    
+
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Verify table shows updated data
-    await expect(page.getByText('更新后流程')).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText('更新后描述')).toBeVisible();
-    
+    await expect(page.getByText(updatedName)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(updatedDesc)).toBeVisible();
+
     if (await slaField.isVisible()) {
       await expect(page.getByText('99.5')).toBeVisible();
     }
-    
+
     if (await cycleTimeField.isVisible()) {
       await expect(page.getByText('24')).toBeVisible();
     }

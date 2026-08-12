@@ -1,11 +1,12 @@
 // spec: specs/eap-test-plan.md
 import { test, expect } from '../helpers/graphql-aware';
-import { login } from '../helpers/auth';
+import { loginAs } from '../helpers/auth';
 
 test.describe('Spaces - CRUD Main Flow', () => {
   test.beforeEach(async ({ page }) => {
-    // Login before each test (env-driven credentials for multi-environment reuse)
-    await login(page);
+    // Use admin login to bypass the 3-space quota for non-admin users.
+    // Previous test runs leave archived spaces that count toward the quota.
+    await loginAs(page, 'admin@test.com', 'admin123456');
 
     // Go to the spaces list page.
     await page.goto('/spaces');
