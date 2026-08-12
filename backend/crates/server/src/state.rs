@@ -146,7 +146,8 @@ async fn resolve_or_create_user(
             match repo.find_by_email(email).await {
                 Ok(Some(existing)) => {
                     tracing::warn!(
-                        "User {email} was created concurrently; reusing existing account"
+                        user_id = %existing.id,
+                        "User was created concurrently; reusing existing account"
                     );
                     Ok((existing.id, false))
                 }
@@ -312,9 +313,9 @@ async fn seed_admin(db: &DatabaseConnection) -> anyhow::Result<()> {
             UserRole::Admin,
         );
         repo.save(&user).await?;
-        tracing::info!("Seeded admin user: {} (password set from config)", email);
+        tracing::info!("Seeded admin user (password set from config)");
     } else {
-        tracing::debug!("Seed admin skipped: {} already exists", email);
+        tracing::debug!("Seed admin skipped: already exists");
     }
     Ok(())
 }

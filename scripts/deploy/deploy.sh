@@ -32,6 +32,10 @@ mkdir -p "$(dirname "$ENV_FILE")"
   {
     echo "APP_ENV=production"
     echo "APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc"
+    if [[ -z "$APP_SEED_ADMIN_EMAIL" || -z "$APP_SEED_ADMIN_PASSWORD" ]]; then
+      echo "ERROR: APP_SEED_ADMIN_EMAIL and APP_SEED_ADMIN_PASSWORD must both be non-empty" >&2
+      exit 1
+    fi
     printf 'APP_SEED_ADMIN_EMAIL=%s\n' "$APP_SEED_ADMIN_EMAIL"
     printf 'APP_SEED_ADMIN_PASSWORD=%s\n' "$APP_SEED_ADMIN_PASSWORD"
     if [[ -n "${APP_SEED_EDITOR_EMAIL:-}" && -n "${APP_SEED_EDITOR_PASSWORD:-}" ]]; then
