@@ -237,10 +237,12 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
     }
 
     // Find an admin user to make the space owner (best-effort; if none, the
-    // space simply has no owner until one is assigned).
+    // space simply has no owner until one is assigned). UserRole::Admin is
+    // stored as 'admin' (snake_case string_value in enums.rs), so the filter
+    // must use lowercase to match.
     let admin_id = IdRow::find_by_statement(sea_orm::Statement::from_sql_and_values(
         db.get_database_backend(),
-        r#"SELECT "id" FROM "users" WHERE "role" = 'Admin' ORDER BY "created_at" ASC LIMIT 1"#,
+        r#"SELECT "id" FROM "users" WHERE "role" = 'admin' ORDER BY "created_at" ASC LIMIT 1"#,
         [],
     ))
     .one(db)
