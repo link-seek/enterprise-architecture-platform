@@ -34,6 +34,6 @@ test.describe('Organizational Units - CRUD Operations', () => {
     await expect(page.getByRole('heading', { name: '确认删除' })).toBeVisible();
     await page.getByRole('button', { name: '删除' }).click();
 
-    await expect(page.getByText(name)).not.toBeVisible();
+    await expect(page.getByText(name, { exact: true })).not.toBeVisible();
   });
 });
