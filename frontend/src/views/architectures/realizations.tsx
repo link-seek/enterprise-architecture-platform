@@ -11,10 +11,6 @@ const GET_REALIZATIONS_DATA = gql`
     businessProcessesBySpace(spaceId: $spaceId) { id name }
     applicationProcessesBySpace(spaceId: $spaceId) { id name }
     businessCapabilitiesBySpace(spaceId: $spaceId) { id name }
-    organizationalUnitsBySpace(spaceId: $spaceId) { id name }
-    businessRolesBySpace(spaceId: $spaceId) { id name }
-    functionalModulesBySpace(spaceId: $spaceId) { id name }
-    applicationInterfacesBySpace(spaceId: $spaceId) { id name }
   }
 `
 
@@ -32,10 +28,6 @@ interface RealizationsData {
   businessProcessesBySpace?: Named[]
   applicationProcessesBySpace?: Named[]
   businessCapabilitiesBySpace?: Named[]
-  organizationalUnitsBySpace?: Named[]
-  businessRolesBySpace?: Named[]
-  functionalModulesBySpace?: Named[]
-  applicationInterfacesBySpace?: Named[]
 }
 
 function RealizationTable({ title, rows }: { title: string; rows: { left: string; right: string }[] }) {
@@ -81,7 +73,7 @@ export default function Realizations() {
     if (!data) return
     let cancelled = false
     async function fetchCapabilityRealizations() {
-      if (capabilities.length === 0) { setCapabilityRealizations([]); return }
+      if (capabilities.length === 0) { setCapabilityRealizations([]); setRealizationsLoading(false); return }
       setRealizationsLoading(true)
       try {
         const results = await Promise.all(

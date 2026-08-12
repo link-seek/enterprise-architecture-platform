@@ -44,6 +44,7 @@ interface BusinessRoleQuery { businessRolesBySpace?: BusinessRole[] }
 interface OrgUnitQuery { organizationalUnitsBySpace?: { id: string; name: string }[] }
 
 const EMPTY: BusinessRole[] = []
+const EMPTY_ORG: { id: string; name: string }[] = []
 
 const RoleList = memo(function RoleList({ nodes, orgUnits, canEdit, onEdit, onDelete }: {
   nodes: BusinessRole[]; orgUnits: { id: string; name: string }[]; canEdit: boolean; onEdit: (r: BusinessRole) => void; onDelete: (r: BusinessRole) => void
@@ -108,10 +109,10 @@ export default function BusinessRoles() {
         <CardContent>
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
           {Boolean(error) && <div className="text-center py-8 text-destructive">加载失败</div>}
-          {data && <RoleList nodes={data.businessRolesBySpace ?? EMPTY} orgUnits={orgData?.organizationalUnitsBySpace ?? []} canEdit={canEdit} onEdit={handleEdit} onDelete={handleDelete} />}
+          {data && <RoleList nodes={data.businessRolesBySpace ?? EMPTY} orgUnits={orgData?.organizationalUnitsBySpace ?? EMPTY_ORG} canEdit={canEdit} onEdit={handleEdit} onDelete={handleDelete} />}
         </CardContent>
       </Card>
-      <RoleCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} orgUnits={orgData?.organizationalUnitsBySpace ?? []} />
+      <RoleCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} orgUnits={orgData?.organizationalUnitsBySpace ?? EMPTY_ORG} />
       <RoleDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
     </div>
   )

@@ -45,6 +45,7 @@ interface InterfaceQuery { applicationInterfacesBySpace?: AppInterface[] }
 interface ModuleQuery { functionalModulesBySpace?: { id: string; name: string }[] }
 
 const EMPTY: AppInterface[] = []
+const EMPTY_MODULES: { id: string; name: string }[] = []
 
 const InterfaceList = memo(function InterfaceList({ nodes, modules, canEdit, onEdit, onDelete }: {
   nodes: AppInterface[]; modules: { id: string; name: string }[]; canEdit: boolean; onEdit: (i: AppInterface) => void; onDelete: (i: AppInterface) => void
@@ -113,10 +114,10 @@ export default function ApplicationInterfaces() {
         <CardContent>
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
           {Boolean(error) && <div className="text-center py-8 text-destructive">加载失败</div>}
-          {data && <InterfaceList nodes={data.applicationInterfacesBySpace ?? EMPTY} modules={modData?.functionalModulesBySpace ?? []} canEdit={canEdit} onEdit={handleEdit} onDelete={handleDelete} />}
+          {data && <InterfaceList nodes={data.applicationInterfacesBySpace ?? EMPTY} modules={modData?.functionalModulesBySpace ?? EMPTY_MODULES} canEdit={canEdit} onEdit={handleEdit} onDelete={handleDelete} />}
         </CardContent>
       </Card>
-      <InterfaceCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} modules={modData?.functionalModulesBySpace ?? []} />
+      <InterfaceCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} modules={modData?.functionalModulesBySpace ?? EMPTY_MODULES} />
       <InterfaceDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
     </div>
   )

@@ -8,7 +8,7 @@ test.describe('v2.1 New Entity Pages - Smoke Tests', () => {
 
   test('Organizational Units page loads', { tag: '@smoke' }, async ({ page }) => {
     await page.goto(`${SPACE_BASE}/organizational-units`);
-    await expect(page.getByRole('heading', { name: '组织单元' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '组织单元', exact: true })).toBeVisible();
     await expect(page.getByText('组织单元列表')).toBeVisible();
   });
 
