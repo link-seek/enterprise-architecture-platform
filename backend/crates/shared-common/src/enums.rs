@@ -346,3 +346,77 @@ pub enum ApplicationProcessTrigger {
     #[sea_orm(string_value = "webhook")]
     Webhook,
 }
+
+/// RACI role for Participation (BusinessRole → BusinessProcess).
+///
+/// Maps to the RACI matrix: Responsible (does the work), Accountable (owns
+/// the outcome), Consulted (provides input), Informed (kept up to date).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum RaciRole {
+    #[sea_orm(string_value = "responsible")]
+    Responsible,
+    #[sea_orm(string_value = "accountable")]
+    Accountable,
+    #[sea_orm(string_value = "consulted")]
+    Consulted,
+    #[sea_orm(string_value = "informed")]
+    Informed,
+}
+
+/// Type of an organizational unit (ArchiMate Business Actor).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum OrganizationalUnitType {
+    #[sea_orm(string_value = "team")]
+    Team,
+    #[sea_orm(string_value = "role")]
+    Role,
+    #[sea_orm(string_value = "unit")]
+    Unit,
+    #[sea_orm(string_value = "external")]
+    External,
+}
+
+/// Lifecycle state of a functional module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum FunctionalModuleStatus {
+    #[sea_orm(string_value = "draft")]
+    Draft,
+    #[sea_orm(string_value = "active")]
+    Active,
+    #[sea_orm(string_value = "deprecated")]
+    Deprecated,
+}
+
+/// Protocol of an application interface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationInterfaceProtocol {
+    #[sea_orm(string_value = "workflow_dispatch")]
+    WorkflowDispatch,
+    #[sea_orm(string_value = "api")]
+    Api,
+    #[sea_orm(string_value = "webhook")]
+    Webhook,
+}
+
+/// Which kind of process a CapabilityRealization targets.
+///
+/// After the v2.1 redesign, a capability is enabled by a *process* (business
+/// or application) rather than by an application component. This enum
+/// discriminates the polymorphic target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityRealizationTargetType {
+    #[sea_orm(string_value = "business_process")]
+    BusinessProcess,
+    #[sea_orm(string_value = "application_process")]
+    ApplicationProcess,
+}

@@ -70,6 +70,22 @@ export const router = createBrowserRouter([
             lazy: async () => ({ Component: (await import('@/views/architectures/application-processes')).default }),
           },
           {
+            path: 'organizational-units',
+            lazy: async () => ({ Component: (await import('@/views/architectures/organizational-units')).default }),
+          },
+          {
+            path: 'business-roles',
+            lazy: async () => ({ Component: (await import('@/views/architectures/business-roles')).default }),
+          },
+          {
+            path: 'functional-modules',
+            lazy: async () => ({ Component: (await import('@/views/architectures/functional-modules')).default }),
+          },
+          {
+            path: 'application-interfaces',
+            lazy: async () => ({ Component: (await import('@/views/architectures/application-interfaces')).default }),
+          },
+          {
             path: 'realizations',
             lazy: async () => ({ Component: (await import('@/views/architectures/realizations')).default }),
           },

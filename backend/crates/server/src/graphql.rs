@@ -11,7 +11,10 @@ use business_architecture::infrastructure::persistence::entities::{
     business_capability, business_process, capability_process, process_step, stage_capability,
     value_stream, value_stream_stage, space, space_member,
     application_component, application_process, application_process_step,
-    process_realization, capability_realization, step_realization,
+    capability_realization,
+    organizational_unit, business_role, functional_module, application_interface,
+    assignment, participation, module_containment, interface_exposure,
+    process_reference, orchestration,
 };
 use business_architecture::application::value_stream_service::ValueStreamService;
 use business_architecture::application::space_service::SpaceService;
@@ -28,6 +31,8 @@ use shared_common::enums::{
     AutomationLevel, BusinessValueRating, CapabilityLevel, CapabilityStatus, CostRating,
     LifecycleStatus, MaturityLevel,
     ApplicationComponentType, ApplicationComponentStatus, ApplicationProcessTrigger,
+    RaciRole, OrganizationalUnitType, FunctionalModuleStatus, ApplicationInterfaceProtocol,
+    CapabilityRealizationTargetType,
 };
 
 pub type GraphqlSchema = async_graphql::dynamic::Schema;
@@ -75,9 +80,17 @@ const ADMIN_READ_ENTITIES: &[&str] = &[
     "application_components",
     "application_processes",
     "application_process_steps",
-    "process_realizations",
     "capability_realizations",
-    "step_realizations",
+    "organizational_units",
+    "business_roles",
+    "functional_modules",
+    "application_interfaces",
+    "assignments",
+    "participations",
+    "module_containments",
+    "interface_exposures",
+    "process_references",
+    "orchestrations",
 ];
 
 /// Fields hidden from all users (including Admin) in queries.
@@ -1662,6 +1675,62 @@ async fn space_of_process_step(db: &DatabaseConnection, step_id: Uuid) -> async_
     space_of_process(db, step.process_id).await
 }
 
+/// Resolve the `space_id` of an organizational unit.
+async fn space_of_organizational_unit(
+    db: &DatabaseConnection,
+    id: Uuid,
+) -> async_graphql::Result<Uuid> {
+    use sea_orm::EntityTrait;
+    let o = organizational_unit::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Organizational unit not found."))?;
+    Ok(o.space_id)
+}
+
+/// Resolve the `space_id` of a business role.
+async fn space_of_business_role(
+    db: &DatabaseConnection,
+    id: Uuid,
+) -> async_graphql::Result<Uuid> {
+    use sea_orm::EntityTrait;
+    let r = business_role::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Business role not found."))?;
+    Ok(r.space_id)
+}
+
+/// Resolve the `space_id` of a functional module.
+async fn space_of_functional_module(
+    db: &DatabaseConnection,
+    id: Uuid,
+) -> async_graphql::Result<Uuid> {
+    use sea_orm::EntityTrait;
+    let m = functional_module::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Functional module not found."))?;
+    Ok(m.space_id)
+}
+
+/// Resolve the `space_id` of an application interface.
+async fn space_of_application_interface(
+    db: &DatabaseConnection,
+    id: Uuid,
+) -> async_graphql::Result<Uuid> {
+    use sea_orm::EntityTrait;
+    let i = application_interface::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        .ok_or_else(|| async_graphql::Error::new("Application interface not found."))?;
+    Ok(i.space_id)
+}
+
 /// Parse an optional `[String]` GraphQL argument into a `StringVec`.
 fn parse_string_vec_arg(
     ctx: &async_graphql::dynamic::ResolverContext<'_>,
@@ -2862,216 +2931,586 @@ fn register_application_process_step_domain_mutations(builder: &mut Builder) {
     builder.mutations.push(delete);
 }
 
+fn register_v21_entity_domain_mutations(builder: &mut Builder) {
+    use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, TypeRef};
+    use sea_orm::ActiveValue::{NotSet, Set};
+    use sea_orm::{EntityTrait, ActiveModelTrait};
+
+    // organizationalUnit CRUD
+    let create = Field::new("organizationalUnitCreate", TypeRef::named_nn("OrganizationalUnits"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Create)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+            let name = ctx.args.try_get("name")?.string()?.to_owned();
+            let unit_type = parse_enum::<OrganizationalUnitType>(ctx.args.try_get("type")?.enum_name()?)?;
+            let parent_id = ctx.args.get("parentId").and_then(|v| v.string().ok()).and_then(|s| Uuid::parse_str(s).ok());
+            let description = ctx.args.get("description").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+            let status = ctx.args.get("status").and_then(|v| v.string().ok()).map(|s| s.to_owned()).unwrap_or_else(|| "active".to_string());
+            ensure_space_edit_access(&ctx, db, space_id).await?;
+            let now = chrono::Utc::now();
+            let am = organizational_unit::ActiveModel {
+                id: Set(Uuid::now_v7()), name: Set(name), r#type: Set(unit_type), parent_id: Set(parent_id),
+                description: Set(description), status: Set(status), created_at: Set(now), updated_at: Set(now),
+                deleted_at: NotSet, space_id: Set(space_id),
+            };
+            let model = am.insert(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("type", TypeRef::named_nn("OrganizationalUnitTypeEnum")))
+    .argument(InputValue::new("parentId", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("status", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    let update = Field::new("organizationalUnitUpdate", TypeRef::named_nn("OrganizationalUnits"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Update)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let id = parse_uuid_arg(&ctx, "id")?;
+            let existing = organizational_unit::Entity::find_by_id(id).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Organizational unit not found."))?;
+            ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+            let mut am: organizational_unit::ActiveModel = existing.into();
+            if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) { am.name = Set(v.to_owned()); }
+            if let Some(v) = get_enum_arg(&ctx, "type") { am.r#type = Set(parse_enum::<OrganizationalUnitType>(&v)?); }
+            match ctx.args.get("parentId") {
+                Some(v) if v.is_null() => am.parent_id = Set(None),
+                Some(v) => { if let Ok(s) = v.string() { am.parent_id = Set(Uuid::parse_str(s).ok()); } }
+                None => {}
+            }
+            if let Some(v) = ctx.args.get("description").and_then(|v| v.string().ok()) { am.description = Set(Some(v.to_owned())); }
+            if let Some(v) = ctx.args.get("status").and_then(|v| v.string().ok()) { am.status = Set(v.to_owned()); }
+            am.updated_at = Set(chrono::Utc::now());
+            let model = am.update(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("type", TypeRef::named("OrganizationalUnitTypeEnum")))
+    .argument(InputValue::new("parentId", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("status", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(update);
+
+    let delete = Field::new("organizationalUnitDelete", TypeRef::named_nn(TypeRef::BOOLEAN), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Delete)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let id = parse_uuid_arg(&ctx, "id")?;
+            let existing = organizational_unit::Entity::find_by_id(id).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Organizational unit not found."))?;
+            ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+            organizational_unit::Entity::delete_by_id(id).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(async_graphql::Value::Boolean(true)))
+        })
+    })
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+
+    // businessRole CRUD
+    let create = Field::new("businessRoleCreate", TypeRef::named_nn("BusinessRoles"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Create)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+            let name = ctx.args.try_get("name")?.string()?.to_owned();
+            let responsibilities = ctx.args.get("responsibilities").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+            let organization_id = parse_uuid_arg(&ctx, "organizationId")?;
+            let org_space = space_of_organizational_unit(db, organization_id).await?;
+            if org_space != space_id { return Err(async_graphql::Error::new("Organization and space must match.")); }
+            ensure_space_edit_access(&ctx, db, space_id).await?;
+            let now = chrono::Utc::now();
+            let am = business_role::ActiveModel {
+                id: Set(Uuid::now_v7()), name: Set(name), responsibilities: Set(responsibilities),
+                organization_id: Set(organization_id), created_at: Set(now), updated_at: Set(now),
+                deleted_at: NotSet, space_id: Set(space_id),
+            };
+            let model = am.insert(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("responsibilities", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("organizationId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    let update = Field::new("businessRoleUpdate", TypeRef::named_nn("BusinessRoles"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Update)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let id = parse_uuid_arg(&ctx, "id")?;
+            let existing = business_role::Entity::find_by_id(id).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Business role not found."))?;
+            ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+            let mut am: business_role::ActiveModel = existing.into();
+            if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) { am.name = Set(v.to_owned()); }
+            if let Some(v) = ctx.args.get("responsibilities").and_then(|v| v.string().ok()) { am.responsibilities = Set(Some(v.to_owned())); }
+            am.updated_at = Set(chrono::Utc::now());
+            let model = am.update(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("responsibilities", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(update);
+
+    let delete = Field::new("businessRoleDelete", TypeRef::named_nn(TypeRef::BOOLEAN), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Delete)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let id = parse_uuid_arg(&ctx, "id")?;
+            let existing = business_role::Entity::find_by_id(id).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Business role not found."))?;
+            ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+            business_role::Entity::delete_by_id(id).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(async_graphql::Value::Boolean(true)))
+        })
+    })
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+
+    // functionalModule CRUD
+    let create = Field::new("functionalModuleCreate", TypeRef::named_nn("FunctionalModules"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Create)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+            let name = ctx.args.try_get("name")?.string()?.to_owned();
+            let description = ctx.args.get("description").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+            let boundary = ctx.args.get("boundary").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+            let status = parse_enum::<FunctionalModuleStatus>(ctx.args.try_get("status")?.enum_name()?)?;
+            let parent_id = ctx.args.get("parentId").and_then(|v| v.string().ok()).and_then(|s| Uuid::parse_str(s).ok());
+            ensure_space_edit_access(&ctx, db, space_id).await?;
+            let now = chrono::Utc::now();
+            let am = functional_module::ActiveModel {
+                id: Set(Uuid::now_v7()), name: Set(name), description: Set(description), boundary: Set(boundary),
+                status: Set(status), parent_id: Set(parent_id), created_at: Set(now), updated_at: Set(now),
+                deleted_at: NotSet, space_id: Set(space_id),
+            };
+            let model = am.insert(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("boundary", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("status", TypeRef::named_nn("FunctionalModuleStatusEnum")))
+    .argument(InputValue::new("parentId", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    let update = Field::new("functionalModuleUpdate", TypeRef::named_nn("FunctionalModules"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Update)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let id = parse_uuid_arg(&ctx, "id")?;
+            let existing = functional_module::Entity::find_by_id(id).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Functional module not found."))?;
+            ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+            let mut am: functional_module::ActiveModel = existing.into();
+            if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) { am.name = Set(v.to_owned()); }
+            if let Some(v) = ctx.args.get("description").and_then(|v| v.string().ok()) { am.description = Set(Some(v.to_owned())); }
+            if let Some(v) = ctx.args.get("boundary").and_then(|v| v.string().ok()) { am.boundary = Set(Some(v.to_owned())); }
+            if let Some(v) = get_enum_arg(&ctx, "status") { am.status = Set(parse_enum::<FunctionalModuleStatus>(&v)?); }
+            match ctx.args.get("parentId") {
+                Some(v) if v.is_null() => am.parent_id = Set(None),
+                Some(v) => { if let Ok(s) = v.string() { am.parent_id = Set(Uuid::parse_str(s).ok()); } }
+                None => {}
+            }
+            am.updated_at = Set(chrono::Utc::now());
+            let model = am.update(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("boundary", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("status", TypeRef::named("FunctionalModuleStatusEnum")))
+    .argument(InputValue::new("parentId", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(update);
+
+    let delete = Field::new("functionalModuleDelete", TypeRef::named_nn(TypeRef::BOOLEAN), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Delete)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let id = parse_uuid_arg(&ctx, "id")?;
+            let existing = functional_module::Entity::find_by_id(id).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Functional module not found."))?;
+            ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+            functional_module::Entity::delete_by_id(id).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(async_graphql::Value::Boolean(true)))
+        })
+    })
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+
+    // applicationInterface CRUD
+    let create = Field::new("applicationInterfaceCreate", TypeRef::named_nn("ApplicationInterfaces"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Create)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+            let name = ctx.args.try_get("name")?.string()?.to_owned();
+            let protocol = parse_enum::<ApplicationInterfaceProtocol>(ctx.args.try_get("protocol")?.enum_name()?)?;
+            let contract = ctx.args.get("contract").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+            let provider_module_id = parse_uuid_arg(&ctx, "providerModuleId")?;
+            let consumer_module_id = ctx.args.get("consumerModuleId").and_then(|v| v.string().ok()).and_then(|s| Uuid::parse_str(s).ok());
+            let mod_space = space_of_functional_module(db, provider_module_id).await?;
+            if mod_space != space_id { return Err(async_graphql::Error::new("Provider module and space must match.")); }
+            ensure_space_edit_access(&ctx, db, space_id).await?;
+            let now = chrono::Utc::now();
+            let am = application_interface::ActiveModel {
+                id: Set(Uuid::now_v7()), name: Set(name), protocol: Set(protocol), contract: Set(contract),
+                input_schema: NotSet, output_schema: NotSet, provider_module_id: Set(provider_module_id),
+                consumer_module_id: Set(consumer_module_id), created_at: Set(now), updated_at: Set(now),
+                deleted_at: NotSet, space_id: Set(space_id),
+            };
+            let model = am.insert(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("protocol", TypeRef::named_nn("ApplicationInterfaceProtocolEnum")))
+    .argument(InputValue::new("contract", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("providerModuleId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("consumerModuleId", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    let update = Field::new("applicationInterfaceUpdate", TypeRef::named_nn("ApplicationInterfaces"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Update)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let id = parse_uuid_arg(&ctx, "id")?;
+            let existing = application_interface::Entity::find_by_id(id).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Application interface not found."))?;
+            ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+            let mut am: application_interface::ActiveModel = existing.into();
+            if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) { am.name = Set(v.to_owned()); }
+            if let Some(v) = get_enum_arg(&ctx, "protocol") { am.protocol = Set(parse_enum::<ApplicationInterfaceProtocol>(&v)?); }
+            if let Some(v) = ctx.args.get("contract").and_then(|v| v.string().ok()) { am.contract = Set(Some(v.to_owned())); }
+            match ctx.args.get("consumerModuleId") {
+                Some(v) if v.is_null() => am.consumer_module_id = Set(None),
+                Some(v) => { if let Ok(s) = v.string() { am.consumer_module_id = Set(Uuid::parse_str(s).ok()); } }
+                None => {}
+            }
+            am.updated_at = Set(chrono::Utc::now());
+            let model = am.update(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("protocol", TypeRef::named("ApplicationInterfaceProtocolEnum")))
+    .argument(InputValue::new("contract", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("consumerModuleId", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(update);
+
+    let delete = Field::new("applicationInterfaceDelete", TypeRef::named_nn(TypeRef::BOOLEAN), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Delete)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let id = parse_uuid_arg(&ctx, "id")?;
+            let existing = application_interface::Entity::find_by_id(id).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Application interface not found."))?;
+            ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+            application_interface::Entity::delete_by_id(id).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(async_graphql::Value::Boolean(true)))
+        })
+    })
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+}
+
 fn register_realization_domain_mutations(builder: &mut Builder) {
     use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, TypeRef};
     use sea_orm::ActiveValue::Set;
     use sea_orm::{EntityTrait, ActiveModelTrait};
 
-    // ── processRealizationCreate ─────────────────────────────────────
-    // Join table: business process and application process must share a space.
-    let create = Field::new(
-        "processRealizationCreate",
-        TypeRef::named_nn("ProcessRealizations"),
-        |ctx| {
-            FieldFuture::new(async move {
-                check_value_stream_auth(&ctx, OperationType::Create)?;
-                let db = ctx.data::<DatabaseConnection>()?;
-
-                let business_process_id = parse_uuid_arg(&ctx, "businessProcessId")?;
-                let application_process_id = parse_uuid_arg(&ctx, "applicationProcessId")?;
-                let bp_space = space_of_process(db, business_process_id).await?;
-                let ap_space = space_of_application_process(db, application_process_id).await?;
-                if bp_space != ap_space {
-                    return Err(async_graphql::Error::new(
-                        "Business process and application process must belong to the same space.",
-                    ));
-                }
-                ensure_space_edit_access(&ctx, db, bp_space).await?;
-
-                let am = process_realization::ActiveModel {
-                    business_process_id: Set(business_process_id),
-                    application_process_id: Set(application_process_id),
-                };
-                let model = am
-                    .insert(db)
-                    .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
-                Ok(Some(FieldValue::owned_any(model)))
-            })
-        },
-    )
-    .argument(InputValue::new("businessProcessId", TypeRef::named_nn(TypeRef::STRING)))
-    .argument(InputValue::new("applicationProcessId", TypeRef::named_nn(TypeRef::STRING)));
+    let create = Field::new("capabilityRealizationCreate", TypeRef::named_nn("CapabilityRealizations"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Create)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let capability_id = parse_uuid_arg(&ctx, "capabilityId")?;
+            let process_id = parse_uuid_arg(&ctx, "processId")?;
+            let process_type = parse_enum::<CapabilityRealizationTargetType>(ctx.args.try_get("processType")?.enum_name()?)?;
+            let cap_space = space_of_capability(db, capability_id).await?;
+            let proc_space = match process_type {
+                CapabilityRealizationTargetType::BusinessProcess => space_of_process(db, process_id).await?,
+                CapabilityRealizationTargetType::ApplicationProcess => space_of_application_process(db, process_id).await?,
+            };
+            if cap_space != proc_space { return Err(async_graphql::Error::new("Capability and process must belong to the same space.")); }
+            ensure_space_edit_access(&ctx, db, cap_space).await?;
+            let am = capability_realization::ActiveModel { capability_id: Set(capability_id), process_id: Set(process_id), process_type: Set(process_type) };
+            let model = am.insert(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("processId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("processType", TypeRef::named_nn("CapabilityRealizationTargetTypeEnum")));
     builder.mutations.push(create);
 
-    // ── processRealizationDelete ─────────────────────────────────────
-    let delete = Field::new(
-        "processRealizationDelete",
-        TypeRef::named_nn(TypeRef::BOOLEAN),
-        |ctx| {
-            FieldFuture::new(async move {
-                check_value_stream_auth(&ctx, OperationType::Delete)?;
-                let db = ctx.data::<DatabaseConnection>()?;
-                let business_process_id = parse_uuid_arg(&ctx, "businessProcessId")?;
-                let application_process_id = parse_uuid_arg(&ctx, "applicationProcessId")?;
-
-                let existing = process_realization::Entity::find_by_id((business_process_id, application_process_id))
-                    .one(db)
-                    .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
-                    .ok_or_else(|| async_graphql::Error::new("Process realization link not found."))?;
-                let space_id = space_of_process(db, existing.business_process_id).await?;
-                ensure_space_edit_access(&ctx, db, space_id).await?;
-
-                process_realization::Entity::delete_by_id((business_process_id, application_process_id))
-                    .exec(db)
-                    .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
-                Ok(Some(async_graphql::Value::Boolean(true)))
-            })
-        },
-    )
-    .argument(InputValue::new("businessProcessId", TypeRef::named_nn(TypeRef::STRING)))
-    .argument(InputValue::new("applicationProcessId", TypeRef::named_nn(TypeRef::STRING)));
+    let delete = Field::new("capabilityRealizationDelete", TypeRef::named_nn(TypeRef::BOOLEAN), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Delete)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let capability_id = parse_uuid_arg(&ctx, "capabilityId")?;
+            let process_id = parse_uuid_arg(&ctx, "processId")?;
+            let process_type = parse_enum::<CapabilityRealizationTargetType>(ctx.args.try_get("processType")?.enum_name()?)?;
+            let existing = capability_realization::Entity::find_by_id((capability_id, process_id, process_type)).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Capability realization link not found."))?;
+            let space_id = space_of_capability(db, existing.capability_id).await?;
+            ensure_space_edit_access(&ctx, db, space_id).await?;
+            capability_realization::Entity::delete_by_id((capability_id, process_id, process_type)).exec(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(async_graphql::Value::Boolean(true)))
+        })
+    })
+    .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("processId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("processType", TypeRef::named_nn("CapabilityRealizationTargetTypeEnum")));
     builder.mutations.push(delete);
 
-    // ── capabilityRealizationCreate ──────────────────────────────────
-    // Join table: capability and application component must share a space.
-    let create = Field::new(
-        "capabilityRealizationCreate",
-        TypeRef::named_nn("CapabilityRealizations"),
-        |ctx| {
-            FieldFuture::new(async move {
-                check_value_stream_auth(&ctx, OperationType::Create)?;
-                let db = ctx.data::<DatabaseConnection>()?;
+    let create = Field::new("assignmentCreate", TypeRef::named_nn("Assignments"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Create)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let organization_id = parse_uuid_arg(&ctx, "organizationId")?;
+            let business_role_id = parse_uuid_arg(&ctx, "businessRoleId")?;
+            let s1 = space_of_organizational_unit(db, organization_id).await?;
+            let s2 = space_of_business_role(db, business_role_id).await?;
+            if s1 != s2 { return Err(async_graphql::Error::new("Organization and business role must belong to the same space.")); }
+            ensure_space_edit_access(&ctx, db, s1).await?;
+            let am = assignment::ActiveModel { organization_id: Set(organization_id), business_role_id: Set(business_role_id) };
+            let model = am.insert(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("organizationId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("businessRoleId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(create);
 
-                let capability_id = parse_uuid_arg(&ctx, "capabilityId")?;
-                let application_component_id = parse_uuid_arg(&ctx, "applicationComponentId")?;
-                let cap_space = space_of_capability(db, capability_id).await?;
-                let ac_space = space_of_application_component(db, application_component_id).await?;
-                if cap_space != ac_space {
-                    return Err(async_graphql::Error::new(
-                        "Capability and application component must belong to the same space.",
-                    ));
-                }
-                ensure_space_edit_access(&ctx, db, cap_space).await?;
+    let delete = Field::new("assignmentDelete", TypeRef::named_nn(TypeRef::BOOLEAN), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Delete)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let organization_id = parse_uuid_arg(&ctx, "organizationId")?;
+            let business_role_id = parse_uuid_arg(&ctx, "businessRoleId")?;
+            let existing = assignment::Entity::find_by_id((organization_id, business_role_id)).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Assignment not found."))?;
+            let space_id = space_of_organizational_unit(db, existing.organization_id).await?;
+            ensure_space_edit_access(&ctx, db, space_id).await?;
+            assignment::Entity::delete_by_id((organization_id, business_role_id)).exec(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(async_graphql::Value::Boolean(true)))
+        })
+    })
+    .argument(InputValue::new("organizationId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("businessRoleId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
 
-                let am = capability_realization::ActiveModel {
-                    capability_id: Set(capability_id),
-                    application_component_id: Set(application_component_id),
-                };
-                let model = am
-                    .insert(db)
-                    .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
-                Ok(Some(FieldValue::owned_any(model)))
-            })
-        },
-    )
-    .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)))
+    let create = Field::new("participationCreate", TypeRef::named_nn("Participations"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Create)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let business_role_id = parse_uuid_arg(&ctx, "businessRoleId")?;
+            let business_process_id = parse_uuid_arg(&ctx, "businessProcessId")?;
+            let raci_role = parse_enum::<RaciRole>(ctx.args.try_get("raciRole")?.enum_name()?)?;
+            let s1 = space_of_business_role(db, business_role_id).await?;
+            let s2 = space_of_process(db, business_process_id).await?;
+            if s1 != s2 { return Err(async_graphql::Error::new("Business role and business process must belong to the same space.")); }
+            ensure_space_edit_access(&ctx, db, s1).await?;
+            let am = participation::ActiveModel { business_role_id: Set(business_role_id), business_process_id: Set(business_process_id), raci_role: Set(raci_role) };
+            let model = am.insert(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("businessRoleId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("businessProcessId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("raciRole", TypeRef::named_nn("RaciRoleEnum")));
+    builder.mutations.push(create);
+
+    let delete = Field::new("participationDelete", TypeRef::named_nn(TypeRef::BOOLEAN), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Delete)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let business_role_id = parse_uuid_arg(&ctx, "businessRoleId")?;
+            let business_process_id = parse_uuid_arg(&ctx, "businessProcessId")?;
+            let existing = participation::Entity::find_by_id((business_role_id, business_process_id)).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Participation not found."))?;
+            let space_id = space_of_business_role(db, existing.business_role_id).await?;
+            ensure_space_edit_access(&ctx, db, space_id).await?;
+            participation::Entity::delete_by_id((business_role_id, business_process_id)).exec(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(async_graphql::Value::Boolean(true)))
+        })
+    })
+    .argument(InputValue::new("businessRoleId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("businessProcessId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+
+    let create = Field::new("moduleContainmentCreate", TypeRef::named_nn("ModuleContainments"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Create)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let functional_module_id = parse_uuid_arg(&ctx, "functionalModuleId")?;
+            let application_component_id = parse_uuid_arg(&ctx, "applicationComponentId")?;
+            let s1 = space_of_functional_module(db, functional_module_id).await?;
+            let s2 = space_of_application_component(db, application_component_id).await?;
+            if s1 != s2 { return Err(async_graphql::Error::new("Functional module and application component must belong to the same space.")); }
+            ensure_space_edit_access(&ctx, db, s1).await?;
+            let am = module_containment::ActiveModel { functional_module_id: Set(functional_module_id), application_component_id: Set(application_component_id) };
+            let model = am.insert(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("functionalModuleId", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("applicationComponentId", TypeRef::named_nn(TypeRef::STRING)));
     builder.mutations.push(create);
 
-    // ── capabilityRealizationDelete ──────────────────────────────────
-    let delete = Field::new(
-        "capabilityRealizationDelete",
-        TypeRef::named_nn(TypeRef::BOOLEAN),
-        |ctx| {
-            FieldFuture::new(async move {
-                check_value_stream_auth(&ctx, OperationType::Delete)?;
-                let db = ctx.data::<DatabaseConnection>()?;
-                let capability_id = parse_uuid_arg(&ctx, "capabilityId")?;
-                let application_component_id = parse_uuid_arg(&ctx, "applicationComponentId")?;
-
-                let existing = capability_realization::Entity::find_by_id((capability_id, application_component_id))
-                    .one(db)
-                    .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
-                    .ok_or_else(|| async_graphql::Error::new("Capability realization link not found."))?;
-                let space_id = space_of_capability(db, existing.capability_id).await?;
-                ensure_space_edit_access(&ctx, db, space_id).await?;
-
-                capability_realization::Entity::delete_by_id((capability_id, application_component_id))
-                    .exec(db)
-                    .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
-                Ok(Some(async_graphql::Value::Boolean(true)))
-            })
-        },
-    )
-    .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)))
+    let delete = Field::new("moduleContainmentDelete", TypeRef::named_nn(TypeRef::BOOLEAN), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Delete)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let functional_module_id = parse_uuid_arg(&ctx, "functionalModuleId")?;
+            let application_component_id = parse_uuid_arg(&ctx, "applicationComponentId")?;
+            let existing = module_containment::Entity::find_by_id((functional_module_id, application_component_id)).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Module containment not found."))?;
+            let space_id = space_of_functional_module(db, existing.functional_module_id).await?;
+            ensure_space_edit_access(&ctx, db, space_id).await?;
+            module_containment::Entity::delete_by_id((functional_module_id, application_component_id)).exec(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(async_graphql::Value::Boolean(true)))
+        })
+    })
+    .argument(InputValue::new("functionalModuleId", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("applicationComponentId", TypeRef::named_nn(TypeRef::STRING)));
     builder.mutations.push(delete);
 
-    // ── stepRealizationCreate ────────────────────────────────────────
-    // Join table: process step and application process step must share a space.
-    let create = Field::new(
-        "stepRealizationCreate",
-        TypeRef::named_nn("StepRealizations"),
-        |ctx| {
-            FieldFuture::new(async move {
-                check_value_stream_auth(&ctx, OperationType::Create)?;
-                let db = ctx.data::<DatabaseConnection>()?;
-
-                let process_step_id = parse_uuid_arg(&ctx, "processStepId")?;
-                let application_process_step_id = parse_uuid_arg(&ctx, "applicationProcessStepId")?;
-                let ps_space = space_of_process_step(db, process_step_id).await?;
-                let aps_space = space_of_application_process_step(db, application_process_step_id).await?;
-                if ps_space != aps_space {
-                    return Err(async_graphql::Error::new(
-                        "Process step and application process step must belong to the same space.",
-                    ));
-                }
-                ensure_space_edit_access(&ctx, db, ps_space).await?;
-
-                let am = step_realization::ActiveModel {
-                    process_step_id: Set(process_step_id),
-                    application_process_step_id: Set(application_process_step_id),
-                };
-                let model = am
-                    .insert(db)
-                    .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
-                Ok(Some(FieldValue::owned_any(model)))
-            })
-        },
-    )
-    .argument(InputValue::new("processStepId", TypeRef::named_nn(TypeRef::STRING)))
-    .argument(InputValue::new("applicationProcessStepId", TypeRef::named_nn(TypeRef::STRING)));
+    let create = Field::new("interfaceExposureCreate", TypeRef::named_nn("InterfaceExposures"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Create)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let functional_module_id = parse_uuid_arg(&ctx, "functionalModuleId")?;
+            let application_interface_id = parse_uuid_arg(&ctx, "applicationInterfaceId")?;
+            let s1 = space_of_functional_module(db, functional_module_id).await?;
+            let s2 = space_of_application_interface(db, application_interface_id).await?;
+            if s1 != s2 { return Err(async_graphql::Error::new("Functional module and application interface must belong to the same space.")); }
+            ensure_space_edit_access(&ctx, db, s1).await?;
+            let am = interface_exposure::ActiveModel { functional_module_id: Set(functional_module_id), application_interface_id: Set(application_interface_id) };
+            let model = am.insert(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("functionalModuleId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("applicationInterfaceId", TypeRef::named_nn(TypeRef::STRING)));
     builder.mutations.push(create);
 
-    // ── stepRealizationDelete ────────────────────────────────────────
-    let delete = Field::new(
-        "stepRealizationDelete",
-        TypeRef::named_nn(TypeRef::BOOLEAN),
-        |ctx| {
-            FieldFuture::new(async move {
-                check_value_stream_auth(&ctx, OperationType::Delete)?;
-                let db = ctx.data::<DatabaseConnection>()?;
-                let process_step_id = parse_uuid_arg(&ctx, "processStepId")?;
-                let application_process_step_id = parse_uuid_arg(&ctx, "applicationProcessStepId")?;
-
-                let existing = step_realization::Entity::find_by_id((process_step_id, application_process_step_id))
-                    .one(db)
-                    .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
-                    .ok_or_else(|| async_graphql::Error::new("Step realization link not found."))?;
-                let space_id = space_of_process_step(db, existing.process_step_id).await?;
-                ensure_space_edit_access(&ctx, db, space_id).await?;
-
-                step_realization::Entity::delete_by_id((process_step_id, application_process_step_id))
-                    .exec(db)
-                    .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
-                Ok(Some(async_graphql::Value::Boolean(true)))
-            })
-        },
-    )
-    .argument(InputValue::new("processStepId", TypeRef::named_nn(TypeRef::STRING)))
-    .argument(InputValue::new("applicationProcessStepId", TypeRef::named_nn(TypeRef::STRING)));
+    let delete = Field::new("interfaceExposureDelete", TypeRef::named_nn(TypeRef::BOOLEAN), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Delete)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let functional_module_id = parse_uuid_arg(&ctx, "functionalModuleId")?;
+            let application_interface_id = parse_uuid_arg(&ctx, "applicationInterfaceId")?;
+            let existing = interface_exposure::Entity::find_by_id((functional_module_id, application_interface_id)).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Interface exposure not found."))?;
+            let space_id = space_of_functional_module(db, existing.functional_module_id).await?;
+            ensure_space_edit_access(&ctx, db, space_id).await?;
+            interface_exposure::Entity::delete_by_id((functional_module_id, application_interface_id)).exec(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(async_graphql::Value::Boolean(true)))
+        })
+    })
+    .argument(InputValue::new("functionalModuleId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("applicationInterfaceId", TypeRef::named_nn(TypeRef::STRING)));
     builder.mutations.push(delete);
+
+    let create = Field::new("processReferenceCreate", TypeRef::named_nn("ProcessReferences"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Create)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let application_process_id = parse_uuid_arg(&ctx, "applicationProcessId")?;
+            let business_process_id = parse_uuid_arg(&ctx, "businessProcessId")?;
+            let s1 = space_of_application_process(db, application_process_id).await?;
+            let s2 = space_of_process(db, business_process_id).await?;
+            if s1 != s2 { return Err(async_graphql::Error::new("Application process and business process must belong to the same space.")); }
+            ensure_space_edit_access(&ctx, db, s1).await?;
+            let am = process_reference::ActiveModel { application_process_id: Set(application_process_id), business_process_id: Set(business_process_id) };
+            let model = am.insert(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("applicationProcessId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("businessProcessId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    let delete = Field::new("processReferenceDelete", TypeRef::named_nn(TypeRef::BOOLEAN), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Delete)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let application_process_id = parse_uuid_arg(&ctx, "applicationProcessId")?;
+            let business_process_id = parse_uuid_arg(&ctx, "businessProcessId")?;
+            let existing = process_reference::Entity::find_by_id((application_process_id, business_process_id)).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Process reference not found."))?;
+            let space_id = space_of_application_process(db, existing.application_process_id).await?;
+            ensure_space_edit_access(&ctx, db, space_id).await?;
+            process_reference::Entity::delete_by_id((application_process_id, business_process_id)).exec(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(async_graphql::Value::Boolean(true)))
+        })
+    })
+    .argument(InputValue::new("applicationProcessId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("businessProcessId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+
+    let create = Field::new("orchestrationCreate", TypeRef::named_nn("Orchestrations"), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Create)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let application_process_id = parse_uuid_arg(&ctx, "applicationProcessId")?;
+            let functional_module_id = parse_uuid_arg(&ctx, "functionalModuleId")?;
+            let s1 = space_of_application_process(db, application_process_id).await?;
+            let s2 = space_of_functional_module(db, functional_module_id).await?;
+            if s1 != s2 { return Err(async_graphql::Error::new("Application process and functional module must belong to the same space.")); }
+            ensure_space_edit_access(&ctx, db, s1).await?;
+            let am = orchestration::ActiveModel { application_process_id: Set(application_process_id), functional_module_id: Set(functional_module_id) };
+            let model = am.insert(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(FieldValue::owned_any(model)))
+        })
+    })
+    .argument(InputValue::new("applicationProcessId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("functionalModuleId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    let delete = Field::new("orchestrationDelete", TypeRef::named_nn(TypeRef::BOOLEAN), |ctx| {
+        FieldFuture::new(async move {
+            check_value_stream_auth(&ctx, OperationType::Delete)?;
+            let db = ctx.data::<DatabaseConnection>()?;
+            let application_process_id = parse_uuid_arg(&ctx, "applicationProcessId")?;
+            let functional_module_id = parse_uuid_arg(&ctx, "functionalModuleId")?;
+            let existing = orchestration::Entity::find_by_id((application_process_id, functional_module_id)).one(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Orchestration not found."))?;
+            let space_id = space_of_application_process(db, existing.application_process_id).await?;
+            ensure_space_edit_access(&ctx, db, space_id).await?;
+            orchestration::Entity::delete_by_id((application_process_id, functional_module_id)).exec(db).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            Ok(Some(async_graphql::Value::Boolean(true)))
+        })
+    })
+    .argument(InputValue::new("applicationProcessId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("functionalModuleId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(delete);
+
 }
-
 fn register_space_scoped_queries(builder: &mut Builder) {
     use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, Object, TypeRef};
     use sea_orm::{EntityTrait, ColumnTrait, QueryFilter, PaginatorTrait};
@@ -3768,63 +4207,82 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     .argument(InputValue::new("processId", TypeRef::named_nn(TypeRef::STRING)));
     builder.queries.push(aps_by_process);
 
-    // processRealizationsByBusinessProcess
-    let pr_by_bp = Field::new(
-        "processRealizationsByBusinessProcess",
-        TypeRef::named_nn_list_nn("ProcessRealizations"),
-        |ctx| {
-            FieldFuture::new(async move {
-                let db = ctx.data::<DatabaseConnection>()?;
-                let bp_id = parse_uuid_arg(&ctx, "businessProcessId")?;
-                let space_id = space_of_process(db, bp_id).await?;
-                let (actor_id, actor_role) = caller_identity(&ctx);
-                let service = space_service(db);
-                service
-                    .ensure_can_read(space_id, actor_id, actor_role)
-                    .await
-                    .map_err(domain_err_to_graphql)?;
-                let rows = process_realization::Entity::find()
-                    .filter(process_realization::Column::BusinessProcessId.eq(bp_id))
-                    .all(db)
-                    .await
-                    .map_err(db_err_to_graphql)?;
-                let values: Vec<FieldValue> =
-                    rows.into_iter().map(FieldValue::owned_any).collect();
-                Ok(Some(FieldValue::list(values)))
-            })
-        },
-    )
-    .argument(InputValue::new("businessProcessId", TypeRef::named_nn(TypeRef::STRING)));
-    builder.queries.push(pr_by_bp);
+    // ── v2.1 entity BySpace queries ───────────────────────────────────
+    // organizationalUnitsBySpace
+    let ou_by_space = Field::new("organizationalUnitsBySpace", TypeRef::named_nn_list_nn("OrganizationalUnits"), |ctx| {
+        FieldFuture::new(async move {
+            let db = ctx.data::<DatabaseConnection>()?;
+            let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+            let (actor_id, actor_role) = caller_identity(&ctx);
+            let service = space_service(db);
+            service.ensure_can_read(space_id, actor_id, actor_role).await.map_err(domain_err_to_graphql)?;
+            let rows = organizational_unit::Entity::find()
+                .filter(organizational_unit::Column::SpaceId.eq(space_id))
+                .filter(organizational_unit::Column::DeletedAt.is_null())
+                .all(db).await.map_err(db_err_to_graphql)?;
+            let values: Vec<FieldValue> = rows.into_iter().map(FieldValue::owned_any).collect();
+            Ok(Some(FieldValue::list(values)))
+        })
+    })
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(ou_by_space);
 
-    // processRealizationsByApplicationProcess
-    let pr_by_ap = Field::new(
-        "processRealizationsByApplicationProcess",
-        TypeRef::named_nn_list_nn("ProcessRealizations"),
-        |ctx| {
-            FieldFuture::new(async move {
-                let db = ctx.data::<DatabaseConnection>()?;
-                let ap_id = parse_uuid_arg(&ctx, "applicationProcessId")?;
-                let space_id = space_of_application_process(db, ap_id).await?;
-                let (actor_id, actor_role) = caller_identity(&ctx);
-                let service = space_service(db);
-                service
-                    .ensure_can_read(space_id, actor_id, actor_role)
-                    .await
-                    .map_err(domain_err_to_graphql)?;
-                let rows = process_realization::Entity::find()
-                    .filter(process_realization::Column::ApplicationProcessId.eq(ap_id))
-                    .all(db)
-                    .await
-                    .map_err(db_err_to_graphql)?;
-                let values: Vec<FieldValue> =
-                    rows.into_iter().map(FieldValue::owned_any).collect();
-                Ok(Some(FieldValue::list(values)))
-            })
-        },
-    )
-    .argument(InputValue::new("applicationProcessId", TypeRef::named_nn(TypeRef::STRING)));
-    builder.queries.push(pr_by_ap);
+    // businessRolesBySpace
+    let br_by_space = Field::new("businessRolesBySpace", TypeRef::named_nn_list_nn("BusinessRoles"), |ctx| {
+        FieldFuture::new(async move {
+            let db = ctx.data::<DatabaseConnection>()?;
+            let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+            let (actor_id, actor_role) = caller_identity(&ctx);
+            let service = space_service(db);
+            service.ensure_can_read(space_id, actor_id, actor_role).await.map_err(domain_err_to_graphql)?;
+            let rows = business_role::Entity::find()
+                .filter(business_role::Column::SpaceId.eq(space_id))
+                .filter(business_role::Column::DeletedAt.is_null())
+                .all(db).await.map_err(db_err_to_graphql)?;
+            let values: Vec<FieldValue> = rows.into_iter().map(FieldValue::owned_any).collect();
+            Ok(Some(FieldValue::list(values)))
+        })
+    })
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(br_by_space);
+
+    // functionalModulesBySpace
+    let fm_by_space = Field::new("functionalModulesBySpace", TypeRef::named_nn_list_nn("FunctionalModules"), |ctx| {
+        FieldFuture::new(async move {
+            let db = ctx.data::<DatabaseConnection>()?;
+            let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+            let (actor_id, actor_role) = caller_identity(&ctx);
+            let service = space_service(db);
+            service.ensure_can_read(space_id, actor_id, actor_role).await.map_err(domain_err_to_graphql)?;
+            let rows = functional_module::Entity::find()
+                .filter(functional_module::Column::SpaceId.eq(space_id))
+                .filter(functional_module::Column::DeletedAt.is_null())
+                .all(db).await.map_err(db_err_to_graphql)?;
+            let values: Vec<FieldValue> = rows.into_iter().map(FieldValue::owned_any).collect();
+            Ok(Some(FieldValue::list(values)))
+        })
+    })
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(fm_by_space);
+
+    // applicationInterfacesBySpace
+    let ai_by_space = Field::new("applicationInterfacesBySpace", TypeRef::named_nn_list_nn("ApplicationInterfaces"), |ctx| {
+        FieldFuture::new(async move {
+            let db = ctx.data::<DatabaseConnection>()?;
+            let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+            let (actor_id, actor_role) = caller_identity(&ctx);
+            let service = space_service(db);
+            service.ensure_can_read(space_id, actor_id, actor_role).await.map_err(domain_err_to_graphql)?;
+            let rows = application_interface::Entity::find()
+                .filter(application_interface::Column::SpaceId.eq(space_id))
+                .filter(application_interface::Column::DeletedAt.is_null())
+                .all(db).await.map_err(db_err_to_graphql)?;
+            let values: Vec<FieldValue> = rows.into_iter().map(FieldValue::owned_any).collect();
+            Ok(Some(FieldValue::list(values)))
+        })
+    })
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(ai_by_space);
 
     // capabilityRealizationsByCapability
     let cr_by_cap = Field::new(
@@ -3855,23 +4313,226 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)));
     builder.queries.push(cr_by_cap);
 
-    // capabilityRealizationsByApplicationComponent
-    let cr_by_ac = Field::new(
-        "capabilityRealizationsByApplicationComponent",
-        TypeRef::named_nn_list_nn("CapabilityRealizations"),
+    // processReferencesByApplicationProcess
+    let q = Field::new(
+        "processReferencesByApplicationProcess",
+        TypeRef::named_nn_list_nn("ProcessReferences"),
         |ctx| {
             FieldFuture::new(async move {
                 let db = ctx.data::<DatabaseConnection>()?;
-                let ac_id = parse_uuid_arg(&ctx, "applicationComponentId")?;
-                let space_id = space_of_application_component(db, ac_id).await?;
+                let sid = parse_uuid_arg(&ctx, "applicationProcessId")?;
+                let space_id = space_of_application_process(db, sid).await?;
                 let (actor_id, actor_role) = caller_identity(&ctx);
                 let service = space_service(db);
                 service
                     .ensure_can_read(space_id, actor_id, actor_role)
                     .await
                     .map_err(domain_err_to_graphql)?;
-                let rows = capability_realization::Entity::find()
-                    .filter(capability_realization::Column::ApplicationComponentId.eq(ac_id))
+                let rows = process_reference::Entity::find()
+                    .filter(process_reference::Column::ApplicationProcessId.eq(sid))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("applicationProcessId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
+
+    // processReferencesByBusinessProcess
+    let q = Field::new(
+        "processReferencesByBusinessProcess",
+        TypeRef::named_nn_list_nn("ProcessReferences"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let sid = parse_uuid_arg(&ctx, "businessProcessId")?;
+                let space_id = space_of_process(db, sid).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = process_reference::Entity::find()
+                    .filter(process_reference::Column::BusinessProcessId.eq(sid))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("businessProcessId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
+
+    // assignmentsByOrganization
+    let q = Field::new(
+        "assignmentsByOrganization",
+        TypeRef::named_nn_list_nn("Assignments"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let sid = parse_uuid_arg(&ctx, "organizationId")?;
+                let space_id = space_of_organizational_unit(db, sid).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = assignment::Entity::find()
+                    .filter(assignment::Column::OrganizationId.eq(sid))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("organizationId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
+
+    // assignmentsByBusinessRole
+    let q = Field::new(
+        "assignmentsByBusinessRole",
+        TypeRef::named_nn_list_nn("Assignments"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let sid = parse_uuid_arg(&ctx, "businessRoleId")?;
+                let space_id = space_of_business_role(db, sid).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = assignment::Entity::find()
+                    .filter(assignment::Column::BusinessRoleId.eq(sid))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("businessRoleId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
+
+    // participationsByBusinessRole
+    let q = Field::new(
+        "participationsByBusinessRole",
+        TypeRef::named_nn_list_nn("Participations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let sid = parse_uuid_arg(&ctx, "businessRoleId")?;
+                let space_id = space_of_business_role(db, sid).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = participation::Entity::find()
+                    .filter(participation::Column::BusinessRoleId.eq(sid))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("businessRoleId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
+
+    // participationsByBusinessProcess
+    let q = Field::new(
+        "participationsByBusinessProcess",
+        TypeRef::named_nn_list_nn("Participations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let sid = parse_uuid_arg(&ctx, "businessProcessId")?;
+                let space_id = space_of_process(db, sid).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = participation::Entity::find()
+                    .filter(participation::Column::BusinessProcessId.eq(sid))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("businessProcessId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
+
+    // moduleContainmentsByFunctionalModule
+    let q = Field::new(
+        "moduleContainmentsByFunctionalModule",
+        TypeRef::named_nn_list_nn("ModuleContainments"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let sid = parse_uuid_arg(&ctx, "functionalModuleId")?;
+                let space_id = space_of_functional_module(db, sid).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = module_containment::Entity::find()
+                    .filter(module_containment::Column::FunctionalModuleId.eq(sid))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("functionalModuleId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
+
+    // moduleContainmentsByApplicationComponent
+    let q = Field::new(
+        "moduleContainmentsByApplicationComponent",
+        TypeRef::named_nn_list_nn("ModuleContainments"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let sid = parse_uuid_arg(&ctx, "applicationComponentId")?;
+                let space_id = space_of_application_component(db, sid).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = module_containment::Entity::find()
+                    .filter(module_containment::Column::ApplicationComponentId.eq(sid))
                     .all(db)
                     .await
                     .map_err(db_err_to_graphql)?;
@@ -3882,25 +4543,25 @@ fn register_space_scoped_queries(builder: &mut Builder) {
         },
     )
     .argument(InputValue::new("applicationComponentId", TypeRef::named_nn(TypeRef::STRING)));
-    builder.queries.push(cr_by_ac);
+    builder.queries.push(q);
 
-    // stepRealizationsByProcessStep
-    let sr_by_ps = Field::new(
-        "stepRealizationsByProcessStep",
-        TypeRef::named_nn_list_nn("StepRealizations"),
+    // interfaceExposuresByFunctionalModule
+    let q = Field::new(
+        "interfaceExposuresByFunctionalModule",
+        TypeRef::named_nn_list_nn("InterfaceExposures"),
         |ctx| {
             FieldFuture::new(async move {
                 let db = ctx.data::<DatabaseConnection>()?;
-                let ps_id = parse_uuid_arg(&ctx, "processStepId")?;
-                let space_id = space_of_process_step(db, ps_id).await?;
+                let sid = parse_uuid_arg(&ctx, "functionalModuleId")?;
+                let space_id = space_of_functional_module(db, sid).await?;
                 let (actor_id, actor_role) = caller_identity(&ctx);
                 let service = space_service(db);
                 service
                     .ensure_can_read(space_id, actor_id, actor_role)
                     .await
                     .map_err(domain_err_to_graphql)?;
-                let rows = step_realization::Entity::find()
-                    .filter(step_realization::Column::ProcessStepId.eq(ps_id))
+                let rows = interface_exposure::Entity::find()
+                    .filter(interface_exposure::Column::FunctionalModuleId.eq(sid))
                     .all(db)
                     .await
                     .map_err(db_err_to_graphql)?;
@@ -3910,26 +4571,26 @@ fn register_space_scoped_queries(builder: &mut Builder) {
             })
         },
     )
-    .argument(InputValue::new("processStepId", TypeRef::named_nn(TypeRef::STRING)));
-    builder.queries.push(sr_by_ps);
+    .argument(InputValue::new("functionalModuleId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
 
-    // stepRealizationsByApplicationProcessStep
-    let sr_by_aps = Field::new(
-        "stepRealizationsByApplicationProcessStep",
-        TypeRef::named_nn_list_nn("StepRealizations"),
+    // interfaceExposuresByApplicationInterface
+    let q = Field::new(
+        "interfaceExposuresByApplicationInterface",
+        TypeRef::named_nn_list_nn("InterfaceExposures"),
         |ctx| {
             FieldFuture::new(async move {
                 let db = ctx.data::<DatabaseConnection>()?;
-                let aps_id = parse_uuid_arg(&ctx, "applicationProcessStepId")?;
-                let space_id = space_of_application_process_step(db, aps_id).await?;
+                let sid = parse_uuid_arg(&ctx, "applicationInterfaceId")?;
+                let space_id = space_of_application_interface(db, sid).await?;
                 let (actor_id, actor_role) = caller_identity(&ctx);
                 let service = space_service(db);
                 service
                     .ensure_can_read(space_id, actor_id, actor_role)
                     .await
                     .map_err(domain_err_to_graphql)?;
-                let rows = step_realization::Entity::find()
-                    .filter(step_realization::Column::ApplicationProcessStepId.eq(aps_id))
+                let rows = interface_exposure::Entity::find()
+                    .filter(interface_exposure::Column::ApplicationInterfaceId.eq(sid))
                     .all(db)
                     .await
                     .map_err(db_err_to_graphql)?;
@@ -3939,8 +4600,67 @@ fn register_space_scoped_queries(builder: &mut Builder) {
             })
         },
     )
-    .argument(InputValue::new("applicationProcessStepId", TypeRef::named_nn(TypeRef::STRING)));
-    builder.queries.push(sr_by_aps);
+    .argument(InputValue::new("applicationInterfaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
+
+    // orchestrationsByApplicationProcess
+    let q = Field::new(
+        "orchestrationsByApplicationProcess",
+        TypeRef::named_nn_list_nn("Orchestrations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let sid = parse_uuid_arg(&ctx, "applicationProcessId")?;
+                let space_id = space_of_application_process(db, sid).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = orchestration::Entity::find()
+                    .filter(orchestration::Column::ApplicationProcessId.eq(sid))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("applicationProcessId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
+
+    // orchestrationsByFunctionalModule
+    let q = Field::new(
+        "orchestrationsByFunctionalModule",
+        TypeRef::named_nn_list_nn("Orchestrations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let sid = parse_uuid_arg(&ctx, "functionalModuleId")?;
+                let space_id = space_of_functional_module(db, sid).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = orchestration::Entity::find()
+                    .filter(orchestration::Column::FunctionalModuleId.eq(sid))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("functionalModuleId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
+
 }
 
 // ============================================================================
@@ -3982,9 +4702,17 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     register_entity::<application_component::Entity>(&mut builder);  // queries only
     register_entity::<application_process::Entity>(&mut builder);   // queries only
     register_entity::<application_process_step::Entity>(&mut builder); // queries only
-    register_entity::<process_realization::Entity>(&mut builder);   // queries only
     register_entity::<capability_realization::Entity>(&mut builder); // queries only
-    register_entity::<step_realization::Entity>(&mut builder);      // queries only
+    register_entity::<organizational_unit::Entity>(&mut builder);  // queries only
+    register_entity::<business_role::Entity>(&mut builder);        // queries only
+    register_entity::<functional_module::Entity>(&mut builder);    // queries only
+    register_entity::<application_interface::Entity>(&mut builder); // queries only
+    register_entity::<assignment::Entity>(&mut builder);           // queries only
+    register_entity::<participation::Entity>(&mut builder);        // queries only
+    register_entity::<module_containment::Entity>(&mut builder);   // queries only
+    register_entity::<interface_exposure::Entity>(&mut builder);   // queries only
+    register_entity::<process_reference::Entity>(&mut builder);    // queries only
+    register_entity::<orchestration::Entity>(&mut builder);        // queries only
 
     // ── Spaces (reuses `organizations` table) + membership ─────────────
     // Queries are admin-only via the auto-generated query (see ADMIN_READ_ENTITIES);
@@ -4010,6 +4738,7 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     register_application_component_domain_mutations(&mut builder);
     register_application_process_domain_mutations(&mut builder);
     register_application_process_step_domain_mutations(&mut builder);
+    register_v21_entity_domain_mutations(&mut builder);
     register_realization_domain_mutations(&mut builder);
 
     // ── Custom domain mutations for Space + membership ────────────────
@@ -4046,12 +4775,28 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
         .register_entity_dataloader_one_to_many(application_process::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_one(application_process_step::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_many(application_process_step::Entity, tokio::spawn)
-        .register_entity_dataloader_one_to_one(process_realization::Entity, tokio::spawn)
-        .register_entity_dataloader_one_to_many(process_realization::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_one(capability_realization::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_many(capability_realization::Entity, tokio::spawn)
-        .register_entity_dataloader_one_to_one(step_realization::Entity, tokio::spawn)
-        .register_entity_dataloader_one_to_many(step_realization::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(organizational_unit::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(organizational_unit::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(business_role::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(business_role::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(functional_module::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(functional_module::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(application_interface::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(application_interface::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(assignment::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(assignment::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(participation::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(participation::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(module_containment::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(module_containment::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(interface_exposure::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(interface_exposure::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(process_reference::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(process_reference::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(orchestration::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(orchestration::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_one(space::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_many(space::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_one(space_member::Entity, tokio::spawn)
@@ -4070,6 +4815,11 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     builder.register_enumeration::<ApplicationComponentType>();
     builder.register_enumeration::<ApplicationComponentStatus>();
     builder.register_enumeration::<ApplicationProcessTrigger>();
+    builder.register_enumeration::<RaciRole>();
+    builder.register_enumeration::<OrganizationalUnitType>();
+    builder.register_enumeration::<FunctionalModuleStatus>();
+    builder.register_enumeration::<ApplicationInterfaceProtocol>();
+    builder.register_enumeration::<CapabilityRealizationTargetType>();
 
     // SpaceVisibility is used as a field type on the `Organizations` entity
     // (the `visibility` column). If the enum is not registered, seaography
