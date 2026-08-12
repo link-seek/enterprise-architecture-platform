@@ -41,9 +41,13 @@ impl SeaOrmUserRepo {
 /// fall through to the generic `Database` error to avoid misleading messages.
 fn map_unique_violation(e: sea_orm::DbErr) -> DomainError {
     if let Some(sea_orm::SqlErr::UniqueConstraintViolation(constraint)) = e.sql_err() {
-        // SQLite reports the column path ("users.email"), PostgreSQL/MySQL
-        // report the index name ("idx_users_email"). Match both precisely.
-        if constraint.contains("users.email") || constraint.contains("idx_users_email") {
+        // SQLite reports "users.email" (column path), PostgreSQL/MySQL
+        // report "idx_users_email" (index name). Match both precisely,
+        // with a fallback on "email" for backward compatibility.
+        if constraint.contains("users.email")
+            || constraint.contains("idx_users_email")
+            || constraint.contains("email")
+        {
             return DomainError::EmailExists;
         }
     }
