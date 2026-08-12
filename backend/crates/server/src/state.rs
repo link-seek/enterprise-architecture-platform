@@ -335,8 +335,12 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
     let repo = SeaOrmUserRepo::new(db.clone());
 
     // --- Editor ---
-    let editor_email = std::env::var("APP_SEED_EDITOR_EMAIL");
-    let editor_password = std::env::var("APP_SEED_EDITOR_PASSWORD");
+    // Prefer APP_SEED_EDITOR_*; fall back to E2E_EDITOR_* so the backend seeds
+    // with the same credentials the tests use even when APP_SEED_* is unset.
+    let editor_email = std::env::var("APP_SEED_EDITOR_EMAIL")
+        .or_else(|_| std::env::var("E2E_EDITOR_EMAIL"));
+    let editor_password = std::env::var("APP_SEED_EDITOR_PASSWORD")
+        .or_else(|_| std::env::var("E2E_EDITOR_PASSWORD"));
     match (editor_email, editor_password) {
         (Ok(email), Ok(password)) => {
             if password.chars().count() < 8 {
@@ -376,8 +380,12 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
     }
 
     // --- Stranger ---
-    let stranger_email = std::env::var("APP_SEED_STRANGER_EMAIL");
-    let stranger_password = std::env::var("APP_SEED_STRANGER_PASSWORD");
+    // Prefer APP_SEED_STRANGER_*; fall back to E2E_STRANGER_* for the same
+    // reason as the editor fallback above.
+    let stranger_email = std::env::var("APP_SEED_STRANGER_EMAIL")
+        .or_else(|_| std::env::var("E2E_STRANGER_EMAIL"));
+    let stranger_password = std::env::var("APP_SEED_STRANGER_PASSWORD")
+        .or_else(|_| std::env::var("E2E_STRANGER_PASSWORD"));
     match (stranger_email, stranger_password) {
         (Ok(email), Ok(password)) => {
             if password.chars().count() < 8 {

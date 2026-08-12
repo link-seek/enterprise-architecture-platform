@@ -26,6 +26,8 @@ podman rm -f "$CONTAINER_NAME" 2>/dev/null || true
 # Optional seed vars (editor/stranger) are only written when non-empty: the
 # backend treats unset env (std::env::var returns Err) as "skip seeding", but
 # an empty string would be treated as a valid (too-short) password and bail.
+# Fall back to E2E_* env vars so the backend seeds with the same credentials
+# the tests use, even when APP_SEED_* secrets are not separately configured.
 mkdir -p "$(dirname "$ENV_FILE")"
 (
   umask 077
@@ -34,13 +36,17 @@ mkdir -p "$(dirname "$ENV_FILE")"
     echo "APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc"
     printf 'APP_SEED_ADMIN_EMAIL=%s\n' "$APP_SEED_ADMIN_EMAIL"
     printf 'APP_SEED_ADMIN_PASSWORD=%s\n' "$APP_SEED_ADMIN_PASSWORD"
-    if [[ -n "${APP_SEED_EDITOR_EMAIL:-}" && -n "${APP_SEED_EDITOR_PASSWORD:-}" ]]; then
-      printf 'APP_SEED_EDITOR_EMAIL=%s\n' "$APP_SEED_EDITOR_EMAIL"
-      printf 'APP_SEED_EDITOR_PASSWORD=%s\n' "$APP_SEED_EDITOR_PASSWORD"
+    SEED_EDITOR_EMAIL="${APP_SEED_EDITOR_EMAIL:-${E2E_EDITOR_EMAIL:-}}"
+    SEED_EDITOR_PASSWORD="${APP_SEED_EDITOR_PASSWORD:-${E2E_EDITOR_PASSWORD:-}}"
+    if [[ -n "${SEED_EDITOR_EMAIL:-}" && -n "${SEED_EDITOR_PASSWORD:-}" ]]; then
+      printf 'APP_SEED_EDITOR_EMAIL=%s\n' "$SEED_EDITOR_EMAIL"
+      printf 'APP_SEED_EDITOR_PASSWORD=%s\n' "$SEED_EDITOR_PASSWORD"
     fi
-    if [[ -n "${APP_SEED_STRANGER_EMAIL:-}" && -n "${APP_SEED_STRANGER_PASSWORD:-}" ]]; then
-      printf 'APP_SEED_STRANGER_EMAIL=%s\n' "$APP_SEED_STRANGER_EMAIL"
-      printf 'APP_SEED_STRANGER_PASSWORD=%s\n' "$APP_SEED_STRANGER_PASSWORD"
+    SEED_STRANGER_EMAIL="${APP_SEED_STRANGER_EMAIL:-${E2E_STRANGER_EMAIL:-}}"
+    SEED_STRANGER_PASSWORD="${APP_SEED_STRANGER_PASSWORD:-${E2E_STRANGER_PASSWORD:-}}"
+    if [[ -n "${SEED_STRANGER_EMAIL:-}" && -n "${SEED_STRANGER_PASSWORD:-}" ]]; then
+      printf 'APP_SEED_STRANGER_EMAIL=%s\n' "$SEED_STRANGER_EMAIL"
+      printf 'APP_SEED_STRANGER_PASSWORD=%s\n' "$SEED_STRANGER_PASSWORD"
     fi
     echo "RUST_LOG=info,sqlx::pool=warn"
   } > "$ENV_FILE"

@@ -23,7 +23,10 @@ test.describe('Error Handling - Network Errors', () => {
         console.log(`No data found on ${pageInfo.name} page`);
       }
 
-      await expect(page.getByRole('button', { name: /新建|New/ })).toBeVisible();
+      // canEdit is gated by useSpaceMembership, which requires fetchMe() +
+      // membership query to complete after the page reload. Use an explicit
+      // timeout to avoid flaky failures in production with network latency.
+      await expect(page.getByRole('button', { name: /新建|New/ })).toBeVisible({ timeout: 10000 });
     }
   });
 
