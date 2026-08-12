@@ -37,6 +37,8 @@ impl Default for RateLimitConfig {
     }
 }
 
+/// Desired request rate in requests/second. The governor replenishes 1 token
+/// every `1/per_second` seconds.
 fn default_rate_limit_per_second() -> u64 {
     4
 }

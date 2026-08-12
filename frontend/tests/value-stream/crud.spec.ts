@@ -1,6 +1,6 @@
 // spec: specs/eap-test-plan.md
-import { test, expect } from '@playwright/test';
-import { login } from '../helpers/auth';
+import { test, expect } from '../helpers/graphql-aware';
+import { login, SPACE_BASE } from '../helpers/auth';
 
 test.describe('Value Stream Management - CRUD Operations', () => {
   test.beforeEach(async ({ page }) => {
@@ -8,7 +8,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await login(page);
   });
 
-  test('Happy Path - Create Value Stream', async ({ page }) => {
+  test('Happy Path - Create Value Stream', { tag: '@regression' }, async ({ page }) => {
     // Click "新建价值流" button
     await page.getByRole('button', { name: '新建价值流' }).click();
     
@@ -17,7 +17,8 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('heading', { name: /新建价值流|创建价值流/ })).toBeVisible();
     
     // Fill in form
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('测试价值流');
+    const name = `测试价值流_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这是一个测试价值流');
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
@@ -36,11 +37,10 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Verify new value stream appears in table
-    await expect(page.getByText('测试价值流')).toBeVisible({ timeout: 10000 });
+    const row = page.locator('tr').filter({ hasText: name });
+    await expect(row).toBeVisible({ timeout: 10000 });
     
     // Verify table shows correct data
-    const row = page.locator('tr').filter({ hasText: '测试价值流' });
-    await expect(row).toBeVisible();
     await expect(row.getByText('v1.0')).toBeVisible();
     await expect(row.getByText('active')).toBeVisible();
     
@@ -48,10 +48,11 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     // For now, we verify the item appears in the table
   });
 
-  test('Happy Path - Edit Value Stream', async ({ page }) => {
+  test('Happy Path - Edit Value Stream', { tag: '@regression' }, async ({ page }) => {
     // First, create a value stream to edit
     await page.getByRole('button', { name: '新建价值流' }).click();
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('原始名称');
+    const originalName = `原始名称_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(originalName);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('原始描述');
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
@@ -65,11 +66,11 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created value stream and click edit button
-    const row = page.locator('tr').filter({ hasText: '原始名称' });
+    const row = page.locator('tr').filter({ hasText: originalName });
     await expect(row).toBeVisible();
     
     // Click edit (pencil) button
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="pencil"]') }).click();
+    await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-pencil"]') }).click();
     
     // Verify edit dialog opens with pre-filled data
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -77,13 +78,14 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     
     // Verify form fields have existing data
     const nameField = page.getByRole('textbox', { name: /名称|Name/ });
-    await expect(nameField).toHaveValue('原始名称');
+    await expect(nameField).toHaveValue(originalName);
     
     const descField = page.getByRole('textbox', { name: /描述|Description/ });
     await expect(descField).toHaveValue('原始描述');
     
     // Modify fields
-    await nameField.fill('Updated Name');
+    const updatedName = `Updated_${Date.now()}`;
+    await nameField.fill(updatedName);
     await descField.fill('Updated Description');
     
     // Click "保存" button
@@ -93,18 +95,21 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Verify table shows updated data
-    await expect(page.getByText('Updated Name')).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText('Updated Description')).toBeVisible();
+    const updatedRow = page.locator('tr').filter({ hasText: updatedName });
+    await expect(updatedRow).toBeVisible({ timeout: 10000 });
+    await expect(updatedRow.getByText('Updated Description')).toBeVisible();
     
     // Verify other fields unchanged
-    await expect(page.getByText('v1.0')).toBeVisible();
-    await expect(page.getByText('active')).toBeVisible();
+    await expect(updatedRow.getByText('v1.0')).toBeVisible();
+    await expect(updatedRow.getByText('active')).toBeVisible();
   });
 
-  test('Happy Path - Delete Value Stream', async ({ page }) => {
-    // First, create a value stream to delete
+  test('Happy Path - Delete Value Stream', { tag: '@regression' }, async ({ page }) => {
+    // Use a unique name to avoid strict-mode violations from residual data on repeated runs
+    const name = `待删除价值流_${Date.now()}`;
+    // First, create a value stream to delete (archive)
     await page.getByRole('button', { name: '新建价值流' }).click();
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('待删除价值流');
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这个将被删除');
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
@@ -118,11 +123,11 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created value stream
-    const row = page.locator('tr').filter({ hasText: '待删除价值流' });
+    const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible();
     
     // Click delete (trash) button
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="trash-2"]') }).click();
+    await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-trash-2"]') }).click();
     
     // Verify delete confirmation dialog opens
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -134,11 +139,11 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
-    // Verify value stream removed from table
-    await expect(page.getByText('待删除价值流')).not.toBeVisible({ timeout: 10000 });
+    // Delete is implemented as archive: verify the row's status becomes "archived"
+    await expect(row.getByText('archived')).toBeVisible({ timeout: 10000 });
   });
 
-  test('Edge Case - Create Value Stream Validation', async ({ page }) => {
+  test('Edge Case - Create Value Stream Validation', { tag: '@regression' }, async ({ page }) => {
     await page.getByRole('button', { name: '新建价值流' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
     
@@ -162,10 +167,11 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
-  test('Edge Case - Delete Confirmation Cancel', async ({ page }) => {
+  test('Edge Case - Delete Confirmation Cancel', { tag: '@regression' }, async ({ page }) => {
     // Create a value stream
     await page.getByRole('button', { name: '新建价值流' }).click();
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('测试取消删除');
+    const cancelName = `测试取消删除_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(cancelName);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('测试取消删除描述');
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
     
@@ -176,11 +182,11 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
     
     // Find the created value stream
-    const row = page.locator('tr').filter({ hasText: '测试取消删除' });
+    const row = page.locator('tr').filter({ hasText: cancelName });
     await expect(row).toBeVisible();
     
     // Click delete (trash) button
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="trash-2"]') }).click();
+    await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-trash-2"]') }).click();
     
     // Verify delete confirmation dialog opens
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -198,10 +204,10 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
     
     // Verify value stream still in table
-    await expect(page.getByText('测试取消删除')).toBeVisible();
+    await expect(page.getByText(cancelName)).toBeVisible();
   });
 
-  test('View Value Stream Details @smoke', async ({ page }) => {
+  test('View Value Stream Details', { tag: '@regression' }, async ({ page }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `查看详情测试_${Date.now()}`;
     // First, create a value stream to view
@@ -239,11 +245,11 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     const backButton = page.getByRole('button', { name: '返回列表' });
     if (await backButton.isVisible()) {
       await backButton.click();
-      await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
+      await expect(page).toHaveURL(`${SPACE_BASE}/value-streams`);
     } else {
       // Use browser back if no back button
       await page.goBack();
-      await expect(page).toHaveURL('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
+      await expect(page).toHaveURL(`${SPACE_BASE}/value-streams`);
     }
   });
 });

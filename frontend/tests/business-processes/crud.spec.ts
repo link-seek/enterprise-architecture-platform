@@ -1,5 +1,5 @@
 // spec: specs/eap-test-plan.md
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../helpers/graphql-aware';
 import { login, SPACE_BASE } from '../helpers/auth';
 
 test.describe('Business Processes Management - CRUD Operations', () => {
@@ -12,63 +12,64 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     await expect(page).toHaveURL(`${SPACE_BASE}/processes`);
   });
 
-  test('Happy Path - Create Business Process', async ({ page }) => {
+  test('Happy Path - Create Business Process', { tag: '@regression' }, async ({ page }) => {
     // Click "新建业务流程" button
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await expect(createButton).toBeVisible();
     await createButton.click();
-    
+
     // Verify create dialog opens
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByRole('heading', { name: /新建流程|新建业务流程|Create Business Process/ })).toBeVisible();
-    
-    // Fill in form with test data including SLA, cycle time, cost
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('测试业务流程');
+
+    // Fill in form with unique test data
+    const name = `测试业务流程_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这是一个测试业务流程');
-    
+
     // Fill numeric fields if they exist
     const slaField = page.getByRole('spinbutton', { name: /SLA|服务级别协议/ }).or(page.getByRole('textbox', { name: /SLA|服务级别协议/ }));
     if (await slaField.isVisible()) {
       await slaField.fill('99.9');
     }
-    
+
     const cycleTimeField = page.getByRole('spinbutton', { name: /周期时间|Cycle Time/ }).or(page.getByRole('textbox', { name: /周期时间|Cycle Time/ }));
     if (await cycleTimeField.isVisible()) {
       await cycleTimeField.fill('24');
     }
-    
+
     const costField = page.getByRole('spinbutton', { name: /成本|Cost/ }).or(page.getByRole('textbox', { name: /成本|Cost/ }));
     if (await costField.isVisible()) {
       await costField.fill('1000');
     }
-    
+
     // Click "保存" button
     await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
-    
+
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Verify new process appears in table
-    await expect(page.getByText('测试业务流程')).toBeVisible({ timeout: 10000 });
-    
+    await expect(page.getByRole('cell', { name, exact: true })).toBeVisible({ timeout: 10000 });
+
     // Verify numeric fields formatted correctly
-    const row = page.locator('tr').filter({ hasText: '测试业务流程' });
+    const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible();
-    
+
     if (await slaField.isVisible()) {
       await expect(row.getByText('99.9')).toBeVisible();
     }
-    
+
     if (await cycleTimeField.isVisible()) {
       await expect(row.getByText('24')).toBeVisible();
     }
-    
+
     if (await costField.isVisible()) {
       await expect(row.getByText('1000')).toBeVisible();
     }
   });
 
-  test('Happy Path - Read Business Process @smoke', async ({ page }) => {
+  test('Happy Path - Read Business Process', { tag: '@regression' }, async ({ page }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `读取测试流程_${Date.now()}`;
     // Create a process to read
@@ -118,83 +119,86 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     }
   });
 
-  test('Happy Path - Update Business Process', async ({ page }) => {
+  test('Happy Path - Update Business Process', { tag: '@regression' }, async ({ page }) => {
     // Create a process to update
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
-    
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('更新前流程');
+
+    const originalName = `更新前流程_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(originalName);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('更新前描述');
-    
+
     const slaField = page.getByRole('spinbutton', { name: /SLA|服务级别协议/ }).or(page.getByRole('textbox', { name: /SLA|服务级别协议/ }));
     if (await slaField.isVisible()) {
       await slaField.fill('90');
     }
-    
+
     const cycleTimeField = page.getByRole('spinbutton', { name: /周期时间|Cycle Time/ }).or(page.getByRole('textbox', { name: /周期时间|Cycle Time/ }));
     if (await cycleTimeField.isVisible()) {
       await cycleTimeField.fill('72');
     }
-    
+
     const costField = page.getByRole('spinbutton', { name: /成本|Cost/ }).or(page.getByRole('textbox', { name: /成本|Cost/ }));
     if (await costField.isVisible()) {
       await costField.fill('2000');
     }
-    
+
     await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Find the created process and click edit button
-    const row = page.locator('tr').filter({ hasText: '更新前流程' });
+    const row = page.locator('tr').filter({ hasText: originalName });
     await expect(row).toBeVisible();
-    
+
     // Click edit (pencil) button
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="pencil"]') }).click();
-    
+    await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-pencil"]') }).click();
+
     // Verify edit dialog opens with pre-filled data
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByRole('heading', { name: /编辑|Edit/ })).toBeVisible();
-    
+
     // Verify form fields have existing data
     const nameField = page.getByRole('textbox', { name: /名称|Name/ });
-    await expect(nameField).toHaveValue('更新前流程');
-    
+    await expect(nameField).toHaveValue(originalName);
+
     const descField = page.getByRole('textbox', { name: /描述|Description/ });
     await expect(descField).toHaveValue('更新前描述');
-    
+
     // Modify fields
-    await nameField.fill('更新后流程');
-    await descField.fill('更新后描述');
-    
+    const updatedName = `更新后流程_${Date.now()}`;
+    await nameField.fill(updatedName);
+    const updatedDesc = `更新后描述_${Date.now()}`;
+    await descField.fill(updatedDesc);
+
     if (await slaField.isVisible()) {
       const editSlaField = page.getByRole('spinbutton', { name: /SLA|服务级别协议/ }).or(page.getByRole('textbox', { name: /SLA|服务级别协议/ }));
       await editSlaField.fill('99.5');
     }
-    
+
     if (await cycleTimeField.isVisible()) {
       const editCycleTimeField = page.getByRole('spinbutton', { name: /周期时间|Cycle Time/ }).or(page.getByRole('textbox', { name: /周期时间|Cycle Time/ }));
       await editCycleTimeField.fill('24');
     }
-    
+
     if (await costField.isVisible()) {
       const editCostField = page.getByRole('spinbutton', { name: /成本|Cost/ }).or(page.getByRole('textbox', { name: /成本|Cost/ }));
       await editCostField.fill('3000');
     }
-    
+
     // Click "保存" button
     await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
-    
+
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Verify table shows updated data
-    await expect(page.getByText('更新后流程')).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText('更新后描述')).toBeVisible();
-    
+    await expect(page.getByText(updatedName)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(updatedDesc)).toBeVisible();
+
     if (await slaField.isVisible()) {
       await expect(page.getByText('99.5')).toBeVisible();
     }
-    
+
     if (await cycleTimeField.isVisible()) {
       await expect(page.getByText('24')).toBeVisible();
     }
@@ -204,7 +208,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     }
   });
 
-  test('Happy Path - Delete Business Process', async ({ page }) => {
+  test('Happy Path - Delete Business Process', { tag: '@regression' }, async ({ page }) => {
     // Create a process to delete
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
@@ -220,7 +224,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     await expect(row).toBeVisible();
     
     // Click delete (trash) button
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="trash-2"]') }).click();
+    await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-trash-2"]') }).click();
     
     // Verify delete confirmation dialog opens
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -236,7 +240,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     await expect(page.getByText('待删除流程')).not.toBeVisible({ timeout: 10000 });
   });
 
-  test('Edge Case - Numeric Input Validation', async ({ page }) => {
+  test('Edge Case - Numeric Input Validation', { tag: '@regression' }, async ({ page }) => {
     // Click "新建业务流程" button
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
@@ -292,7 +296,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
-  test('Full CRUD Cycle with Numeric Fields', async ({ page }) => {
+  test('Full CRUD Cycle with Numeric Fields', { tag: '@regression' }, async ({ page }) => {
     // Create
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
@@ -338,7 +342,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     }
     
     // Update
-    await row.getByRole('button').filter({ has: page.locator('svg[data-icon="pencil"]') }).click();
+    await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-pencil"]') }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
     
     await page.getByRole('textbox', { name: /名称|Name/ }).fill('更新后的CRUD流程');
@@ -355,7 +359,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     
     // Delete
     const updatedRow = page.locator('tr').filter({ hasText: '更新后的CRUD流程' });
-    await updatedRow.getByRole('button').filter({ has: page.locator('svg[data-icon="trash-2"]') }).click();
+    await updatedRow.getByRole('button').filter({ has: page.locator('svg[class*="lucide-trash-2"]') }).click();
     
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.getByRole('button', { name: /确认|删除|Confirm|Delete/ }).click();

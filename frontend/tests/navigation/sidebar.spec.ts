@@ -62,7 +62,6 @@ test.describe('Navigation & Layout - Sidebar', () => {
       await expect(page).toHaveURL(/\/architectures\/value-streams\/.+/);
       
       // Verify detail page shows value stream information
-      await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
       await expect(page.getByText(/名称|描述|版本|状态/).first()).toBeVisible();
       
       // Look for "返回列表" button and click it

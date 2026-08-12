@@ -23,6 +23,7 @@ impl From<user::Model> for User {
     }
 }
 
+#[derive(Clone)]
 pub struct SeaOrmUserRepo {
     db: DatabaseConnection,
 }
@@ -31,6 +32,20 @@ impl SeaOrmUserRepo {
     pub fn new(db: DatabaseConnection) -> Self {
         Self { db }
     }
+}
+
+/// Map a `DbErr` to `DomainError`, using sea-orm's typed `sql_err()` to
+/// detect unique-constraint violations (portable across SQLite / PostgreSQL /
+/// MySQL) instead of fragile string matching. Only email-index violations
+/// are mapped to `EmailExists`; other unique constraints (e.g. primary key)
+/// fall through to the generic `Database` error to avoid misleading messages.
+fn map_unique_violation(e: sea_orm::DbErr) -> DomainError {
+    if let Some(sea_orm::SqlErr::UniqueConstraintViolation(constraint)) = e.sql_err() {
+        if constraint.contains("email") {
+            return DomainError::EmailExists;
+        }
+    }
+    e.into()
 }
 
 #[async_trait]
@@ -66,7 +81,10 @@ impl UserRepository for SeaOrmUserRepo {
             active.role = Set(user_entity.role);
             active.status = Set(user_entity.status);
             active.updated_at = Set(user_entity.updated_at);
-            active.update(&self.db).await?
+            match active.update(&self.db).await {
+                Ok(m) => m,
+                Err(e) => return Err(map_unique_violation(e)),
+            }
         } else {
             let active = user::ActiveModel {
                 id: Set(user_entity.id),
@@ -79,7 +97,10 @@ impl UserRepository for SeaOrmUserRepo {
                 updated_at: Set(user_entity.updated_at),
                 deleted_at: Set(None),
             };
-            active.insert(&self.db).await?
+            match active.insert(&self.db).await {
+                Ok(m) => m,
+                Err(e) => return Err(map_unique_violation(e)),
+            }
         };
 
         Ok(result.into())

@@ -1,0 +1,51 @@
+services:
+  backend:
+    image: ghcr.io/link-seek/eap-dev-backend:latest
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      - cargo-cache:/usr/local/cargo/registry
+      - cargo-target:/app/target
+    ports:
+      - "8080:8080"
+    environment:
+      - RUST_LOG=info
+      - APP_ENV=dev
+      - APP_DATABASE__URL=sqlite://./data/platform.db?mode=rwc
+      - APP_SERVER__HOST=0.0.0.0
+      - APP_SERVER__PORT=8080
+      - APP_SERVER__RATE_LIMIT__PER_SECOND=100
+      - APP_SERVER__RATE_LIMIT__BURST_SIZE=1000
+    command: cargo watch -x 'run -p server'
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 120
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - node-modules:/app/node_modules
+    ports:
+      - "80:3000"
+    environment:
+      - VITE_API_URL=/api
+      - VITE_GRAPHQL_URL=/graphql
+      - BACKEND_HOST=backend
+    depends_on:
+      backend:
+        condition: service_started
+    command: sh -c "npm install --silent && npx vite --host 0.0.0.0"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+volumes:
+  cargo-cache:
+  cargo-target:
+  node-modules:

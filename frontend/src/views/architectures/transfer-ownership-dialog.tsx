@@ -35,7 +35,7 @@ export function TransferOwnershipDialog({ open, onOpenChange, entityId, spaceId,
 
   const { data } = useQuery<{ spaceMembersBySpace: SpaceMember[] }>(GET_SPACE_MEMBERS, {
     variables: { spaceId },
-    skip: !spaceId,
+    skip: !spaceId || !open,
   })
   const [transferMut] = useMutation(mutation)
 

@@ -41,12 +41,15 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
     ));
 
     // Rate limiter: configurable per environment.
-    // Production defaults: per_second(4) / burst_size(25) (see config.rs).
+    // `per_second` is the desired request rate (requests/second). tower_governor's
+    // `per_second()` sets the *replenish period* in seconds (1 token per period),
+    // so we convert: period_ns = 1e9 / per_second.
     // CI/E2E overrides via APP_SERVER__RATE_LIMIT__PER_SECOND etc.
     let rl = &state.config.server.rate_limit;
+    let period_ns = (1_000_000_000u64 / rl.per_second).max(1);
     let governor_config = std::sync::Arc::new(
         tower_governor::governor::GovernorConfigBuilder::default()
-            .per_second(rl.per_second)
+            .per_nanosecond(period_ns)
             .burst_size(rl.burst_size)
             .finish()
             .expect("governor config must be valid — rate_limit.per_second and burst_size must be > 0; validated in Configuration::ensure_defaults()"),

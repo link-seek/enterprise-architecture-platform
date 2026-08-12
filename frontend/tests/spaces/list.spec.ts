@@ -1,5 +1,5 @@
 // spec: specs/eap-test-plan.md
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../helpers/graphql-aware';
 import { login, TEST_SPACE_ID } from '../helpers/auth';
 
 test.describe('Spaces - Browse Spaces Main Flow', () => {
@@ -8,7 +8,7 @@ test.describe('Spaces - Browse Spaces Main Flow', () => {
     await login(page);
   });
 
-  test('Happy Path - Browse spaces list and enter a space', async ({ page }) => {
+  test('Happy Path - Browse spaces list and enter a space', { tag: '@smoke' }, async ({ page }) => {
     // Track any 405 responses on /graphql to assert the list loads without 405.
     const statuses: number[] = [];
     page.on('response', (res) => {
