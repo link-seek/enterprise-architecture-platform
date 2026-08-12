@@ -45,6 +45,19 @@ mod m20250101_000042_create_capability_realizations;
 mod m20250101_000043_create_step_realizations;
 mod m20250101_000044_enrich_value_stream_stage;
 mod m20250101_000045_backfill_entity_owners;
+mod m20250101_000046_drop_process_realizations;
+mod m20250101_000047_drop_step_realizations;
+mod m20250101_000048_recreate_capability_realizations;
+mod m20250101_000049_create_organizational_units;
+mod m20250101_000050_create_business_roles;
+mod m20250101_000051_create_functional_modules;
+mod m20250101_000052_create_application_interfaces;
+mod m20250101_000053_create_assignments;
+mod m20250101_000054_create_participations;
+mod m20250101_000055_create_module_containments;
+mod m20250101_000056_create_interface_exposures;
+mod m20250101_000057_create_process_references;
+mod m20250101_000058_create_orchestrations;
 
 pub struct Migrator;
 
@@ -97,6 +110,19 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000043_create_step_realizations::Migration),
             Box::new(m20250101_000044_enrich_value_stream_stage::Migration),
             Box::new(m20250101_000045_backfill_entity_owners::Migration),
+            Box::new(m20250101_000046_drop_process_realizations::Migration),
+            Box::new(m20250101_000047_drop_step_realizations::Migration),
+            Box::new(m20250101_000048_recreate_capability_realizations::Migration),
+            Box::new(m20250101_000049_create_organizational_units::Migration),
+            Box::new(m20250101_000050_create_business_roles::Migration),
+            Box::new(m20250101_000051_create_functional_modules::Migration),
+            Box::new(m20250101_000052_create_application_interfaces::Migration),
+            Box::new(m20250101_000053_create_assignments::Migration),
+            Box::new(m20250101_000054_create_participations::Migration),
+            Box::new(m20250101_000055_create_module_containments::Migration),
+            Box::new(m20250101_000056_create_interface_exposures::Migration),
+            Box::new(m20250101_000057_create_process_references::Migration),
+            Box::new(m20250101_000058_create_orchestrations::Migration),
         ]
     }
 }

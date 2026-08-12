@@ -1,17 +1,14 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use shared_common::enums::CapabilityRealizationTargetType;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
-#[sea_orm(table_name = "capability_realizations")]
+#[sea_orm(table_name = "process_references")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub capability_id: Uuid,
+    pub application_process_id: Uuid,
     #[sea_orm(primary_key, auto_increment = false)]
-    pub process_id: Uuid,
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub process_type: CapabilityRealizationTargetType,
+    pub business_process_id: Uuid,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -15,15 +15,15 @@ use sea_orm::{
 use shared_common::enums::{
     ApplicationComponentStatus, ApplicationComponentType, ApplicationProcessTrigger,
     AutomationLevel, BusinessValueRating, CapabilityLevel, CapabilityStatus, CostRating,
-    LifecycleStatus, MaturityLevel, ValueStreamImportance,
+    LifecycleStatus, MaturityLevel, ValueStreamImportance, CapabilityRealizationTargetType,
 };
 use shared_common::value_objects::{StringStringMap, StringVec};
 use uuid::Uuid;
 
 use business_architecture::infrastructure::persistence::entities::{
     application_component, application_process, application_process_step, business_capability,
-    business_process, capability_process, capability_realization, process_realization,
-    process_step, stage_capability, step_realization, value_stream, value_stream_stage,
+    business_process, capability_process, capability_realization,
+    process_step, stage_capability, value_stream, value_stream_stage,
 };
 
 const TEST_SPACE_ID: Uuid =
@@ -733,108 +733,44 @@ fn application_processes() -> [AppProcessSpec; 4] {
 // ---------------------------------------------------------------------------
 
 async fn seed_realizations(db: &DatabaseConnection) -> anyhow::Result<()> {
-    // BusinessProcess → ApplicationProcess
-    for (bp_id, ap_id) in [
-        (bp::CODE_VERIFICATION, ap::PR_CI_PIPELINE),
-        (bp::AUTO_REMEDIATION, ap::AUTO_FIX_PIPELINE),
-        (bp::BUILD_RELEASE, ap::BUILD_PIPELINE),
-        (bp::DEPLOYMENT, ap::DEPLOY_PIPELINE),
-        (bp::SMOKE_VERIFICATION, ap::PR_CI_PIPELINE),
+    // v2.1: ProcessRealization and StepRealization are deleted.
+    // CapabilityRealization now targets a process (business or application)
+    // instead of an application component. We link capabilities to the
+    // business processes that enable them.
+    for (cap_id, bp_id) in [
+        (cap::CI, bp::CODE_VERIFICATION),
+        (cap::CODE_REVIEW, bp::CODE_VERIFICATION),
+        (cap::AUTO_FIX, bp::AUTO_REMEDIATION),
+        (cap::IMAGE_BUILD, bp::BUILD_RELEASE),
+        (cap::AUTO_DEPLOY, bp::DEPLOYMENT),
+        (cap::SMOKE_TEST, bp::SMOKE_VERIFICATION),
+        (cap::INCIDENT_RECOVERY, bp::SMOKE_VERIFICATION),
+        (cap::TASK_DISPATCH, bp::TASK_ASSIGNMENT),
     ] {
-        link_process_realization(db, bp_id, ap_id).await?;
+        link_capability_realization(db, cap_id, bp_id, CapabilityRealizationTargetType::BusinessProcess).await?;
     }
 
-    // Capability → ApplicationComponent
-    for (cap_id, ac_id) in [
-        (cap::CI, ac::PR_CI),
-        (cap::CODE_REVIEW, ac::REVIEW_AI),
-        (cap::AUTO_FIX, ac::FIX),
-        (cap::AUTO_FIX, ac::FIX_ISSUE),
-        (cap::IMAGE_BUILD, ac::ON_PUSH_BUILD),
-        (cap::AUTO_DEPLOY, ac::SYNC_DEPLOY),
-        (cap::SMOKE_TEST, ac::E2E_TEST),
-        (cap::INCIDENT_RECOVERY, ac::ON_STOP),
-        (cap::TASK_DISPATCH, ac::ON_LABEL),
-    ] {
-        link_capability_realization(db, cap_id, ac_id).await?;
-    }
-
-    // ProcessStep → ApplicationProcessStep
-    for (ps_id, aps_id) in [
-        (ps::VERIFY_LINT, aps::PR_LINT),
-        (ps::VERIFY_TEST, aps::PR_UNIT),
-        (ps::REMEDIATE, aps::FIX_RUN),
-        (ps::BUILD, aps::BUILD_COMPILE),
-        (ps::PUSH_IMAGE, aps::BUILD_PUSH),
-        (ps::DEPLOY, aps::DEPLOY_SYNC),
-        (ps::SMOKE_RUN, aps::PR_E2E),
-        (ps::RECOVER, aps::DEPLOY_STOP),
-    ] {
-        link_step_realization(db, ps_id, aps_id).await?;
-    }
-
-    Ok(())
-}
-
-async fn link_process_realization(
-    db: &DatabaseConnection,
-    business_process_id: Uuid,
-    application_process_id: Uuid,
-) -> anyhow::Result<()> {
-    let exists = process_realization::Entity::find()
-        .filter(process_realization::Column::BusinessProcessId.eq(business_process_id))
-        .filter(process_realization::Column::ApplicationProcessId.eq(application_process_id))
-        .one(db)
-        .await?
-        .is_some();
-    if !exists {
-        process_realization::ActiveModel {
-            business_process_id: Set(business_process_id),
-            application_process_id: Set(application_process_id),
-        }
-        .insert(db)
-        .await?;
-    }
     Ok(())
 }
 
 async fn link_capability_realization(
     db: &DatabaseConnection,
     capability_id: Uuid,
-    application_component_id: Uuid,
+    process_id: Uuid,
+    process_type: CapabilityRealizationTargetType,
 ) -> anyhow::Result<()> {
     let exists = capability_realization::Entity::find()
         .filter(capability_realization::Column::CapabilityId.eq(capability_id))
-        .filter(capability_realization::Column::ApplicationComponentId.eq(application_component_id))
+        .filter(capability_realization::Column::ProcessId.eq(process_id))
+        .filter(capability_realization::Column::ProcessType.eq(process_type))
         .one(db)
         .await?
         .is_some();
     if !exists {
         capability_realization::ActiveModel {
             capability_id: Set(capability_id),
-            application_component_id: Set(application_component_id),
-        }
-        .insert(db)
-        .await?;
-    }
-    Ok(())
-}
-
-async fn link_step_realization(
-    db: &DatabaseConnection,
-    process_step_id: Uuid,
-    application_process_step_id: Uuid,
-) -> anyhow::Result<()> {
-    let exists = step_realization::Entity::find()
-        .filter(step_realization::Column::ProcessStepId.eq(process_step_id))
-        .filter(step_realization::Column::ApplicationProcessStepId.eq(application_process_step_id))
-        .one(db)
-        .await?
-        .is_some();
-    if !exists {
-        step_realization::ActiveModel {
-            process_step_id: Set(process_step_id),
-            application_process_step_id: Set(application_process_step_id),
+            process_id: Set(process_id),
+            process_type: Set(process_type),
         }
         .insert(db)
         .await?;
@@ -922,19 +858,9 @@ mod tests {
         seed_dogfood(&db).await.unwrap();
 
         assert_eq!(
-            process_realization::Entity::find().count(&db).await.unwrap(),
-            5,
-            "process-level realizes mappings"
-        );
-        assert_eq!(
             capability_realization::Entity::find().count(&db).await.unwrap(),
-            9,
-            "capability-level realizes mappings"
-        );
-        assert_eq!(
-            step_realization::Entity::find().count(&db).await.unwrap(),
             8,
-            "step-level realizes mappings"
+            "capability-level realizes mappings (v2.1: Capability -> Process)"
         );
     }
 
@@ -947,7 +873,7 @@ mod tests {
         let comp1 = application_component::Entity::find().count(&db).await.unwrap();
         let proc1 = business_process::Entity::find().count(&db).await.unwrap();
         let step1 = process_step::Entity::find().count(&db).await.unwrap();
-        let areal1 = process_realization::Entity::find().count(&db).await.unwrap();
+        let areal1 = capability_realization::Entity::find().count(&db).await.unwrap();
 
         // Re-run; counts must not change.
         seed_dogfood(&db).await.unwrap();
@@ -972,7 +898,7 @@ mod tests {
             step1
         );
         assert_eq!(
-            process_realization::Entity::find().count(&db).await.unwrap(),
+            capability_realization::Entity::find().count(&db).await.unwrap(),
             areal1,
             "realization mappings must not duplicate"
         );

@@ -18,6 +18,10 @@ import {
   Component,
   GitBranch,
   Link2,
+  Building2,
+  UserCircle,
+  Layers,
+  Plug,
 } from 'lucide-react'
 import { GET_SPACE } from '@/api/spaces'
 import type { Space } from '@/api/spaces'
@@ -36,6 +40,10 @@ function SidebarContent({ onNavigate, spaceName, spaceId }: { onNavigate?: () =>
     { path: `${base}/processes`, label: '业务流程', icon: Workflow },
     { path: `${base}/applications`, label: '应用组件', icon: Component },
     { path: `${base}/application-processes`, label: '应用流程', icon: GitBranch },
+    { path: `${base}/organizational-units`, label: '组织单元', icon: Building2 },
+    { path: `${base}/business-roles`, label: '业务角色', icon: UserCircle },
+    { path: `${base}/functional-modules`, label: '功能模块', icon: Layers },
+    { path: `${base}/application-interfaces`, label: '应用接口', icon: Plug },
     { path: `${base}/realizations`, label: '映射关系', icon: Link2 },
   ]
 

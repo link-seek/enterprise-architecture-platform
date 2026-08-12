@@ -11,34 +11,23 @@ const GET_REALIZATIONS_DATA = gql`
     businessProcessesBySpace(spaceId: $spaceId) { id name }
     applicationProcessesBySpace(spaceId: $spaceId) { id name }
     businessCapabilitiesBySpace(spaceId: $spaceId) { id name }
-    applicationComponentsBySpace(spaceId: $spaceId) { id name }
-  }
-`
-
-const GET_PROCESS_REALIZATIONS = gql`
-  query GetProcessRealizations($businessProcessId: String!) {
-    processRealizationsByBusinessProcess(businessProcessId: $businessProcessId) {
-      businessProcessId applicationProcessId
-    }
   }
 `
 
 const GET_CAPABILITY_REALIZATIONS = gql`
   query GetCapabilityRealizations($capabilityId: String!) {
     capabilityRealizationsByCapability(capabilityId: $capabilityId) {
-      capabilityId applicationComponentId
+      capabilityId processId processType
     }
   }
 `
 
 interface Named { id: string; name: string }
-interface ProcessRealization { businessProcessId: string; applicationProcessId: string }
-interface CapabilityRealization { capabilityId: string; applicationComponentId: string }
+interface CapabilityRealization { capabilityId: string; processId: string; processType: string }
 interface RealizationsData {
   businessProcessesBySpace?: Named[]
   applicationProcessesBySpace?: Named[]
   businessCapabilitiesBySpace?: Named[]
-  applicationComponentsBySpace?: Named[]
 }
 
 function RealizationTable({ title, rows }: { title: string; rows: { left: string; right: string }[] }) {
@@ -75,48 +64,17 @@ export default function Realizations() {
   const { spaceId } = useParams<{ spaceId: string }>()
   const client = useApolloClient()
   const { data, loading, error } = useQuery<RealizationsData>(GET_REALIZATIONS_DATA, { variables: { spaceId }, skip: !spaceId })
-  const [processRealizations, setProcessRealizations] = useState<ProcessRealization[]>([])
   const [capabilityRealizations, setCapabilityRealizations] = useState<CapabilityRealization[]>([])
   const [realizationsLoading, setRealizationsLoading] = useState(false)
 
-  const businessProcesses = data?.businessProcessesBySpace ?? []
   const capabilities = data?.businessCapabilitiesBySpace ?? []
 
   useEffect(() => {
     if (!data) return
     let cancelled = false
-    async function fetchProcessRealizations() {
-      if (businessProcesses.length === 0) { setProcessRealizations([]); return }
-      setRealizationsLoading(true)
-      try {
-        const results = await Promise.all(
-          businessProcesses.map((bp) =>
-            client.query<{ processRealizationsByBusinessProcess: ProcessRealization[] }>({
-              query: GET_PROCESS_REALIZATIONS,
-              variables: { businessProcessId: bp.id },
-              fetchPolicy: 'network-only',
-            }),
-          ),
-        )
-        if (!cancelled) {
-          setProcessRealizations(results.flatMap((r) => r.data?.processRealizationsByBusinessProcess ?? []))
-        }
-      } catch {
-        if (!cancelled) setProcessRealizations([])
-      } finally {
-        if (!cancelled) setRealizationsLoading(false)
-      }
-    }
-    fetchProcessRealizations()
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data])
-
-  useEffect(() => {
-    if (!data) return
-    let cancelled = false
     async function fetchCapabilityRealizations() {
-      if (capabilities.length === 0) { setCapabilityRealizations([]); return }
+      if (capabilities.length === 0) { setCapabilityRealizations([]); setRealizationsLoading(false); return }
+      setRealizationsLoading(true)
       try {
         const results = await Promise.all(
           capabilities.map((cap) =>
@@ -132,6 +90,8 @@ export default function Realizations() {
         }
       } catch {
         if (!cancelled) setCapabilityRealizations([])
+      } finally {
+        if (!cancelled) setRealizationsLoading(false)
       }
     }
     fetchCapabilityRealizations()
@@ -139,21 +99,15 @@ export default function Realizations() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data])
 
-  const applicationProcessName = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const ap of data?.applicationProcessesBySpace ?? []) map.set(ap.id, ap.name)
-    return map
-  }, [data])
-
-  const applicationComponentName = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const ac of data?.applicationComponentsBySpace ?? []) map.set(ac.id, ac.name)
-    return map
-  }, [data])
-
   const businessProcessName = useMemo(() => {
     const map = new Map<string, string>()
     for (const bp of data?.businessProcessesBySpace ?? []) map.set(bp.id, bp.name)
+    return map
+  }, [data])
+
+  const applicationProcessName = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const ap of data?.applicationProcessesBySpace ?? []) map.set(ap.id, ap.name)
     return map
   }, [data])
 
@@ -163,14 +117,14 @@ export default function Realizations() {
     return map
   }, [data])
 
-  const processRows = processRealizations.map((r) => ({
-    left: businessProcessName.get(r.businessProcessId) ?? r.businessProcessId,
-    right: applicationProcessName.get(r.applicationProcessId) ?? r.applicationProcessId,
-  }))
+  const processName = (id: string, type: string) => {
+    if (type === 'business_process') return businessProcessName.get(id) ?? id
+    return applicationProcessName.get(id) ?? id
+  }
 
   const capabilityRows = capabilityRealizations.map((r) => ({
     left: capabilityName.get(r.capabilityId) ?? r.capabilityId,
-    right: applicationComponentName.get(r.applicationComponentId) ?? r.applicationComponentId,
+    right: `${processName(r.processId, r.processType)} (${r.processType})`,
   }))
 
   const showSpinner = loading || realizationsLoading
@@ -186,8 +140,12 @@ export default function Realizations() {
       {Boolean(error) && !loading && <div className="text-center py-8 text-destructive">加载失败</div>}
       {!showSpinner && !error && (
         <>
-          <RealizationTable title="业务流程 → 应用流程" rows={processRows} />
-          <RealizationTable title="业务能力 → 应用组件" rows={capabilityRows} />
+          <RealizationTable title="业务能力 → 流程（v2.1）" rows={capabilityRows} />
+          <div className="text-center py-4 text-sm text-muted-foreground">
+            v2.1 变更：ProcessRealization 和 StepRealization 已删除。
+            新增关系（Assignment、Participation、ModuleContainment、InterfaceExposure、ProcessReference、Orchestration）
+            可通过对应实体页面查看。
+          </div>
         </>
       )}
     </div>
