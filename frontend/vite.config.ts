@@ -3,7 +3,9 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
-const backendTarget = `http://${process.env.BACKEND_HOST || 'localhost'}:8080`
+const backendHost = process.env.BACKEND_HOST || 'localhost'
+const backendPort = process.env.BACKEND_PORT || '8080'
+const backendTarget = `http://${backendHost}:${backendPort}`
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

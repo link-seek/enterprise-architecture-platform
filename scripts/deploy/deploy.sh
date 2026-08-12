@@ -45,6 +45,7 @@ mkdir -p "$(dirname "$ENV_FILE")"
     echo "RUST_LOG=info,sqlx::pool=warn"
   } > "$ENV_FILE"
 )
+chmod 600 "$ENV_FILE"
 
 # Create systemd service that runs podman in foreground
 # This avoids conmon dying and leaving the container unresponsive

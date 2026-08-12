@@ -46,7 +46,7 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
     // so we convert: period_ns = 1e9 / per_second.
     // CI/E2E overrides via APP_SERVER__RATE_LIMIT__PER_SECOND etc.
     let rl = &state.config.server.rate_limit;
-    let period_ns = 1_000_000_000u64 / rl.per_second;
+    let period_ns = (1_000_000_000u64 / rl.per_second).max(1);
     let governor_config = std::sync::Arc::new(
         tower_governor::governor::GovernorConfigBuilder::default()
             .per_nanosecond(period_ns)

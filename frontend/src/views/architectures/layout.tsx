@@ -50,7 +50,7 @@ function SidebarContent({ onNavigate, spaceName, spaceId }: { onNavigate?: () =>
           <ArrowLeft className="h-3.5 w-3.5" />
           所有空间
         </Link>
-        <div className="text-lg font-semibold truncate" role="heading" aria-level={2}>{spaceName}</div>
+        <h2 className="text-lg font-semibold truncate">{spaceName}</h2>
         <p className="text-sm text-muted-foreground">Enterprise Architecture</p>
         {!canEdit && (
           <p className="mt-1 text-xs text-amber-600">只读模式（非成员）</p>

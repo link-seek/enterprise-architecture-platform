@@ -181,8 +181,25 @@ async fn upsert_space_member(
     // (space_id / user_id are Uuid blobs, role is a whitelisted string,
     // now is an RFC-3339 timestamp). `Statement::from_sql_and_values`
     // converts `?` placeholders to the backend-specific syntax.
+    // UUID binding is backend-dependent: SQLite stores UUID as 16-byte
+    // binary blob (Value::Bytes), while PostgreSQL has a native uuid
+    // type (Value::Uuid). We branch on the database backend to ensure
+    // portability across both.
+    let backend = db.get_database_backend();
+    let space_id_val = match backend {
+        sea_orm::DatabaseBackend::Sqlite => {
+            sea_orm::Value::Bytes(Some(space_id.as_bytes().to_vec()))
+        }
+        _ => sea_orm::Value::Uuid(Some(*space_id)),
+    };
+    let user_id_val = match backend {
+        sea_orm::DatabaseBackend::Sqlite => {
+            sea_orm::Value::Bytes(Some(user_id.as_bytes().to_vec()))
+        }
+        _ => sea_orm::Value::Uuid(Some(user_id)),
+    };
     let stmt = sea_orm::Statement::from_sql_and_values(
-        db.get_database_backend(),
+        backend,
         r#"INSERT INTO "space_members" ("space_id","user_id","role","created_at","updated_at")
            VALUES (?, ?, ?, ?, ?)
            ON CONFLICT ("space_id","user_id") DO UPDATE SET
@@ -193,8 +210,8 @@ async fn upsert_space_member(
                            THEN "space_members"."updated_at"
                            ELSE excluded."updated_at" END"#,
         [
-            sea_orm::Value::Bytes(Some(space_id.as_bytes().to_vec())),
-            sea_orm::Value::Bytes(Some(user_id.as_bytes().to_vec())),
+            space_id_val,
+            user_id_val,
             member_role.into(),
             now.clone().into(),
             now.into(),
