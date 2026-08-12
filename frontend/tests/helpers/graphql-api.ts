@@ -3,10 +3,10 @@
 // `/api/` and `/graphql` to the backend container (see nginx.conf / vite.config.ts).
 import { APIRequestContext } from '@playwright/test';
 
-export const SECOND_EDITOR_EMAIL = process.env.E2E_SECOND_EDITOR_EMAIL || 'test@example.com';
-export const SECOND_EDITOR_PASSWORD = process.env.E2E_SECOND_EDITOR_PASSWORD || 'testpassword123';
-export const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL || 'admin@test.com';
-export const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD || 'admin123456';
+export const SECOND_EDITOR_EMAIL = process.env.E2E_SECOND_EDITOR_EMAIL || process.env.APP_SEED_EDITOR_EMAIL || 'test@example.com';
+export const SECOND_EDITOR_PASSWORD = process.env.E2E_SECOND_EDITOR_PASSWORD || process.env.APP_SEED_EDITOR_PASSWORD || 'testpassword123';
+export const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL || process.env.APP_SEED_ADMIN_EMAIL || 'admin@test.com';
+export const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD || process.env.APP_SEED_ADMIN_PASSWORD || 'admin123456';
 
 export interface GqlResponse {
   data?: Record<string, any>

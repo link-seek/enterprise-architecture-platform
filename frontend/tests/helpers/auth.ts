@@ -3,18 +3,22 @@ import { Page, expect } from '@playwright/test';
 
 // Test credentials — env-driven for multi-environment reuse
 // Defaults work for local dev; CI/prod pass E2E_TEST_EMAIL etc.
-export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || 'e2e3@test.com';
-export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || 'e2e123456';
+// Fall back to APP_SEED_ADMIN_* (or SMOKE_TEST_*) so the primary login
+// credentials always match a seeded account.
+export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || process.env.SMOKE_TEST_EMAIL || process.env.APP_SEED_ADMIN_EMAIL || 'e2e3@test.com';
+export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || process.env.SMOKE_TEST_PASSWORD || process.env.APP_SEED_ADMIN_PASSWORD || 'e2e123456';
 export const TEST_NAME = process.env.E2E_TEST_NAME || 'E2E Test 3';
 
 // Fixed role accounts — seeded by the backend (APP_SEED_EDITOR_* / APP_SEED_STRANGER_*).
 // Editor: registered Architect + test space Editor member.
 // Stranger: registered Architect, NOT a member of the test space.
-export const EDITOR_EMAIL = process.env.E2E_EDITOR_EMAIL || 'test@example.com';
-export const EDITOR_PASSWORD = process.env.E2E_EDITOR_PASSWORD || 'testpassword123';
-export const STRANGER_EMAIL = process.env.E2E_STRANGER_EMAIL || 'stranger@test.com';
-export const STRANGER_PASSWORD = process.env.E2E_STRANGER_PASSWORD || 'stranger123456';
-export const STRANGER_NAME = process.env.E2E_STRANGER_NAME || 'Stranger';
+// Fall back to APP_SEED_* env vars so the test credentials always match the
+// seeded accounts even when E2E_* secrets are not separately configured.
+export const EDITOR_EMAIL = process.env.E2E_EDITOR_EMAIL || process.env.APP_SEED_EDITOR_EMAIL || 'test@example.com';
+export const EDITOR_PASSWORD = process.env.E2E_EDITOR_PASSWORD || process.env.APP_SEED_EDITOR_PASSWORD || 'testpassword123';
+export const STRANGER_EMAIL = process.env.E2E_STRANGER_EMAIL || process.env.APP_SEED_STRANGER_EMAIL || 'stranger@test.com';
+export const STRANGER_PASSWORD = process.env.E2E_STRANGER_PASSWORD || process.env.APP_SEED_STRANGER_PASSWORD || 'stranger123456';
+export const STRANGER_NAME = process.env.E2E_STRANGER_NAME || process.env.APP_SEED_STRANGER_NAME || 'Stranger';
 
 // Test space id — env-driven, mirrors backend migration TEST_SPACE_ID.
 export const TEST_SPACE_ID = process.env.E2E_TEST_SPACE_ID || '00000000-0000-0000-0000-000000000010';
