@@ -9,36 +9,36 @@ test.describe('Navigation & Layout - Sidebar', () => {
 
   test('Happy Path - Sidebar Navigation', { tag: '@smoke' }, async ({ page }) => {
     // Verify sidebar contains 3 main items
-    await expect(page.getByRole('link', { name: '价值流' })).toBeVisible();
-    await expect(page.getByRole('link', { name: '业务能力' })).toBeVisible();
-    await expect(page.getByRole('link', { name: '业务流程' })).toBeVisible();
+    await expect(page.getByRole('link', { name: '价值流', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: '业务能力', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: '业务流程', exact: true })).toBeVisible();
     
-    // Start on value streams page (default after login)
-    await expect(page).toHaveURL(`${SPACE_BASE}/value-streams`);
-    await expect(page.getByRole('link', { name: '价值流' })).toHaveClass(/bg-primary/);
+    // Start on architecture overview page (default after login)
+    await expect(page).toHaveURL(`${SPACE_BASE}/overview`);
+    await expect(page.getByRole('navigation').getByRole('heading', { name: '业务架构' })).toBeVisible();
     
     // Click "业务能力"
-    await page.getByRole('link', { name: '业务能力' }).click();
+    await page.getByRole('link', { name: '业务能力', exact: true }).click();
     
     // Verify URL changes and menu item is highlighted
     await expect(page).toHaveURL(`${SPACE_BASE}/capabilities`);
-    await expect(page.getByRole('link', { name: '业务能力' })).toHaveClass(/bg-primary/);
+    await expect(page.getByRole('link', { name: '业务能力', exact: true })).toHaveClass(/bg-primary/);
     await expect(page.getByRole('heading', { name: /业务能力/ })).toBeVisible();
     
     // Click "业务流程"
-    await page.getByRole('link', { name: '业务流程' }).click();
+    await page.getByRole('link', { name: '业务流程', exact: true }).click();
     
     // Verify URL changes and menu item is highlighted
     await expect(page).toHaveURL(`${SPACE_BASE}/processes`);
-    await expect(page.getByRole('link', { name: '业务流程' })).toHaveClass(/bg-primary/);
+    await expect(page.getByRole('link', { name: '业务流程', exact: true })).toHaveClass(/bg-primary/);
     await expect(page.getByRole('heading', { name: /业务流程/ })).toBeVisible();
     
     // Click "价值流" to return
-    await page.getByRole('link', { name: '价值流' }).click();
+    await page.getByRole('link', { name: '价值流', exact: true }).click();
     
     // Verify URL changes and menu item is highlighted
     await expect(page).toHaveURL(`${SPACE_BASE}/value-streams`);
-    await expect(page.getByRole('link', { name: '价值流' })).toHaveClass(/bg-primary/);
+    await expect(page.getByRole('link', { name: '价值流', exact: true })).toHaveClass(/bg-primary/);
     await expect(page.getByRole('heading', { name: /价值流/ }).first()).toBeVisible();
   });
 
@@ -95,9 +95,9 @@ test.describe('Navigation & Layout - Sidebar', () => {
     // Desktop and tablet (>=768): sidebar links directly visible
     for (const [w, h] of [[1280, 720], [768, 1024]] as const) {
       await page.setViewportSize({ width: w, height: h });
-      await expect(page.getByRole('link', { name: '价值流' })).toBeVisible();
-      await expect(page.getByRole('link', { name: '业务能力' })).toBeVisible();
-      await expect(page.getByRole('link', { name: '业务流程' })).toBeVisible();
+      await expect(page.getByRole('link', { name: '价值流', exact: true })).toBeVisible();
+      await expect(page.getByRole('link', { name: '业务能力', exact: true })).toBeVisible();
+      await expect(page.getByRole('link', { name: '业务流程', exact: true })).toBeVisible();
       await expect(page.getByText(TEST_EMAIL)).toBeVisible();
     }
 
@@ -105,18 +105,18 @@ test.describe('Navigation & Layout - Sidebar', () => {
     await page.setViewportSize({ width: 375, height: 667 });
 
     // Links should not be visible until drawer opens
-    await expect(page.getByRole('link', { name: '价值流' })).not.toBeVisible();
+    await expect(page.getByRole('link', { name: '价值流', exact: true })).not.toBeVisible();
 
     // Open drawer via Menu button
     await page.getByRole('button', { name: '打开菜单' }).click();
-    await expect(page.getByRole('link', { name: '价值流' })).toBeVisible();
-    await expect(page.getByRole('link', { name: '业务能力' })).toBeVisible();
-    await expect(page.getByRole('link', { name: '业务流程' })).toBeVisible();
+    await expect(page.getByRole('link', { name: '价值流', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: '业务能力', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: '业务流程', exact: true })).toBeVisible();
 
     // Click a link: drawer closes and URL changes
-    await page.getByRole('link', { name: '业务能力' }).click();
+    await page.getByRole('link', { name: '业务能力', exact: true }).click();
     await expect(page).toHaveURL(`${SPACE_BASE}/capabilities`);
-    await expect(page.getByRole('link', { name: '业务能力' })).not.toBeVisible();
+    await expect(page.getByRole('link', { name: '业务能力', exact: true })).not.toBeVisible();
 
     // No horizontal overflow
     const overflow = await page.evaluate(
@@ -144,7 +144,7 @@ test.describe('Navigation & Layout - Sidebar', () => {
     expect(sidebarLinks.includes(focusedText) || focusedText === '退出登录').toBeTruthy();
     
     // Navigate to capabilities via click (more reliable than keyboard)
-    await page.getByRole('link', { name: '业务能力' }).click();
+    await page.getByRole('link', { name: '业务能力', exact: true }).click();
     await expect(page).toHaveURL(`${SPACE_BASE}/capabilities`);
     await expect(page.getByRole('heading', { name: /业务能力/ }).first()).toBeVisible();
   });

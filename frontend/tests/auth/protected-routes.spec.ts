@@ -71,7 +71,7 @@ test.describe('Authentication - Protected Routes', () => {
 
     // Architecture pages are public read, so the page stays accessible and the
     // UI reflects the logged-out state (login prompt replaces logout button).
-    await expect(page).toHaveURL(`${SPACE_BASE}/value-streams`, { timeout: 5000 });
+    await expect(page).toHaveURL(`${SPACE_BASE}/overview`, { timeout: 5000 });
     await expect(page.getByRole('button', { name: '退出登录' })).not.toBeVisible();
     await expect(page.getByRole('link', { name: '登录' })).toBeVisible({ timeout: 5000 });
   });

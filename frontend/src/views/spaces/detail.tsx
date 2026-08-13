@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client/react'
+import { gql } from '@apollo/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -14,6 +15,23 @@ import { useIsMobile } from '@/hooks/use-media-query'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { SpaceEditDialog } from './crud'
 import { SpaceMembersDialog } from './members'
+
+// 应用侧统计复用已有 *BySpace 查询，前端计数（后端零新增查询）。
+const GET_APPLICATION_STATS = gql`
+  query GetApplicationStats($spaceId: String!) {
+    applicationProcessesBySpace(spaceId: $spaceId) { id }
+    functionalModulesBySpace(spaceId: $spaceId) { id }
+    applicationComponentsBySpace(spaceId: $spaceId) { id }
+    applicationInterfacesBySpace(spaceId: $spaceId) { id }
+  }
+`
+
+interface ApplicationCounts {
+  applicationProcessesBySpace?: { id: string }[]
+  functionalModulesBySpace?: { id: string }[]
+  applicationComponentsBySpace?: { id: string }[]
+  applicationInterfacesBySpace?: { id: string }[]
+}
 
 function extractFriendlyError(e: { message?: string }): string {
   const msg = e.message ?? ''
@@ -40,6 +58,10 @@ export default function SpaceDetail() {
     skip: !spaceId,
   })
   const { data: stats } = useQuery<SpaceStats>(GET_SPACE_STATS, {
+    variables: { spaceId },
+    skip: !spaceId,
+  })
+  const { data: appStats } = useQuery<ApplicationCounts>(GET_APPLICATION_STATS, {
     variables: { spaceId },
     skip: !spaceId,
   })
@@ -71,10 +93,17 @@ export default function SpaceDetail() {
     setPendingVisibility(space.visibility === 'public' ? 'private' : 'public')
   }, [space, clearAllErrors])
 
-  const statsItems = [
+  const businessStatsItems = [
     { label: '价值流', value: stats?.valueStreamCountBySpace ?? 0, to: 'value-streams' },
     { label: '业务能力', value: stats?.businessCapabilityCountBySpace ?? 0, to: 'capabilities' },
     { label: '业务流程', value: stats?.businessProcessCountBySpace ?? 0, to: 'processes' },
+  ]
+
+  const applicationStatsItems = [
+    { label: '应用流程', value: appStats?.applicationProcessesBySpace?.length ?? 0, to: 'application-processes' },
+    { label: '功能模块', value: appStats?.functionalModulesBySpace?.length ?? 0, to: 'functional-modules' },
+    { label: '应用组件', value: appStats?.applicationComponentsBySpace?.length ?? 0, to: 'applications' },
+    { label: '应用接口', value: appStats?.applicationInterfacesBySpace?.length ?? 0, to: 'application-interfaces' },
   ]
 
   const visibleActions = useMemo(() => [
@@ -160,20 +189,45 @@ export default function SpaceDetail() {
         )}
         <p className="text-muted-foreground">{space.description || '暂无描述'}</p>
 
-        <div className="mt-8 grid gap-6 md:grid-cols-3">
-          {statsItems.map((item) => (
-            <Link key={item.to} to={`/spaces/${space.id}/architectures/${item.to}`}>
-              <Card className="h-full hover:shadow-md transition-shadow">
-                <CardHeader>
-                  <CardTitle>{item.label}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-3xl font-bold">{item.value}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">点击查看详情</p>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
+        <div className="mt-8 space-y-8">
+          <div>
+            <h2 className="text-lg font-semibold">业务架构</h2>
+            <p className="mt-1 text-sm text-muted-foreground">价值流、业务能力与业务流程</p>
+            <div className="mt-3 grid gap-6 md:grid-cols-3">
+              {businessStatsItems.map((item) => (
+                <Link key={item.to} to={`/spaces/${space.id}/architectures/${item.to}`}>
+                  <Card className="h-full hover:shadow-md transition-shadow">
+                    <CardHeader>
+                      <CardTitle>{item.label}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-3xl font-bold">{item.value}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">点击查看详情</p>
+                    </CardContent>
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold">应用架构</h2>
+            <p className="mt-1 text-sm text-muted-foreground">应用流程、功能模块、应用组件与应用接口</p>
+            <div className="mt-3 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+              {applicationStatsItems.map((item) => (
+                <Link key={item.to} to={`/spaces/${space.id}/architectures/${item.to}`}>
+                  <Card className="h-full hover:shadow-md transition-shadow">
+                    <CardHeader>
+                      <CardTitle>{item.label}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-3xl font-bold">{item.value}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">点击查看详情</p>
+                    </CardContent>
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          </div>
         </div>
       </main>
 

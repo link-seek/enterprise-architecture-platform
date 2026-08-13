@@ -104,7 +104,7 @@ testWithError.describe('Error Handling - Network Errors (Intentional Errors)', (
     await expect(page.getByRole('heading', { name: '价值流', exact: true })).toBeVisible();
 
     // Navigation still works (membership query is not blocked)
-    await page.getByRole('link', { name: '业务能力' }).click();
+    await page.getByRole('link', { name: '业务能力', exact: true }).click();
     await expect(page).toHaveURL(`${SPACE_BASE}/capabilities`);
   });
 
@@ -149,6 +149,8 @@ testWithError.describe('Error Handling - Network Errors (Intentional Errors)', (
   });
 
   testWithError('Session Expiry During Operation', { tag: '@regression' }, async ({ page }) => {
+    // Login lands on the architecture overview; navigate to value-streams explicitly.
+    await page.goto(`${SPACE_BASE}/value-streams`);
     await page.getByRole('button', { name: '新建价值流' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
 
@@ -174,6 +176,8 @@ testWithError.describe('Error Handling - Network Errors (Intentional Errors)', (
   });
 
   testWithError('Network Interruption During Operation', { tag: '@regression' }, async ({ page }) => {
+    // Login lands on the architecture overview; navigate to value-streams explicitly.
+    await page.goto(`${SPACE_BASE}/value-streams`);
     await page.getByRole('button', { name: '新建价值流' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
 
@@ -207,6 +211,8 @@ testWithError.describe('Error Handling - Network Errors (Intentional Errors)', (
   });
 
   testWithError('Browser Back/Forward Navigation During Operations', { tag: '@regression' }, async ({ page }) => {
+    // Login lands on the architecture overview; navigate to value-streams explicitly.
+    await page.goto(`${SPACE_BASE}/value-streams`);
     await page.getByRole('button', { name: '新建价值流' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
 

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@apollo/client/react'
 import { LayoutGrid, ArrowRight } from 'lucide-react'
@@ -7,11 +8,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { GET_SPACES, GET_SPACE_STATS, TEST_SPACE_ID } from '@/api/spaces'
 import type { Space, SpaceStats } from '@/api/spaces'
 
-const features = [
+interface Feature {
+  title: string
+  subtitle: string
+  description: string
+  to: string
+  icon: ReactNode
+}
+
+const businessFeatures: Feature[] = [
   {
     title: '价值流',
     subtitle: 'Value Streams',
     description: '梳理端到端价值交付流程，识别增值与非增值环节，驱动业务持续优化。',
+    to: `/spaces/${TEST_SPACE_ID}/architectures/value-streams`,
     icon: (
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -32,6 +42,7 @@ const features = [
     title: '业务能力',
     subtitle: 'Business Capabilities',
     description: '结构化描述组织核心能力，建立能力地图，支撑战略规划与资源配置。',
+    to: `/spaces/${TEST_SPACE_ID}/architectures/capabilities`,
     icon: (
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -54,6 +65,7 @@ const features = [
     title: '业务流程',
     subtitle: 'Business Processes',
     description: '定义并管理业务流程与活动，串联能力与价值流，实现流程可视化与协同。',
+    to: `/spaces/${TEST_SPACE_ID}/architectures/processes`,
     icon: (
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -74,6 +86,120 @@ const features = [
     ),
   },
 ]
+
+const applicationFeatures: Feature[] = [
+  {
+    title: '应用组件',
+    subtitle: 'Application Components',
+    description: '管理应用系统的组成单元与交付物，明确系统边界与实现载体。',
+    to: `/spaces/${TEST_SPACE_ID}/architectures/applications`,
+    icon: (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-6 w-6"
+      >
+        <rect x="3" y="3" width="18" height="7" rx="1" />
+        <rect x="3" y="14" width="18" height="7" rx="1" />
+      </svg>
+    ),
+  },
+  {
+    title: '应用流程',
+    subtitle: 'Application Processes',
+    description: '定义应用系统的运行流程与自动化任务，支撑业务流程落地。',
+    to: `/spaces/${TEST_SPACE_ID}/architectures/application-processes`,
+    icon: (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-6 w-6"
+      >
+        <circle cx="5" cy="6" r="3" />
+        <circle cx="19" cy="6" r="3" />
+        <path d="M5 9v12" />
+        <path d="M19 9v3" />
+        <path d="M5 15h14" />
+      </svg>
+    ),
+  },
+  {
+    title: '功能模块',
+    subtitle: 'Functional Modules',
+    description: '划分应用功能边界，建立模块与组件的包含关系，实现架构分层。',
+    to: `/spaces/${TEST_SPACE_ID}/architectures/functional-modules`,
+    icon: (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-6 w-6"
+      >
+        <rect x="2" y="2" width="20" height="8" rx="1" />
+        <rect x="2" y="14" width="20" height="8" rx="1" />
+      </svg>
+    ),
+  },
+  {
+    title: '应用接口',
+    subtitle: 'Application Interfaces',
+    description: '定义应用间的接口契约与数据交换，保障系统集成与协同。',
+    to: `/spaces/${TEST_SPACE_ID}/architectures/application-interfaces`,
+    icon: (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-6 w-6"
+      >
+        <circle cx="12" cy="5" r="3" />
+        <circle cx="5" cy="19" r="3" />
+        <circle cx="19" cy="19" r="3" />
+        <path d="M12 8v8" />
+        <path d="M7 19h10" />
+      </svg>
+    ),
+  },
+]
+
+function FeatureCard({ feature }: { feature: Feature }) {
+  return (
+    <Link to={feature.to} className="block h-full">
+      <Card className="h-full hover:shadow-md transition-shadow">
+        <CardHeader>
+          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            {feature.icon}
+          </div>
+          <CardTitle className="mt-4">{feature.title}</CardTitle>
+          <CardDescription>{feature.subtitle}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex-1">
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {feature.description}
+          </p>
+        </CardContent>
+      </Card>
+    </Link>
+  )
+}
 
 export default function Home() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
@@ -148,24 +274,24 @@ export default function Home() {
             平台能力
           </h2>
           <p className="mt-3 text-center text-muted-foreground">
-            三大模块协同工作，覆盖企业架构的核心场景
+            业务架构与应用架构双域协同，覆盖企业架构的核心场景
           </p>
-          <div className="mt-10 grid gap-6 md:grid-cols-3">
-            {features.map((feature) => (
-              <Card key={feature.title} className="flex flex-col">
-                <CardHeader>
-                  <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                    {feature.icon}
-                  </div>
-                  <CardTitle className="mt-4">{feature.title}</CardTitle>
-                  <CardDescription>{feature.subtitle}</CardDescription>
-                </CardHeader>
-                <CardContent className="flex-1">
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {feature.description}
-                  </p>
-                </CardContent>
-              </Card>
+          <h3 className="mt-10 text-lg font-semibold tracking-tight">业务架构</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            从战略到执行的业务建模：价值流、业务能力与业务流程
+          </p>
+          <div className="mt-4 grid gap-6 md:grid-cols-3">
+            {businessFeatures.map((feature) => (
+              <FeatureCard key={feature.title} feature={feature} />
+            ))}
+          </div>
+          <h3 className="mt-10 text-lg font-semibold tracking-tight">应用架构</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            支撑业务的系统实现：应用组件、应用流程、功能模块与应用接口
+          </p>
+          <div className="mt-4 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            {applicationFeatures.map((feature) => (
+              <FeatureCard key={feature.title} feature={feature} />
             ))}
           </div>
         </section>

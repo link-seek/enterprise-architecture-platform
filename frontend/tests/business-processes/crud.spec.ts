@@ -8,7 +8,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     await login(page);
 
     // Navigate to processes page
-    await page.getByRole('link', { name: '业务流程' }).click();
+    await page.getByRole('link', { name: '业务流程', exact: true }).click();
     await expect(page).toHaveURL(`${SPACE_BASE}/processes`);
   });
 

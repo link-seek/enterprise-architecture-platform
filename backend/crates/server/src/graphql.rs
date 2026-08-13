@@ -4783,6 +4783,104 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     .argument(InputValue::new("businessProcessId", TypeRef::named_nn(TypeRef::STRING)));
     builder.queries.push(q);
 
+    // capabilityRealizationsBySpace
+    // Aggregation over all capabilities of a space; avoids per-capability
+    // N+1 queries on the architecture overview page.
+    let q = Field::new(
+        "capabilityRealizationsBySpace",
+        TypeRef::named_nn_list_nn("CapabilityRealizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let cap_ids: Vec<Uuid> = business_capability::Entity::find()
+                    .filter(business_capability::Column::SpaceId.eq(space_id))
+                    .filter(business_capability::Column::DeletedAt.is_null())
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?
+                    .into_iter()
+                    .map(|c| c.id)
+                    .collect();
+                let rows = if cap_ids.is_empty() {
+                    Vec::new()
+                } else {
+                    capability_realization::Entity::find()
+                        .filter(capability_realization::Column::CapabilityId.is_in(cap_ids))
+                        .all(db)
+                        .await
+                        .map_err(db_err_to_graphql)?
+                };
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
+
+    // processReferencesBySpace
+    // Aggregation over all business/application processes of a space; avoids
+    // per-process N+1 queries on the architecture overview page.
+    let q = Field::new(
+        "processReferencesBySpace",
+        TypeRef::named_nn_list_nn("ProcessReferences"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let bp_ids: Vec<Uuid> = business_process::Entity::find()
+                    .filter(business_process::Column::SpaceId.eq(space_id))
+                    .filter(business_process::Column::DeletedAt.is_null())
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?
+                    .into_iter()
+                    .map(|p| p.id)
+                    .collect();
+                let ap_ids: Vec<Uuid> = application_process::Entity::find()
+                    .filter(application_process::Column::SpaceId.eq(space_id))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?
+                    .into_iter()
+                    .map(|p| p.id)
+                    .collect();
+                let rows = if bp_ids.is_empty() && ap_ids.is_empty() {
+                    Vec::new()
+                } else {
+                    process_reference::Entity::find()
+                        .filter(
+                            sea_orm::Condition::any()
+                                .add(process_reference::Column::BusinessProcessId.is_in(bp_ids))
+                                .add(process_reference::Column::ApplicationProcessId.is_in(ap_ids)),
+                        )
+                        .all(db)
+                        .await
+                        .map_err(db_err_to_graphql)?
+                };
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
+
     // assignmentsByOrganization
     let q = Field::new(
         "assignmentsByOrganization",

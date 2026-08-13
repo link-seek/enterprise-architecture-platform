@@ -21,7 +21,7 @@ export default function Login() {
     setError(null)
     try {
       await login(loginEmail, loginPassword)
-      navigate(`/spaces/${TEST_SPACE_ID}/architectures/value-streams`)
+      navigate(`/spaces/${TEST_SPACE_ID}/architectures/overview`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed')
     } finally {

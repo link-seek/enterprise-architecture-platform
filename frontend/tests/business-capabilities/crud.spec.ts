@@ -8,7 +8,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     await login(page);
 
     // Navigate to capabilities page
-    await page.getByRole('link', { name: '业务能力' }).click();
+    await page.getByRole('link', { name: '业务能力', exact: true }).click();
     await expect(page).toHaveURL(`${SPACE_BASE}/capabilities`);
   });
 

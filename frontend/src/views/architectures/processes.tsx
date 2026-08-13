@@ -5,8 +5,8 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Plus, Pencil, Trash2, Loader2, MoreVertical, UserRoundCog, GitBranch } from 'lucide-react'
-import { useState, useEffect, useCallback } from 'react'
+import { Plus, Pencil, Trash2, Loader2, MoreVertical, UserRoundCog, GitBranch, AppWindow } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -14,6 +14,7 @@ import { useParams } from 'react-router-dom'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { useIsMobile } from '@/hooks/use-media-query'
 import { TransferOwnershipDialog } from './transfer-ownership-dialog'
+import { CrossDomainDialog, type CrossDomainItem } from './cross-domain-dialog'
 
 const GET_PROCESSES = gql`
   query GetProcesses($spaceId: String!) {
@@ -73,6 +74,21 @@ const GET_CAPABILITIES_BY_PROCESS = gql`
   }
 `
 
+// 跨域关联（R3）：业务流程被哪些应用流程引用（process_references）。
+const GET_PROCESS_REFERENCES_BY_BUSINESS = gql`
+  query GetProcessReferencesByBusiness($businessProcessId: String!) {
+    processReferencesByBusinessProcess(businessProcessId: $businessProcessId) {
+      applicationProcessId businessProcessId
+    }
+  }
+`
+
+const GET_APPLICATION_PROCESSES_BY_SPACE = gql`
+  query GetApplicationProcessesForNames($spaceId: String!) {
+    applicationProcessesBySpace(spaceId: $spaceId) { id name }
+  }
+`
+
 interface Process {
   id: string; name: string; description: string
   inputs?: string[] | null; outputs?: string[] | null
@@ -100,7 +116,7 @@ function joinLines(items: string[] | null | undefined): string {
   return (items ?? []).join('\n')
 }
 
-function ProcessList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer, onPublish }: {
+function ProcessList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer, onPublish, onApplicationSupport }: {
   nodes: Process[]
   isOwned: (p: Process) => boolean
   isMobile: boolean
@@ -108,6 +124,7 @@ function ProcessList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer, o
   onDelete: (p: Process) => void
   onTransfer: (p: Process) => void
   onPublish: (p: Process) => void
+  onApplicationSupport: (p: Process) => void
 }) {
   if (nodes.length === 0) {
     return <div className="text-center py-8 text-muted-foreground">暂无数据</div>
@@ -141,8 +158,11 @@ function ProcessList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer, o
                 {p.outputs?.map(o => <Badge key={`o-${o}`} variant="outline">输出:{o}</Badge>)}
               </div>
             )}
-            {owned && (
-              <div className="flex justify-end pt-1">
+            <div className="flex justify-end gap-1 pt-1">
+              <Button variant="ghost" size="sm" aria-label="应用支撑" title="应用支撑" onClick={() => onApplicationSupport(p)}>
+                <AppWindow className="h-3.5 w-3.5" />
+              </Button>
+              {owned && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="sm" className="h-9 w-9 p-0" aria-label="更多操作">
@@ -161,8 +181,8 @@ function ProcessList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer, o
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </div>
-            )}
+              )}
+            </div>
           </div>
           )
         })}
@@ -220,24 +240,29 @@ function ProcessList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer, o
               <Badge variant={p.status === 'archived' ? 'destructive' : p.status === 'deprecated' ? 'secondary' : 'outline'}>{p.status}</Badge>
             </TableCell>
             <TableCell>
-              {owned && (
-                <div className="flex gap-1">
-                  {p.status === 'active' && p.logicalId && (
-                    <Button variant="ghost" size="sm" onClick={() => onPublish(p)} aria-label="发布新版本" title="发布新版本">
-                      <GitBranch className="h-3.5 w-3.5" />
+              <div className="flex gap-1">
+                <Button variant="ghost" size="sm" aria-label="应用支撑" title="应用支撑" onClick={() => onApplicationSupport(p)}>
+                  <AppWindow className="h-3.5 w-3.5" />
+                </Button>
+                {owned && (
+                  <>
+                    {p.status === 'active' && p.logicalId && (
+                      <Button variant="ghost" size="sm" onClick={() => onPublish(p)} aria-label="发布新版本" title="发布新版本">
+                        <GitBranch className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(p)} aria-label="编辑">
+                      <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                  )}
-                  <Button variant="ghost" size="sm" onClick={() => onEdit(p)} aria-label="编辑">
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => onTransfer(p)} aria-label="转移所有权">
-                    <UserRoundCog className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => onDelete(p)} aria-label="删除">
-                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                  </Button>
-                </div>
-              )}
+                    <Button variant="ghost" size="sm" onClick={() => onTransfer(p)} aria-label="转移所有权">
+                      <UserRoundCog className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(p)} aria-label="删除">
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
+                  </>
+                )}
+              </div>
             </TableCell>
           </TableRow>
           )
@@ -256,12 +281,14 @@ export default function Processes() {
   const [deleting, setDeleting] = useState<Process | null>(null)
   const [transferItem, setTransferItem] = useState<Process | null>(null)
   const [publishing, setPublishing] = useState<Process | null>(null)
+  const [applicationSupport, setApplicationSupport] = useState<Process | null>(null)
   const { data, loading, error } = useQuery<ProcessesQuery>(GET_PROCESSES, { variables: { spaceId }, skip: !spaceId })
 
   const handleEdit = useCallback((p: Process) => { setEditing(p); setDialogOpen(true) }, [])
   const handleDelete = useCallback((p: Process) => setDeleting(p), [])
   const handleTransfer = useCallback((p: Process) => setTransferItem(p), [])
   const handlePublish = useCallback((p: Process) => setPublishing(p), [])
+  const handleApplicationSupport = useCallback((p: Process) => setApplicationSupport(p), [])
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -287,6 +314,7 @@ export default function Processes() {
               onDelete={handleDelete}
               onTransfer={handleTransfer}
               onPublish={handlePublish}
+              onApplicationSupport={handleApplicationSupport}
             />
           )}
         </CardContent>
@@ -294,6 +322,11 @@ export default function Processes() {
       <ProcessCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} />
       <ProcessDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
       <PublishVersionDialog item={publishing} onOpenChange={(v) => { if (!v) setPublishing(null) }} spaceId={spaceId} />
+      <ApplicationSupportDialog
+        process={applicationSupport}
+        spaceId={spaceId}
+        onOpenChange={(v) => { if (!v) setApplicationSupport(null) }}
+      />
       <TransferOwnershipDialog
         open={!!transferItem}
         onOpenChange={(v) => { if (!v) setTransferItem(null) }}
@@ -521,5 +554,45 @@ function ProcessDeleteDialog({ item, onConfirm, spaceId }: { item: Process | nul
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// 跨域关联（R3）：展示引用该业务流程的应用流程（process_references），
+// 行可跳转到应用流程页。
+function ApplicationSupportDialog({ process, spaceId, onOpenChange }: {
+  process: Process | null
+  spaceId?: string
+  onOpenChange: (v: boolean) => void
+}) {
+  const { data, loading } = useQuery<{ processReferencesByBusinessProcess?: { applicationProcessId: string; businessProcessId: string }[] }>(
+    GET_PROCESS_REFERENCES_BY_BUSINESS,
+    { variables: { businessProcessId: process?.id }, skip: !process?.id },
+  )
+  const { data: appProcessesData } = useQuery<{ applicationProcessesBySpace?: { id: string; name: string }[] }>(
+    GET_APPLICATION_PROCESSES_BY_SPACE,
+    { variables: { spaceId }, skip: !spaceId },
+  )
+
+  const appProcessName = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const ap of appProcessesData?.applicationProcessesBySpace ?? []) map.set(ap.id, ap.name)
+    return map
+  }, [appProcessesData])
+
+  const items: CrossDomainItem[] = (data?.processReferencesByBusinessProcess ?? [])
+    .map((r) => ({
+      id: r.applicationProcessId,
+      name: appProcessName.get(r.applicationProcessId) ?? r.applicationProcessId,
+    }))
+
+  return (
+    <CrossDomainDialog
+      open={!!process}
+      onOpenChange={onOpenChange}
+      title={`被应用流程支撑 - ${process?.name}`}
+      items={items}
+      loading={loading}
+      to={`/spaces/${spaceId}/architectures/application-processes`}
+    />
   )
 }
