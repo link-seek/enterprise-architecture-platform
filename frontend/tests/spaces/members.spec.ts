@@ -16,7 +16,8 @@ test.describe('Space Member Management', () => {
 
     // The owner appears in the member list (scope to the table to avoid the
     // role-select combobox option which also contains the text '拥有者').
-    await expect(page.getByRole('table').getByText('拥有者')).toBeVisible({ timeout: 10000 });
+    // Use .first() because multiple owners may be seeded (admin + e2e3).
+    await expect(page.getByRole('table').getByText('拥有者').first()).toBeVisible({ timeout: 10000 });
   });
 
   test('Owner can add member by email with editor role', { tag: '@regression' }, async ({ page }) => {
@@ -45,7 +46,7 @@ test.describe('Space Member Management', () => {
     await page.getByRole('button', { name: '成员' }).click();
     await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 });
 
-    // Remove the member added by the previous test (stranger), never the
+    // Remove the member added by the previous test. Stranger, never the
     // seeded editor test@example.com — otherwise subsequent permission tests
     // break because the seeded editor membership is gone.
     const strangerRow = page.getByRole('dialog').getByRole('row').filter({ hasText: STRANGER_NAME });

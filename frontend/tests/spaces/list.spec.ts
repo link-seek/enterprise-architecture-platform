@@ -4,7 +4,7 @@ import { login, TEST_SPACE_ID } from '../helpers/auth';
 
 test.describe('Spaces - Browse Spaces Main Flow', () => {
   test.beforeEach(async ({ page }) => {
-    // Login before each test (env-driven credentials for multi-environment reuse)
+    // Login before each test. Env-driven credentials for multi-environment reuse.
     await login(page);
   });
 
@@ -25,7 +25,7 @@ test.describe('Spaces - Browse Spaces Main Flow', () => {
     // The list loads without error (no 405 / no failure banner).
     await expect(page.getByText(/加载失败/)).not.toBeVisible();
 
-    // Wait for the seeded test space card to appear (list loaded successfully).
+    // Wait for the seeded test space card to appear. List loaded successfully.
     const testSpaceCard = page.getByRole('link', { name: /测试空间/ });
     await expect(testSpaceCard).toBeVisible({ timeout: 10000 });
 

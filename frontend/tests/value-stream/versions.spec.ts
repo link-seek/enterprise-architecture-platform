@@ -4,7 +4,7 @@ import { login } from '../helpers/auth';
 
 test.describe('Value Stream Management - Version Control', () => {
   test.beforeEach(async ({ page }) => {
-    // Login before each test (env-driven credentials for multi-environment reuse)
+    // Login before each test. Env-driven credentials for multi-environment reuse.
     await login(page);
   });
 
