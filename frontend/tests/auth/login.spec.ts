@@ -1,6 +1,6 @@
 // spec: specs/eap-test-plan.md
 import { test, expect } from '@playwright/test';
-import { login, logout, ensureLoggedOut, TEST_EMAIL, TEST_PASSWORD } from '../helpers/auth';
+import { login, logout, ensureLoggedOut, TEST_EMAIL, TEST_PASSWORD, SPACE_BASE } from '../helpers/auth';
 
 test.describe('Authentication - Login', () => {
   test.beforeEach(async ({ page }) => {
@@ -41,7 +41,9 @@ test.describe('Authentication - Login', () => {
   });
 
   test('Edge Case - Protected Route Access', { tag: '@smoke' }, async ({ page }) => {
-    await page.goto('/spaces/00000000-0000-0000-0000-000000000010/architectures/value-streams');
+    // Architecture pages are public read; the admin-only /users route still
+    // redirects anonymous visitors to the login page.
+    await page.goto(`${SPACE_BASE}/users`);
     await expect(page).toHaveURL('/login');
     await expect(page.getByText('企业架构平台')).toBeVisible();
   });
