@@ -1,9 +1,9 @@
-import { useQuery, useApolloClient } from '@apollo/client/react'
+import { useQuery } from '@apollo/client/react'
 import { gql } from '@apollo/client'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Loader2 } from 'lucide-react'
-import { useState, useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 
 const GET_REALIZATIONS_DATA = gql`
@@ -14,9 +14,9 @@ const GET_REALIZATIONS_DATA = gql`
   }
 `
 
-const GET_CAPABILITY_REALIZATIONS = gql`
-  query GetCapabilityRealizations($capabilityId: String!) {
-    capabilityRealizationsByCapability(capabilityId: $capabilityId) {
+const GET_CAPABILITY_REALIZATIONS_BY_SPACE = gql`
+  query GetCapabilityRealizationsBySpace($spaceId: String!) {
+    capabilityRealizationsBySpace(spaceId: $spaceId) {
       capabilityId processId processType
     }
   }
@@ -62,42 +62,14 @@ function RealizationTable({ title, rows }: { title: string; rows: { left: string
 
 export default function Realizations() {
   const { spaceId } = useParams<{ spaceId: string }>()
-  const client = useApolloClient()
   const { data, loading, error } = useQuery<RealizationsData>(GET_REALIZATIONS_DATA, { variables: { spaceId }, skip: !spaceId })
-  const [capabilityRealizations, setCapabilityRealizations] = useState<CapabilityRealization[]>([])
-  const [realizationsLoading, setRealizationsLoading] = useState(false)
 
-  const capabilities = data?.businessCapabilitiesBySpace ?? []
+  // 一次聚合查询替代逐能力 N+1 查询（capabilityRealizationsBySpace）。
+  const { data: realizationData, loading: realizationsLoading } = useQuery<{
+    capabilityRealizationsBySpace: CapabilityRealization[]
+  }>(GET_CAPABILITY_REALIZATIONS_BY_SPACE, { variables: { spaceId }, skip: !spaceId })
 
-  useEffect(() => {
-    if (!data) return
-    let cancelled = false
-    async function fetchCapabilityRealizations() {
-      if (capabilities.length === 0) { setCapabilityRealizations([]); setRealizationsLoading(false); return }
-      setRealizationsLoading(true)
-      try {
-        const results = await Promise.all(
-          capabilities.map((cap) =>
-            client.query<{ capabilityRealizationsByCapability: CapabilityRealization[] }>({
-              query: GET_CAPABILITY_REALIZATIONS,
-              variables: { capabilityId: cap.id },
-              fetchPolicy: 'network-only',
-            }),
-          ),
-        )
-        if (!cancelled) {
-          setCapabilityRealizations(results.flatMap((r) => r.data?.capabilityRealizationsByCapability ?? []))
-        }
-      } catch {
-        if (!cancelled) setCapabilityRealizations([])
-      } finally {
-        if (!cancelled) setRealizationsLoading(false)
-      }
-    }
-    fetchCapabilityRealizations()
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data])
+  const capabilityRealizations = realizationData?.capabilityRealizationsBySpace ?? []
 
   const businessProcessName = useMemo(() => {
     const map = new Map<string, string>()

@@ -1,11 +1,13 @@
 // spec: specs/eap-test-plan.md
 import { test, expect } from '../helpers/graphql-aware';
-import { login } from '../helpers/auth';
+import { login, SPACE_BASE } from '../helpers/auth';
 
 test.describe('Value Stream Management - Version Control', () => {
   test.beforeEach(async ({ page }) => {
-    // Login before each test (env-driven credentials for multi-environment reuse)
+    // Login before each test (env-driven credentials for multi-environment reuse).
+    // Login now lands on the architecture overview; navigate to value-streams explicitly.
     await login(page);
+    await page.goto(`${SPACE_BASE}/value-streams`);
   });
 
   test('Happy Path - Create New Version', { tag: '@regression' }, async ({ page }) => {

@@ -34,7 +34,7 @@ test.describe('v2.1 New Entity Pages - Smoke Tests', () => {
     await page.goto(`${SPACE_BASE}/value-streams`);
     await expect(page.getByRole('link', { name: '组织单元' })).toBeVisible();
     await expect(page.getByRole('link', { name: '业务角色' })).toBeVisible();
-    await expect(page.getByRole('link', { name: '功能模块' })).toBeVisible();
-    await expect(page.getByRole('link', { name: '应用接口' })).toBeVisible();
+    await expect(page.getByRole('link', { name: '功能模块', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: '应用接口', exact: true })).toBeVisible();
   });
 });

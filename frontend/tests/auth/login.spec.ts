@@ -18,9 +18,9 @@ test.describe('Authentication - Login', () => {
     await page.press('input[type="password"]', 'Enter');
     
     // Login success: sidebar nav items + logout button visible
-    await expect(page.getByRole('link', { name: '价值流' })).toBeVisible({ timeout: 10000 });
-    await expect(page.getByRole('link', { name: '业务能力' })).toBeVisible();
-    await expect(page.getByRole('link', { name: '业务流程' })).toBeVisible();
+    await expect(page.getByRole('link', { name: '价值流', exact: true })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('link', { name: '业务能力', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: '业务流程', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '退出登录' })).toBeVisible();
   });
 

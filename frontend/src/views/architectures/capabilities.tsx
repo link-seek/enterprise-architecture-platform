@@ -5,8 +5,8 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Plus, Pencil, Trash2, Loader2, MoreVertical, UserRoundCog, Link2 } from 'lucide-react'
-import { useState, useEffect, useCallback, memo } from 'react'
+import { Plus, Pencil, Trash2, Loader2, MoreVertical, UserRoundCog, Link2, AppWindow } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo, memo } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -14,6 +14,7 @@ import { useParams } from 'react-router-dom'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { useIsMobile } from '@/hooks/use-media-query'
 import { TransferOwnershipDialog } from './transfer-ownership-dialog'
+import { CrossDomainDialog, type CrossDomainItem } from './cross-domain-dialog'
 
 const GET_CAPABILITIES = gql`
   query GetCapabilities($spaceId: String!) {
@@ -71,6 +72,21 @@ const GET_PROCESSES_BY_SPACE = gql`
   }
 `
 
+// 跨域关联（R3）：能力被哪些应用流程实现（capability_realizations，process_type=application_process）。
+const GET_CAPABILITY_REALIZATIONS = gql`
+  query GetCapabilityRealizations($capabilityId: String!) {
+    capabilityRealizationsByCapability(capabilityId: $capabilityId) {
+      capabilityId processId processType
+    }
+  }
+`
+
+const GET_APPLICATION_PROCESSES_BY_SPACE = gql`
+  query GetApplicationProcessesForNames($spaceId: String!) {
+    applicationProcessesBySpace(spaceId: $spaceId) { id name }
+  }
+`
+
 const CAPABILITY_PROCESS_CREATE = gql`
   mutation CapabilityProcessCreate($capabilityId: String!, $processId: String!) {
     capabilityProcessCreate(capabilityId: $capabilityId, processId: $processId) {
@@ -107,7 +123,7 @@ interface ProcessRelation {
 
 const EMPTY_CAPABILITIES: Capability[] = []
 
-const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer, onProcesses }: {
+const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer, onProcesses, onApplicationSupport }: {
   nodes: Capability[]
   isOwned: (cap: Capability) => boolean
   isMobile: boolean
@@ -115,6 +131,7 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
   onDelete: (cap: Capability) => void
   onTransfer: (cap: Capability) => void
   onProcesses: (cap: Capability) => void
+  onApplicationSupport: (cap: Capability) => void
 }) {
   if (nodes.length === 0) {
     return <div className="text-center py-8 text-muted-foreground">暂无数据</div>
@@ -136,8 +153,11 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
               <Badge variant="secondary">{cap.maturity}</Badge>
               <Badge variant="secondary">{cap.businessValue}</Badge>
             </div>
-            {owned && (
-              <div className="flex justify-end pt-1">
+            <div className="flex justify-end gap-1 pt-1">
+              <Button variant="ghost" size="sm" aria-label="应用支撑" title="应用支撑" onClick={() => onApplicationSupport(cap)}>
+                <AppWindow className="h-3.5 w-3.5" />
+              </Button>
+              {owned && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="sm" className="h-9 w-9 p-0" aria-label="更多操作">
@@ -159,8 +179,8 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </div>
-            )}
+              )}
+            </div>
           </div>
           )
         })}
@@ -191,22 +211,27 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
             <TableCell>{cap.businessValue}</TableCell>
             <TableCell><Badge variant="outline">{cap.status}</Badge></TableCell>
             <TableCell>
-              {owned && (
-                <div className="flex gap-1">
-                  <Button variant="ghost" size="sm" aria-label="关联流程" title="关联流程" onClick={() => onProcesses(cap)}>
-                    <Link2 className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button variant="ghost" size="sm" aria-label="编辑" onClick={() => onEdit(cap)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button variant="ghost" size="sm" aria-label="转移所有权" onClick={() => onTransfer(cap)}>
-                    <UserRoundCog className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button variant="ghost" size="sm" aria-label="删除" onClick={() => onDelete(cap)}>
-                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                  </Button>
-                </div>
-              )}
+              <div className="flex gap-1">
+                <Button variant="ghost" size="sm" aria-label="应用支撑" title="应用支撑" onClick={() => onApplicationSupport(cap)}>
+                  <AppWindow className="h-3.5 w-3.5" />
+                </Button>
+                {owned && (
+                  <>
+                    <Button variant="ghost" size="sm" aria-label="关联流程" title="关联流程" onClick={() => onProcesses(cap)}>
+                      <Link2 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="sm" aria-label="编辑" onClick={() => onEdit(cap)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="sm" aria-label="转移所有权" onClick={() => onTransfer(cap)}>
+                      <UserRoundCog className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="sm" aria-label="删除" onClick={() => onDelete(cap)}>
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
+                  </>
+                )}
+              </div>
             </TableCell>
           </TableRow>
           )
@@ -225,12 +250,14 @@ export default function Capabilities() {
   const [deleting, setDeleting] = useState<Capability | null>(null)
   const [transferItem, setTransferItem] = useState<Capability | null>(null)
   const [processesCapability, setProcessesCapability] = useState<Capability | null>(null)
+  const [applicationSupport, setApplicationSupport] = useState<Capability | null>(null)
   const { data, loading, error } = useQuery<CapabilitiesQuery>(GET_CAPABILITIES, { variables: { spaceId }, skip: !spaceId })
 
   const handleEdit = useCallback((cap: Capability) => { setEditing(cap); setDialogOpen(true) }, [])
   const handleDelete = useCallback((cap: Capability) => setDeleting(cap), [])
   const handleTransfer = useCallback((cap: Capability) => setTransferItem(cap), [])
   const handleProcesses = useCallback((cap: Capability) => setProcessesCapability(cap), [])
+  const handleApplicationSupport = useCallback((cap: Capability) => setApplicationSupport(cap), [])
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -256,6 +283,7 @@ export default function Capabilities() {
               onDelete={handleDelete}
               onTransfer={handleTransfer}
               onProcesses={handleProcesses}
+              onApplicationSupport={handleApplicationSupport}
             />
           )}
         </CardContent>
@@ -266,6 +294,11 @@ export default function Capabilities() {
         capability={processesCapability}
         spaceId={spaceId}
         onOpenChange={(v) => { if (!v) setProcessesCapability(null) }}
+      />
+      <ApplicationSupportDialog
+        capability={applicationSupport}
+        spaceId={spaceId}
+        onOpenChange={(v) => { if (!v) setApplicationSupport(null) }}
       />
       <TransferOwnershipDialog
         open={!!transferItem}
@@ -483,5 +516,46 @@ function ProcessRelationsDialog({ capability, spaceId, onOpenChange }: {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// 跨域关联（R3）：展示实现该业务能力的应用流程（capability_realizations
+// 中 process_type=application_process 的行），行可跳转到应用流程页。
+function ApplicationSupportDialog({ capability, spaceId, onOpenChange }: {
+  capability: Capability | null
+  spaceId?: string
+  onOpenChange: (v: boolean) => void
+}) {
+  const { data, loading } = useQuery<{ capabilityRealizationsByCapability?: { capabilityId: string; processId: string; processType: string }[] }>(
+    GET_CAPABILITY_REALIZATIONS,
+    { variables: { capabilityId: capability?.id }, skip: !capability?.id },
+  )
+  const { data: appProcessesData } = useQuery<{ applicationProcessesBySpace?: { id: string; name: string }[] }>(
+    GET_APPLICATION_PROCESSES_BY_SPACE,
+    { variables: { spaceId }, skip: !spaceId },
+  )
+
+  const appProcessName = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const ap of appProcessesData?.applicationProcessesBySpace ?? []) map.set(ap.id, ap.name)
+    return map
+  }, [appProcessesData])
+
+  const items: CrossDomainItem[] = (data?.capabilityRealizationsByCapability ?? [])
+    .filter((r) => r.processType === 'application_process')
+    .map((r) => ({
+      id: r.processId,
+      name: appProcessName.get(r.processId) ?? r.processId,
+    }))
+
+  return (
+    <CrossDomainDialog
+      open={!!capability}
+      onOpenChange={onOpenChange}
+      title={`应用支撑 - ${capability?.name}`}
+      items={items}
+      loading={loading}
+      to={`/spaces/${spaceId}/architectures/application-processes`}
+    />
   )
 }

@@ -55,8 +55,10 @@ export async function loginAs(page: Page, email: string, password: string) {
   await page.fill('input[type="email"]', email);
   await page.fill('input[type="password"]', password);
   await page.press('input[type="password"]', 'Enter');
-  // Login success: sidebar visible (environment-agnostic)
-  await expect(page.getByRole('link', { name: '价值流' })).toBeVisible({ timeout: 10000 });
+  // Login success: sidebar visible (environment-agnostic).
+  // exact:true — the overview landing page also has entry-card links whose
+  // accessible names contain the entity labels (e.g. "价值流 3 …").
+  await expect(page.getByRole('link', { name: '价值流', exact: true })).toBeVisible({ timeout: 10000 });
 }
 
 /**

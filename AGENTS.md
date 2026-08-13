@@ -67,3 +67,20 @@ Schema 由 `async-graphql` + `seaography` 自动生成。实体需 derive `Entit
 - 错误处理使用 `thiserror` 定义领域错误，向上传播为 `shared-common::error::AppError`
 - 分页统一使用 `shared-common::pagination::Pagination`
 - AI 后端 (`crates/server/src/ai/`) 支持 OpenAI 兼容接口
+
+
+## 架构分域（业务/应用）与跨域映射（2026-08 补充）
+
+- **前端信息架构**：空间架构区侧边栏（`frontend/src/views/architectures/layout.tsx`）按
+  「业务架构 / 应用架构」两组视觉分组，路由保持扁平（`/spaces/:spaceId/architectures/*`）。
+  架构区 index 与登录后跳转目标为 `overview`（架构总览页），登录跳转见 `frontend/src/views/login.tsx`。
+- **跨域映射查询**（`backend/crates/server/src/graphql.rs`）：
+  - 逐实体：`capabilityRealizationsByCapability`、`processReferencesByBusinessProcess`、`processReferencesByApplicationProcess`
+  - 按空间聚合（总览页/映射页用于消除 N+1）：`capabilityRealizationsBySpace`、`processReferencesBySpace`
+  - 注意 `ProcessReferences` GraphQL 类型**没有 `id` 字段**，查询只选 `applicationProcessId`/`businessProcessId`；
+    `capability_realizations.process_type` 为 `business_process | application_process`。
+  - 本地默认限流 4 req/s（burst 25），页面若发起 10+ 并行查询会触发 429；CI 用 100 req/s。
+- **Playwright 注意**：`getByRole(name)` 默认是**子串匹配**；总览页入口卡片是整卡 Link，
+  accessible name 含实体名（如 `价值流 1 …`），会与侧边栏链接子串冲突，故侧边栏断言需 `exact: true`；
+  分组标题「业务架构/应用架构」同时出现在侧边栏 h3 与总览页 h2，需按 `navigation`/`main` 作用域区分。
+- 登录默认落点改为 overview 后，value-stream 类测试需显式 `goto SPACE_BASE + "/value-streams"`。

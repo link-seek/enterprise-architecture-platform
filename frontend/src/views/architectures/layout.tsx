@@ -22,11 +22,40 @@ import {
   UserCircle,
   Layers,
   Plug,
+  type LucideIcon,
 } from 'lucide-react'
 import { GET_SPACE } from '@/api/spaces'
 import type { Space } from '@/api/spaces'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { useIsMobile } from '@/hooks/use-media-query'
+
+interface MenuItem {
+  path: string
+  label: string
+  icon: LucideIcon
+}
+
+function renderMenuItems(items: MenuItem[], location: ReturnType<typeof useLocation>, onNavigate?: () => void) {
+  return items.map((item) => {
+    const Icon = item.icon
+    const active = location.pathname.startsWith(item.path)
+    return (
+      <Link
+        key={item.path}
+        to={item.path}
+        onClick={onNavigate}
+        className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+          active
+            ? 'bg-primary text-primary-foreground'
+            : 'hover:bg-accent hover:text-accent-foreground'
+        }`}
+      >
+        <Icon className="h-4 w-4" />
+        {item.label}
+      </Link>
+    )
+  })
+}
 
 function SidebarContent({ onNavigate, spaceName, spaceId }: { onNavigate?: () => void; spaceName: string; spaceId?: string }) {
   const location = useLocation()
@@ -35,17 +64,21 @@ function SidebarContent({ onNavigate, spaceName, spaceId }: { onNavigate?: () =>
   const { canEdit } = useSpaceMembership(spaceId)
 
   const base = spaceId ? `/spaces/${spaceId}/architectures` : '/architectures'
-  const menuItems = [
+  // 按域分组：业务架构 / 应用架构。路由保持扁平不变，仅做视觉分组。
+  const businessItems = [
     { path: `${base}/value-streams`, label: '价值流', icon: LayoutDashboard },
     { path: `${base}/capabilities`, label: '业务能力', icon: Boxes },
     { path: `${base}/processes`, label: '业务流程', icon: Workflow },
-    { path: `${base}/applications`, label: '应用组件', icon: Component },
-    { path: `${base}/application-processes`, label: '应用流程', icon: GitBranch },
     { path: `${base}/organizational-units`, label: '组织单元', icon: Building2 },
     { path: `${base}/business-roles`, label: '业务角色', icon: UserCircle },
+    { path: `${base}/realizations`, label: '映射关系', icon: Link2 },
+  ]
+
+  const applicationItems = [
+    { path: `${base}/applications`, label: '应用组件', icon: Component },
+    { path: `${base}/application-processes`, label: '应用流程', icon: GitBranch },
     { path: `${base}/functional-modules`, label: '功能模块', icon: Layers },
     { path: `${base}/application-interfaces`, label: '应用接口', icon: Plug },
-    { path: `${base}/realizations`, label: '映射关系', icon: Link2 },
   ]
 
   const adminMenuItems = [
@@ -67,47 +100,15 @@ function SidebarContent({ onNavigate, spaceName, spaceId }: { onNavigate?: () =>
       </div>
       <Separator />
       <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
-        {menuItems.map((item) => {
-          const Icon = item.icon
-          const active = location.pathname.startsWith(item.path)
-          return (
-            <Link
-              key={item.path}
-              to={item.path}
-              onClick={onNavigate}
-              className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                active
-                  ? 'bg-primary text-primary-foreground'
-                  : 'hover:bg-accent hover:text-accent-foreground'
-              }`}
-            >
-              <Icon className="h-4 w-4" />
-              {item.label}
-            </Link>
-          )
-        })}
+        <h3 className="px-3 pt-2 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">业务架构</h3>
+        {renderMenuItems(businessItems, location, onNavigate)}
+        <Separator className="my-2" />
+        <h3 className="px-3 pt-2 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">应用架构</h3>
+        {renderMenuItems(applicationItems, location, onNavigate)}
         {user?.role === 'admin' && (
           <>
             <Separator className="my-2" />
-            {adminMenuItems.map((item) => {
-              const Icon = item.icon
-              const active = location.pathname.startsWith(item.path)
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  onClick={onNavigate}
-                  className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                    active
-                      ? 'bg-primary text-primary-foreground'
-                      : 'hover:bg-accent hover:text-accent-foreground'
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  {item.label}
-                </Link>
-              )
-            })}
+            {renderMenuItems(adminMenuItems, location, onNavigate)}
           </>
         )}
       </nav>

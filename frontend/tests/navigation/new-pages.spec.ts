@@ -7,13 +7,13 @@ test.describe('v2.0 MVP - New Application Architecture Pages', () => {
   });
 
   test('应用组件 page loads via sidebar', { tag: '@smoke' }, async ({ page }) => {
-    await page.getByRole('link', { name: '应用组件' }).click();
+    await page.getByRole('link', { name: '应用组件', exact: true }).click();
     await expect(page).toHaveURL(`${SPACE_BASE}/applications`);
     await expect(page.getByRole('heading', { name: '应用组件' })).toBeVisible();
   });
 
   test('应用流程 page loads via sidebar', { tag: '@smoke' }, async ({ page }) => {
-    await page.getByRole('link', { name: '应用流程' }).click();
+    await page.getByRole('link', { name: '应用流程', exact: true }).click();
     await expect(page).toHaveURL(`${SPACE_BASE}/application-processes`);
     await expect(page.getByRole('heading', { name: '应用流程' })).toBeVisible();
   });
@@ -26,7 +26,7 @@ test.describe('v2.0 MVP - New Application Architecture Pages', () => {
   });
 
   test('应用组件 create dialog opens and submits', { tag: '@regression' }, async ({ page }) => {
-    await page.getByRole('link', { name: '应用组件' }).click();
+    await page.getByRole('link', { name: '应用组件', exact: true }).click();
     await page.getByRole('button', { name: '新建组件' }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByRole('heading', { name: '新建组件' })).toBeVisible();
@@ -39,7 +39,7 @@ test.describe('v2.0 MVP - New Application Architecture Pages', () => {
   });
 
   test('应用流程 create dialog opens and submits', { tag: '@regression' }, async ({ page }) => {
-    await page.getByRole('link', { name: '应用流程' }).click();
+    await page.getByRole('link', { name: '应用流程', exact: true }).click();
     await page.getByRole('button', { name: '新建流程' }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByRole('heading', { name: '新建流程' })).toBeVisible();

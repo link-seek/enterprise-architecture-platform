@@ -10,16 +10,16 @@ test.describe('Mobile Responsive - Drawer & Cards', () => {
 
   test('Drawer open/close and navigation', { tag: '@smoke' }, async ({ page }) => {
     // Sidebar links hidden initially
-    await expect(page.getByRole('link', { name: '价值流' })).not.toBeVisible();
+    await expect(page.getByRole('link', { name: '价值流', exact: true })).not.toBeVisible();
 
     // Open drawer
     await page.getByRole('button', { name: '打开菜单' }).click();
-    await expect(page.getByRole('link', { name: '价值流' })).toBeVisible();
+    await expect(page.getByRole('link', { name: '价值流', exact: true })).toBeVisible();
 
     // Navigate to capabilities, drawer auto-closes
-    await page.getByRole('link', { name: '业务能力' }).click();
+    await page.getByRole('link', { name: '业务能力', exact: true }).click();
     await expect(page).toHaveURL(`${SPACE_BASE}/capabilities`);
-    await expect(page.getByRole('link', { name: '业务能力' })).not.toBeVisible();
+    await expect(page.getByRole('link', { name: '业务能力', exact: true })).not.toBeVisible();
   });
 
   test('No horizontal overflow on list pages', { tag: '@smoke' }, async ({ page }) => {

@@ -37,7 +37,11 @@ export const router = createBrowserRouter([
     path: '/spaces/:spaceId/architectures',
     lazy: async () => ({ Component: (await import('@/views/architectures/layout')).default }),
     children: [
-      { index: true, element: <Navigate to="value-streams" replace /> },
+      { index: true, element: <Navigate to="overview" replace /> },
+      {
+        path: 'overview',
+        lazy: async () => ({ Component: (await import('@/views/architectures/overview')).default }),
+      },
       {
         path: 'value-streams',
         lazy: async () => ({ Component: (await import('@/views/architectures/value-streams')).default }),
