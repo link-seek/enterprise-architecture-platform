@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Plus, Pencil, Trash2, Loader2, MoreVertical, UserRoundCog } from 'lucide-react'
+import { Plus, Pencil, Trash2, Loader2, MoreVertical, UserRoundCog, Link2 } from 'lucide-react'
 import { useState, useEffect, useCallback, memo } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -49,6 +49,42 @@ const DELETE_CAPABILITY = gql`
   }
 `
 
+const GET_PROCESS_RELATIONS = gql`
+  query GetProcessRelations($capabilityId: String!) {
+    capabilityProcessRelations(capabilityId: $capabilityId) {
+      capabilityId
+      processId
+      logicalId
+      processName
+      businessVersion
+      status
+      valid
+    }
+  }
+`
+
+const GET_PROCESSES_BY_SPACE = gql`
+  query GetProcessesForReanchor($spaceId: String!) {
+    businessProcessesBySpace(spaceId: $spaceId) {
+      id logicalId businessVersion status name
+    }
+  }
+`
+
+const CAPABILITY_PROCESS_CREATE = gql`
+  mutation CapabilityProcessCreate($capabilityId: String!, $processId: String!) {
+    capabilityProcessCreate(capabilityId: $capabilityId, processId: $processId) {
+      capabilityId processId
+    }
+  }
+`
+
+const CAPABILITY_PROCESS_DELETE = gql`
+  mutation CapabilityProcessDelete($capabilityId: String!, $processId: String!) {
+    capabilityProcessDelete(capabilityId: $capabilityId, processId: $processId)
+  }
+`
+
 interface Capability {
   id: string; name: string; description: string
   level: string; maturity: string; businessValue: string; status: string
@@ -59,15 +95,26 @@ interface CapabilitiesQuery {
   businessCapabilitiesBySpace?: Capability[]
 }
 
+interface ProcessRelation {
+  capabilityId: string
+  processId: string
+  logicalId: string
+  processName: string
+  businessVersion: string
+  status: string
+  valid: boolean
+}
+
 const EMPTY_CAPABILITIES: Capability[] = []
 
-const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer }: {
+const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer, onProcesses }: {
   nodes: Capability[]
   isOwned: (cap: Capability) => boolean
   isMobile: boolean
   onEdit: (cap: Capability) => void
   onDelete: (cap: Capability) => void
   onTransfer: (cap: Capability) => void
+  onProcesses: (cap: Capability) => void
 }) {
   if (nodes.length === 0) {
     return <div className="text-center py-8 text-muted-foreground">暂无数据</div>
@@ -103,6 +150,9 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => onTransfer(cap)}>
                       <UserRoundCog className="h-4 w-4 mr-2" />转移所有权
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onProcesses(cap)}>
+                      <Link2 className="h-4 w-4 mr-2" />关联流程
                     </DropdownMenuItem>
                     <DropdownMenuItem className="text-destructive" onClick={() => onDelete(cap)}>
                       <Trash2 className="h-4 w-4 mr-2" />删除
@@ -143,6 +193,9 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
             <TableCell>
               {owned && (
                 <div className="flex gap-1">
+                  <Button variant="ghost" size="sm" aria-label="关联流程" title="关联流程" onClick={() => onProcesses(cap)}>
+                    <Link2 className="h-3.5 w-3.5" />
+                  </Button>
                   <Button variant="ghost" size="sm" aria-label="编辑" onClick={() => onEdit(cap)}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
@@ -171,11 +224,13 @@ export default function Capabilities() {
   const [editing, setEditing] = useState<Capability | null>(null)
   const [deleting, setDeleting] = useState<Capability | null>(null)
   const [transferItem, setTransferItem] = useState<Capability | null>(null)
+  const [processesCapability, setProcessesCapability] = useState<Capability | null>(null)
   const { data, loading, error } = useQuery<CapabilitiesQuery>(GET_CAPABILITIES, { variables: { spaceId }, skip: !spaceId })
 
   const handleEdit = useCallback((cap: Capability) => { setEditing(cap); setDialogOpen(true) }, [])
   const handleDelete = useCallback((cap: Capability) => setDeleting(cap), [])
   const handleTransfer = useCallback((cap: Capability) => setTransferItem(cap), [])
+  const handleProcesses = useCallback((cap: Capability) => setProcessesCapability(cap), [])
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -200,12 +255,18 @@ export default function Capabilities() {
               onEdit={handleEdit}
               onDelete={handleDelete}
               onTransfer={handleTransfer}
+              onProcesses={handleProcesses}
             />
           )}
         </CardContent>
       </Card>
       <CapabilityCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} />
       <CapabilityDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
+      <ProcessRelationsDialog
+        capability={processesCapability}
+        spaceId={spaceId}
+        onOpenChange={(v) => { if (!v) setProcessesCapability(null) }}
+      />
       <TransferOwnershipDialog
         open={!!transferItem}
         onOpenChange={(v) => { if (!v) setTransferItem(null) }}
@@ -319,6 +380,106 @@ function CapabilityDeleteDialog({ item, onConfirm, spaceId }: { item: Capability
         <DialogFooter>
           <Button variant="outline" onClick={onConfirm}>取消</Button>
           <Button variant="destructive" onClick={handleDelete} disabled={loading}>{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : '删除'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// 能力↔流程关系（版本锚定可见）：展示流程名 + 版本 + 状态，`valid=false`
+// 的关系标红并提供「重新锚定到最新版」（组合 capabilityProcessDelete +
+// capabilityProcessCreate 指向该 logicalId 的最新 active 行）。
+function ProcessRelationsDialog({ capability, spaceId, onOpenChange }: {
+  capability: Capability | null
+  spaceId?: string
+  onOpenChange: (v: boolean) => void
+}) {
+  const [reanchoring, setReanchoring] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const { data, loading, refetch } = useQuery<{ capabilityProcessRelations?: ProcessRelation[] }>(
+    GET_PROCESS_RELATIONS,
+    { variables: { capabilityId: capability?.id }, skip: !capability?.id },
+  )
+  const { data: processesData } = useQuery<{ businessProcessesBySpace?: { id: string; logicalId: string; businessVersion: string; status: string }[] }>(
+    GET_PROCESSES_BY_SPACE,
+    { variables: { spaceId }, skip: !spaceId },
+  )
+  const [deleteMut] = useMutation(CAPABILITY_PROCESS_DELETE)
+  const [createMut] = useMutation(CAPABILITY_PROCESS_CREATE)
+
+  useEffect(() => {
+    if (capability) setError(null)
+  }, [capability])
+
+  async function handleReanchor(rel: ProcessRelation) {
+    if (!capability) return
+    setReanchoring(rel.processId)
+    setError(null)
+    const latest = (processesData?.businessProcessesBySpace ?? [])
+      .find(p => p.logicalId === rel.logicalId && p.status === 'active')
+    if (!latest) {
+      setError(`未找到流程「${rel.processName}」的最新 active 版本`)
+      setReanchoring(null)
+      return
+    }
+    try {
+      await deleteMut({ variables: { capabilityId: capability.id, processId: rel.processId } })
+      await createMut({ variables: { capabilityId: capability.id, processId: latest.id } })
+      refetch()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '重新锚定失败')
+    } finally {
+      setReanchoring(null)
+    }
+  }
+
+  const relations = data?.capabilityProcessRelations ?? []
+
+  return (
+    <Dialog open={!!capability} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>关联流程 - {capability?.name}</DialogTitle></DialogHeader>
+        <div className="space-y-4 py-4 text-sm">
+          {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
+          {loading ? (
+            <div className="text-center py-6 text-muted-foreground">加载中...</div>
+          ) : relations.length === 0 ? (
+            <div className="text-center py-6 text-muted-foreground">暂无关联流程</div>
+          ) : (
+            <ul className="space-y-2">
+              {relations.map(rel => (
+                <li key={rel.processId} className={`rounded-md border px-3 py-2 ${rel.valid ? '' : 'border-destructive/50 bg-destructive/5'}`}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{rel.processName}</span>
+                    <Badge variant="secondary" className="font-mono">{rel.businessVersion}</Badge>
+                    <Badge variant={rel.status === 'archived' ? 'destructive' : rel.status === 'deprecated' ? 'secondary' : 'outline'}>{rel.status}</Badge>
+                    {!rel.valid && (
+                      <>
+                        <Badge variant="destructive">已失效</Badge>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="ml-auto"
+                          disabled={reanchoring === rel.processId}
+                          onClick={() => handleReanchor(rel)}
+                        >
+                          {reanchoring === rel.processId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '重新锚定到最新版'}
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                  {!rel.valid && (
+                    <p className="mt-1 text-xs text-destructive">
+                      该流程已发布新版本，此关系仍指向旧版本行，建议重新锚定。
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>关闭</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

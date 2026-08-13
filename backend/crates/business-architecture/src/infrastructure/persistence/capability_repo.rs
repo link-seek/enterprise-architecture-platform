@@ -162,7 +162,10 @@ impl SeaOrmCapabilityRepo {
             .await?
             .ok_or(DomainError::ProcessNotFound)?;
 
-        if process.status != LifecycleStatus::Active {
+        // Active and Deprecated processes are both valid link targets: a
+        // deprecated process remains usable during its compatibility window.
+        // Only archived processes become invalid references.
+        if !matches!(process.status, LifecycleStatus::Active | LifecycleStatus::Deprecated) {
             return Err(DomainError::CannotReferenceArchived);
         }
 

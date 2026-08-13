@@ -1,14 +1,45 @@
-import { useMutation } from '@apollo/client/react'
+import { useMutation, useQuery } from '@apollo/client/react'
 import { gql } from '@apollo/client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { Badge } from '@/components/ui/badge'
 import { Loader2 } from 'lucide-react'
 import { GET_VALUE_STREAM_DETAIL } from './value-stream-detail'
 import { KeyValueField, serializeKeyValues, parseKeyValues } from './key-value-field'
+
+export const GET_STAGE_CAPABILITIES = gql`
+  query GetStageCapabilities($stageId: String!) {
+    capabilitiesByStage(stageId: $stageId) {
+      id name status
+    }
+  }
+`
+
+const GET_CAPABILITIES_BY_SPACE = gql`
+  query GetCapabilitiesForStage($spaceId: String!) {
+    businessCapabilitiesBySpace(spaceId: $spaceId) {
+      id name status
+    }
+  }
+`
+
+const STAGE_CAPABILITY_CREATE = gql`
+  mutation StageCapabilityCreate($stageId: String!, $capabilityId: String!) {
+    stageCapabilityCreate(stageId: $stageId, capabilityId: $capabilityId) {
+      stageId capabilityId
+    }
+  }
+`
+
+const STAGE_CAPABILITY_DELETE = gql`
+  mutation StageCapabilityDelete($stageId: String!, $capabilityId: String!) {
+    stageCapabilityDelete(stageId: $stageId, capabilityId: $capabilityId)
+  }
+`
 
 export interface ValueStreamStage {
   id: string
@@ -257,5 +288,143 @@ export function StageDeleteDialog({ stage, onConfirm, spaceId, valueStreamId }: 
       error={error}
       onConfirm={handleDelete}
     />
+  )
+}
+
+export function StageCapabilitiesCell({ stageId }: { stageId: string }) {
+  const { data, loading } = useQuery<{ capabilitiesByStage?: { id: string; name: string; status: string }[] }>(
+    GET_STAGE_CAPABILITIES,
+    { variables: { stageId } },
+  )
+  if (loading) return <span className="text-xs text-muted-foreground">加载中...</span>
+  const caps = data?.capabilitiesByStage ?? []
+  if (caps.length === 0) return <span>-</span>
+  return (
+    <div className="flex flex-wrap gap-1">
+      {caps.map(c => (
+        <Badge key={c.id} variant="outline" className="gap-1">
+          {c.name}
+          <span className="text-[10px] text-muted-foreground">{c.status}</span>
+        </Badge>
+      ))}
+    </div>
+  )
+}
+
+export function StageCapabilityDialog({ stage, spaceId, open, onOpenChange }: {
+  stage: ValueStreamStage | null
+  spaceId: string
+  open: boolean
+  onOpenChange: (v: boolean) => void
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const initializedRef = useRef(false)
+  const [createMut] = useMutation(STAGE_CAPABILITY_CREATE)
+  const [deleteMut] = useMutation(STAGE_CAPABILITY_DELETE)
+  const { data: candidatesData, loading: candidatesLoading } = useQuery<{ businessCapabilitiesBySpace?: { id: string; name: string; status: string }[] }>(
+    GET_CAPABILITIES_BY_SPACE,
+    // Fetch only while the dialog is open so newly created capabilities are
+    // picked up instead of serving a stale cache written on page load.
+    { variables: { spaceId }, skip: !open || !spaceId },
+  )
+  const { data: linkedData, loading: linkedLoading } = useQuery<{ capabilitiesByStage?: { id: string; name: string; status: string }[] }>(
+    GET_STAGE_CAPABILITIES,
+    { variables: { stageId: stage?.id }, skip: !stage?.id },
+  )
+
+  useEffect(() => {
+    if (open && stage) {
+      initializedRef.current = false
+      setError(null)
+      setLoading(false)
+    }
+  }, [open, stage])
+
+  useEffect(() => {
+    if (open && stage && !initializedRef.current && linkedData) {
+      setSelected(new Set((linkedData.capabilitiesByStage ?? []).map(c => c.id)))
+      initializedRef.current = true
+    }
+  }, [open, stage, linkedData])
+
+  function toggle(capId: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(capId)) next.delete(capId)
+      else next.add(capId)
+      return next
+    })
+  }
+
+  async function handleSave() {
+    if (!stage) return
+    setLoading(true); setError(null)
+    const linkedIds = new Set((linkedData?.capabilitiesByStage ?? []).map(c => c.id))
+    const toAdd = [...selected].filter(id => !linkedIds.has(id))
+    const toRemove = [...linkedIds].filter(id => !selected.has(id))
+    // Refetch the stage-capability list so the detail table and the dialog's
+    // own linked list stay in sync after the mutations.
+    const refetchQueries = [{ query: GET_STAGE_CAPABILITIES, variables: { stageId: stage.id } }]
+    try {
+      for (const capId of toAdd) {
+        await createMut({ variables: { stageId: stage.id, capabilityId: capId }, refetchQueries })
+      }
+      for (const capId of toRemove) {
+        await deleteMut({ variables: { stageId: stage.id, capabilityId: capId }, refetchQueries })
+      }
+      onOpenChange(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const candidates = candidatesData?.businessCapabilitiesBySpace ?? []
+  const linked = linkedData?.capabilitiesByStage ?? []
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>关联能力 - {stage?.name}</DialogTitle></DialogHeader>
+        <div className="space-y-4 py-4">
+          {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
+          {candidatesLoading || linkedLoading ? (
+            <div className="text-center py-6 text-muted-foreground">加载中...</div>
+          ) : candidates.length === 0 ? (
+            <div className="text-center py-6 text-muted-foreground">暂无可关联的能力</div>
+          ) : (
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {candidates.map(c => {
+                const checked = selected.has(c.id)
+                return (
+                  <label key={c.id} className="flex items-center gap-3 rounded-md border px-3 py-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(c.id)}
+                      className="h-4 w-4 rounded border-input"
+                    />
+                    <span className="flex-1 text-sm">{c.name}</span>
+                    <Badge variant="outline">{c.status}</Badge>
+                  </label>
+                )
+              })}
+            </div>
+          )}
+          {linked.length > 0 && (
+            <p className="text-xs text-muted-foreground">已关联 {linked.length} 个能力，取消勾选即可移除。</p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+          <Button onClick={handleSave} disabled={loading || candidatesLoading || linkedLoading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : '保存'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

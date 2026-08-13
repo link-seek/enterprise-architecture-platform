@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use shared_common::enums::{AutomationLevel, LifecycleStatus, MaturityLevel};
+use shared_common::value_objects::StringVec;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
@@ -14,6 +15,8 @@ pub struct Model {
     pub status: LifecycleStatus,
     pub name: String,
     pub description: String,
+    pub inputs: StringVec,
+    pub outputs: StringVec,
     pub sla: Option<String>,
     pub cost_per_transaction: Option<f64>,
     pub cycle_time: Option<i64>,
