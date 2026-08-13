@@ -26,7 +26,7 @@ export default function SpaceDetail() {
   const { spaceId } = useParams<{ spaceId: string }>()
   const navigate = useNavigate()
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
-  const { canEdit, role } = useSpaceMembership(spaceId)
+  const { canEdit, canManage, role } = useSpaceMembership(spaceId)
   const isMobile = useIsMobile()
   const [editOpen, setEditOpen] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
@@ -79,10 +79,10 @@ export default function SpaceDetail() {
 
   const visibleActions = useMemo(() => [
     { icon: Pencil, label: '编辑', onClick: handleEdit, visible: canEdit },
-    { icon: Users, label: '成员', onClick: handleMembers, visible: role === 'owner' },
-    { icon: space?.visibility === 'public' ? EyeOff : Eye, label: space?.visibility === 'public' ? '设为私有' : '设为公开', onClick: handleVisibility, visible: role === 'owner' },
-    { icon: Archive, label: '归档', onClick: handleArchive, visible: role === 'owner' },
-  ].filter((a) => a.visible), [canEdit, role, handleEdit, handleMembers, handleArchive, handleVisibility, space?.visibility])
+    { icon: Users, label: '成员', onClick: handleMembers, visible: canManage },
+    { icon: space?.visibility === 'public' ? EyeOff : Eye, label: space?.visibility === 'public' ? '设为私有' : '设为公开', onClick: handleVisibility, visible: canManage },
+    { icon: Archive, label: '归档', onClick: handleArchive, visible: canManage },
+  ].filter((a) => a.visible), [canEdit, canManage, handleEdit, handleMembers, handleArchive, handleVisibility, space?.visibility])
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">加载中...</div>
   if (error) return <div className="min-h-screen flex items-center justify-center text-destructive">加载失败: {error.message}</div>

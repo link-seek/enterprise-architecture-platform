@@ -34,11 +34,13 @@ export function useSpaceMembership(spaceId: string | undefined) {
   const role = data?.myMembership?.role ?? null
   const isAdmin = user?.role === 'admin'
   // Platform admins bypass space membership checks on the backend
-  // (ensure_can_edit returns Ok for admins), so the frontend must match:
-  // an admin can edit any space even without an explicit membership record.
+  // (ensure_can_edit / ensure_can_manage return Ok for admins), so the
+  // frontend must match: an admin can edit and manage any space even without
+  // an explicit membership record.
   const canEdit = isAdmin || role === 'owner' || role === 'editor'
+  const canManage = isAdmin || role === 'owner'
   const isEntityOwner = (ownerId?: string | null) =>
     isAdmin || (canEdit && user?.id != null && ownerId === user.id)
 
-  return { role, canEdit, loading, user, isEntityOwner }
+  return { role, canEdit, canManage, loading, user, isEntityOwner }
 }

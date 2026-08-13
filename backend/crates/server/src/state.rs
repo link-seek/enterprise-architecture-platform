@@ -237,17 +237,29 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
     }
 
     // Find an admin user to make the space owner (best-effort; if none, the
-    // space simply has no owner until one is assigned). UserRole::Admin is
-    // stored as 'admin' (snake_case string_value in enums.rs), so the filter
-    // must use lowercase to match.
-    let admin_id = IdRow::find_by_statement(sea_orm::Statement::from_sql_and_values(
-        db.get_database_backend(),
-        r#"SELECT "id" FROM "users" WHERE "role" = 'admin' ORDER BY "created_at" ASC LIMIT 1"#,
-        [],
-    ))
-    .one(db)
-    .await?
-    .map(|r| r.id);
+    // space simply has no owner until one is assigned). Prefer the explicitly
+    // configured seed admin (APP_SEED_ADMIN_EMAIL) so the account the E2E
+    // smoke tests log in with is deterministically the owner even when
+    // multiple admin users exist; fall back to the oldest `role = 'admin'`
+    // user for environments without a configured seed. UserRole::Admin is
+    // stored as 'admin' (snake_case string_value in enums.rs), so the SQL
+    // filter must use lowercase to match.
+    let configured_admin = std::env::var("APP_SEED_ADMIN_EMAIL").ok();
+    let repo = SeaOrmUserRepo::new(db.clone());
+    let mut admin_id = match configured_admin {
+        Some(email) => repo.find_by_email(&email).await?.map(|u| u.id),
+        None => None,
+    };
+    if admin_id.is_none() {
+        admin_id = IdRow::find_by_statement(sea_orm::Statement::from_sql_and_values(
+            db.get_database_backend(),
+            r#"SELECT "id" FROM "users" WHERE "role" = 'admin' ORDER BY "created_at" ASC LIMIT 1"#,
+            [],
+        ))
+        .one(db)
+        .await?
+        .map(|r| r.id);
+    }
 
     if let Some(admin_id) = admin_id {
         upsert_space_member(db, &test_space_id, admin_id, "owner").await?;
