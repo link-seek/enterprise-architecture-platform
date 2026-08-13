@@ -29,3 +29,42 @@ jobs:
     with:
       ref: ''
     secrets: inherit
+
+  create-e2e-issue:
+    needs: e2e-test
+    runs-on: ubuntu-latest
+    if: always() && needs.e2e-test.result == 'failure'
+    steps:
+      - name: Create E2E failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          SHORT_SHA="${SHA:0:12}"
+          # Check if issue already exists for this SHA
+          EXISTING=$(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&labels=deploy-broken" \
+            --jq ".[] | select(.title | contains(\"$SHORT_SHA\")) | .number" 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ]; then
+            echo "Issue #$EXISTING already exists for SHA $SHORT_SHA"
+            exit 0
+          fi
+          # Download E2E logs for error details
+          gh api repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/logs > /tmp/logs.zip 2>/dev/null || true
+          mkdir -p /tmp/logs && cd /tmp/logs && unzip -o /tmp/logs.zip 2>/dev/null || true
+          E2E_ERRORS=$(grep -rhi "failed\|error\|Error\|timeout" ./*.txt 2>/dev/null | tail -30 || echo "No logs found")
+          # Create issue
+          gh api repos/$GITHUB_REPOSITORY/issues \
+            -f title="deploy-broken: E2E test failed (SHA $SHORT_SHA)" \
+            --raw-field body="## E2E Test Failed
+
+          **Commit**: \\`$SHA\\`
+          **Run**: https://github.com/$GITHUB_REPOSITORY/actions/runs/$RUN_ID
+
+          ### Error details
+          \\`\\`\\`
+          $E2E_ERRORS
+          \\`\\`\\`
+          " \
+            -f "labels[]=deploy-broken" \
+            -f "labels[]=fix-me"
