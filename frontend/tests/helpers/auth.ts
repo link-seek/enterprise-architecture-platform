@@ -60,11 +60,12 @@ export async function loginAs(page: Page, email: string, password: string) {
 }
 
 /**
- * Logout via the UI.
+ * Logout via the UI. Architecture pages are public read, so the page stays
+ * put and the sidebar switches to the logged-out state (登录 link appears).
  */
 export async function logout(page: Page) {
   await page.getByText('退出登录').click();
-  await expect(page).toHaveURL('/login', { timeout: 5000 });
+  await expect(page.getByRole('link', { name: '登录' })).toBeVisible({ timeout: 5000 });
 }
 
 /**

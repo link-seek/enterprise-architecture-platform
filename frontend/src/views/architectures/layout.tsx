@@ -31,6 +31,7 @@ import { useIsMobile } from '@/hooks/use-media-query'
 function SidebarContent({ onNavigate, spaceName, spaceId }: { onNavigate?: () => void; spaceName: string; spaceId?: string }) {
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const { canEdit } = useSpaceMembership(spaceId)
 
   const base = spaceId ? `/spaces/${spaceId}/architectures` : '/architectures'
@@ -121,15 +122,29 @@ function SidebarContent({ onNavigate, spaceName, spaceId }: { onNavigate?: () =>
             <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full justify-start gap-2 text-muted-foreground"
-          onClick={async () => { try { await logout() } finally { onNavigate?.() } }}
-        >
-          <LogOut className="h-4 w-4" />
-          退出登录
-        </Button>
+        {isAuthenticated ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 text-muted-foreground"
+            onClick={async () => { try { await logout() } finally { onNavigate?.() } }}
+          >
+            <LogOut className="h-4 w-4" />
+            退出登录
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 text-muted-foreground"
+            asChild
+          >
+            <Link to="/login" onClick={onNavigate}>
+              <LogOut className="h-4 w-4" />
+              登录
+            </Link>
+          </Button>
+        )}
       </div>
     </div>
   )
