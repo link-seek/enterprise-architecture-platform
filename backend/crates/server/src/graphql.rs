@@ -20,9 +20,12 @@ use business_architecture::application::value_stream_service::ValueStreamService
 use business_architecture::application::space_service::SpaceService;
 use business_architecture::domain::value_stream::entity::ValueStream as DomainValueStream;
 use business_architecture::domain::value_stream::repository::ValueStreamRepository;
+use business_architecture::domain::process::entity::BusinessProcess as DomainBusinessProcess;
+use business_architecture::domain::process::repository::ProcessRepository;
 use business_architecture::domain::space::entity::{Space as DomainSpace, SpaceMember as DomainSpaceMember};
 use business_architecture::domain::error::DomainError;
 use business_architecture::infrastructure::persistence::value_stream_repo::SeaOrmValueStreamRepo;
+use business_architecture::infrastructure::persistence::process_repo::SeaOrmProcessRepo;
 use business_architecture::infrastructure::persistence::space_repo::{SeaOrmSpaceRepo, SeaOrmMembershipRepo};
 use business_architecture::infrastructure::persistence::space_audit_repo::SeaOrmAuditLogRepo;
 use shared_common::enums::ValueStreamImportance;
@@ -438,6 +441,50 @@ where
 /// seaography's field resolvers can downcast and resolve all fields.
 fn domain_vs_to_model(vs: &DomainValueStream) -> value_stream::Model {
     vs.into()
+}
+
+/// Convert a domain BusinessProcess back to a SeaORM Model so that
+/// seaography's field resolvers can downcast and resolve all fields.
+fn domain_process_to_model(p: &DomainBusinessProcess) -> business_process::Model {
+    p.into()
+}
+
+// ============================================================================
+// Capability↔Process version-anchoring result types
+// ============================================================================
+
+/// One capability↔process link enriched with the process name, business
+/// version, lifecycle status and derived validity (`valid = status ∈
+/// {active, deprecated}`). Used by the `capabilityProcessRelations` query.
+#[derive(Clone, Debug)]
+struct CapabilityProcessRelation {
+    capability_id: String,
+    process_id: String,
+    logical_id: String,
+    process_name: String,
+    business_version: String,
+    status: String,
+    valid: bool,
+}
+
+/// A capability that referenced the old process version before a publish.
+#[derive(Clone, Debug)]
+struct AffectedProcessLinkOutput {
+    capability_id: String,
+    capability_name: String,
+    old_version: String,
+    new_version: String,
+}
+
+/// Result of the `processPublishVersion` mutation: the newly created active
+/// version plus the capability links that now point at the deprecated old
+/// version.
+#[derive(Clone, Debug)]
+struct ProcessPublishVersionOutput {
+    id: String,
+    business_version: String,
+    status: String,
+    affected_links: Vec<AffectedProcessLinkOutput>,
 }
 
 // ============================================================================
@@ -1343,6 +1390,8 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                 let space_id = parse_uuid_arg(&ctx, "spaceId")?;
                 let name = ctx.args.try_get("name")?.string()?.to_owned();
                 let description = ctx.args.get("description").and_then(|v| v.string().ok()).map(|s| s.to_owned()).unwrap_or_default();
+                let inputs = parse_string_vec_arg(&ctx, "inputs")?;
+                let outputs = parse_string_vec_arg(&ctx, "outputs")?;
                 let sla = ctx.args.get("sla").and_then(|v| v.string().ok()).map(|s| s.to_owned());
                 let cycle_time: Option<i64> = ctx.args.get("cycleTime").and_then(|v| v.i64().ok());
                 let cost_per_transaction: Option<f64> = ctx.args.get("costPerTransaction").and_then(|v| v.f64().ok());
@@ -1365,10 +1414,14 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                 let am = business_process::ActiveModel {
                     id: Set(Uuid::now_v7()),
                     logical_id: Set(Uuid::now_v7()),
-                    business_version: Set("v1.0".to_owned()),
+                    // Strict semver ("1.0.0"): `publish_new_version` bumps the
+                    // minor component with semver, which rejects a leading 'v'.
+                    business_version: Set("1.0.0".to_owned()),
                     status: Set(LifecycleStatus::Active),
                     name: Set(name),
                     description: Set(description),
+                    inputs: Set(inputs),
+                    outputs: Set(outputs),
                     sla: Set(sla),
                     cost_per_transaction: Set(cost_per_transaction),
                     cycle_time: Set(cycle_time),
@@ -1393,6 +1446,8 @@ fn register_process_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("inputs", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("outputs", TypeRef::named_list(TypeRef::STRING)))
     .argument(InputValue::new("sla", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("cycleTime", TypeRef::named(TypeRef::INT)))
     .argument(InputValue::new("costPerTransaction", TypeRef::named(TypeRef::FLOAT)))
@@ -1425,6 +1480,12 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                 if let Some(v) = ctx.args.get("description").and_then(|v| v.string().ok()) {
                     am.description = Set(v.to_owned());
                 }
+                if ctx.args.get("inputs").is_some() {
+                    am.inputs = Set(parse_string_vec_arg(&ctx, "inputs")?);
+                }
+                if ctx.args.get("outputs").is_some() {
+                    am.outputs = Set(parse_string_vec_arg(&ctx, "outputs")?);
+                }
                 if let Some(v) = ctx.args.get("sla").and_then(|v| v.string().ok()) {
                     am.sla = Set(Some(v.to_owned()));
                 }
@@ -1452,6 +1513,8 @@ fn register_process_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("inputs", TypeRef::named_list(TypeRef::STRING)))
+    .argument(InputValue::new("outputs", TypeRef::named_list(TypeRef::STRING)))
     .argument(InputValue::new("sla", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("cycleTime", TypeRef::named(TypeRef::INT)))
     .argument(InputValue::new("costPerTransaction", TypeRef::named(TypeRef::FLOAT)))
@@ -1522,6 +1585,88 @@ fn register_process_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("newOwnerId", TypeRef::named_nn(TypeRef::STRING)));
     builder.mutations.push(transfer);
+
+    // ── processPublishVersion ─────────────────────────────────────────
+    // Publish a new minor version of the active process identified by
+    // logicalId. The old active row becomes Deprecated (compatibility window)
+    // and the result lists the capability links now pointing at the old
+    // version so the UI can warn about version anchoring.
+    let publish = Field::new(
+        "processPublishVersion",
+        TypeRef::named_nn("ProcessPublishVersionResult"),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Create)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let logical_id = parse_uuid_arg(&ctx, "logicalId")?;
+
+                let repo = SeaOrmProcessRepo::new(db.clone());
+                // Enforce space-level ACL + entity ownership before publishing.
+                let active = repo
+                    .find_active_by_logical_id(logical_id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("No active process found for this logicalId."))?;
+                ensure_space_edit_access(&ctx, db, active.space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, active.owner_id).await?;
+
+                let result = repo
+                    .publish_new_version(logical_id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                let model = domain_process_to_model(&result.new_process);
+                Ok(Some(FieldValue::owned_any(ProcessPublishVersionOutput {
+                    id: model.id.to_string(),
+                    business_version: model.business_version,
+                    status: format!("{:?}", model.status).to_lowercase(),
+                    affected_links: result
+                        .affected_links
+                        .into_iter()
+                        .map(|l| AffectedProcessLinkOutput {
+                            capability_id: l.capability_id.to_string(),
+                            capability_name: l.capability_name,
+                            old_version: l.old_version,
+                            new_version: l.new_version,
+                        })
+                        .collect(),
+                })))
+            })
+        },
+    )
+    .argument(InputValue::new("logicalId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(publish);
+
+    // ── processArchive ────────────────────────────────────────────────
+    // Only `Deprecated → Archived` is allowed: the Deprecated compatibility
+    // window cannot be skipped by archiving an Active process directly.
+    let archive = Field::new(
+        "processArchive",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Update)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let existing = business_process::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Process not found."))?;
+                ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
+
+                let repo = SeaOrmProcessRepo::new(db.clone());
+                repo.archive(id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(archive);
 }
 // ============================================================================
 // Custom Sub-Entity Domain Mutations (space-level ACL enforced)
@@ -2313,10 +2458,20 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                     stage_id: Set(stage_id),
                     capability_id: Set(capability_id),
                 };
-                let model = am
-                    .insert(db)
+                // Idempotent: re-submitting an existing link is a no-op
+                // instead of a duplicate-key error (matches the repo-level
+                // `link_stage_capability` semantics).
+                let model = match stage_capability::Entity::find_by_id((stage_id, capability_id))
+                    .one(db)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                {
+                    Some(m) => m,
+                    None => am
+                        .insert(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?,
+                };
                 Ok(Some(FieldValue::owned_any(model)))
             })
         },
@@ -3563,6 +3718,114 @@ fn register_space_scoped_queries(builder: &mut Builder) {
         }));
     builder.outputs.push(member_with_user_type);
 
+    // ── CapabilityProcessRelation output type ─────────────────────────
+    let cap_proc_relation_type = Object::new("CapabilityProcessRelation")
+        .field(Field::new("capabilityId", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<CapabilityProcessRelation>()?;
+                Ok(Some(FieldValue::value(v.capability_id.clone())))
+            })
+        }))
+        .field(Field::new("processId", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<CapabilityProcessRelation>()?;
+                Ok(Some(FieldValue::value(v.process_id.clone())))
+            })
+        }))
+        .field(Field::new("logicalId", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<CapabilityProcessRelation>()?;
+                Ok(Some(FieldValue::value(v.logical_id.clone())))
+            })
+        }))
+        .field(Field::new("processName", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<CapabilityProcessRelation>()?;
+                Ok(Some(FieldValue::value(v.process_name.clone())))
+            })
+        }))
+        .field(Field::new("businessVersion", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<CapabilityProcessRelation>()?;
+                Ok(Some(FieldValue::value(v.business_version.clone())))
+            })
+        }))
+        .field(Field::new("status", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<CapabilityProcessRelation>()?;
+                Ok(Some(FieldValue::value(v.status.clone())))
+            })
+        }))
+        .field(Field::new("valid", TypeRef::named_nn(TypeRef::BOOLEAN), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<CapabilityProcessRelation>()?;
+                Ok(Some(FieldValue::value(v.valid)))
+            })
+        }));
+    builder.outputs.push(cap_proc_relation_type);
+
+    // ── AffectedProcessLink output type ───────────────────────────────
+    let affected_link_type = Object::new("AffectedProcessLink")
+        .field(Field::new("capabilityId", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<AffectedProcessLinkOutput>()?;
+                Ok(Some(FieldValue::value(v.capability_id.clone())))
+            })
+        }))
+        .field(Field::new("capabilityName", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<AffectedProcessLinkOutput>()?;
+                Ok(Some(FieldValue::value(v.capability_name.clone())))
+            })
+        }))
+        .field(Field::new("oldVersion", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<AffectedProcessLinkOutput>()?;
+                Ok(Some(FieldValue::value(v.old_version.clone())))
+            })
+        }))
+        .field(Field::new("newVersion", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<AffectedProcessLinkOutput>()?;
+                Ok(Some(FieldValue::value(v.new_version.clone())))
+            })
+        }));
+    builder.outputs.push(affected_link_type);
+
+    // ── ProcessPublishVersionResult output type ───────────────────────
+    let publish_result_type = Object::new("ProcessPublishVersionResult")
+        .field(Field::new("id", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<ProcessPublishVersionOutput>()?;
+                Ok(Some(FieldValue::value(v.id.clone())))
+            })
+        }))
+        .field(Field::new("businessVersion", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<ProcessPublishVersionOutput>()?;
+                Ok(Some(FieldValue::value(v.business_version.clone())))
+            })
+        }))
+        .field(Field::new("status", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<ProcessPublishVersionOutput>()?;
+                Ok(Some(FieldValue::value(v.status.clone())))
+            })
+        }))
+        .field(Field::new("affectedLinks", TypeRef::named_nn_list_nn("AffectedProcessLink"), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<ProcessPublishVersionOutput>()?;
+                let values: Vec<FieldValue> = v
+                    .affected_links
+                    .iter()
+                    .cloned()
+                    .map(FieldValue::owned_any)
+                    .collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        }));
+    builder.outputs.push(publish_result_type);
+
     // ── myMembership ──────────────────────────────────────────────────
     // Returns the caller's own role in a space (or null for non-members).
     // Unlike the admin-gated auto-generated `spaceMembers` query, this is
@@ -4086,6 +4349,71 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)));
     builder.queries.push(cp_by_cap);
 
+    // capabilityProcessRelations
+    // Version-anchored view of a capability's process links: enriches each raw
+    // join row with the process name, business version, lifecycle status and
+    // derived validity (`valid = status ∈ {active, deprecated}`). Lets the UI
+    // warn when a process publish left a link pointing at a deprecated row.
+    let cp_relations = Field::new(
+        "capabilityProcessRelations",
+        TypeRef::named_nn_list_nn("CapabilityProcessRelation"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let cap_id = parse_uuid_arg(&ctx, "capabilityId")?;
+                let space_id = space_of_capability(db, cap_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let links = capability_process::Entity::find()
+                    .filter(capability_process::Column::CapabilityId.eq(cap_id))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let process_ids: Vec<Uuid> = links.iter().map(|l| l.process_id).collect();
+                let processes = if process_ids.is_empty() {
+                    Vec::new()
+                } else {
+                    business_process::Entity::find()
+                        .filter(business_process::Column::Id.is_in(process_ids.clone()))
+                        .all(db)
+                        .await
+                        .map_err(db_err_to_graphql)?
+                };
+                let mut relations: Vec<CapabilityProcessRelation> = processes
+                    .iter()
+                    .map(|p| CapabilityProcessRelation {
+                        capability_id: cap_id.to_string(),
+                        process_id: p.id.to_string(),
+                        logical_id: p.logical_id.to_string(),
+                        process_name: p.name.clone(),
+                        business_version: p.business_version.clone(),
+                        status: format!("{:?}", p.status).to_lowercase(),
+                        valid: matches!(
+                            p.status,
+                            LifecycleStatus::Active | LifecycleStatus::Deprecated
+                        ),
+                    })
+                    .collect();
+                // Preserve the join-row order.
+                relations.sort_by_key(|r| {
+                    process_ids
+                        .iter()
+                        .position(|id| id.to_string() == r.process_id)
+                        .unwrap_or(0)
+                });
+                let values: Vec<FieldValue> =
+                    relations.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("capabilityId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(cp_relations);
+
     // stageCapabilitiesByStage
     let sc_by_stage = Field::new(
         "stageCapabilitiesByStage",
@@ -4114,6 +4442,90 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     )
     .argument(InputValue::new("stageId", TypeRef::named_nn(TypeRef::STRING)));
     builder.queries.push(sc_by_stage);
+
+    // capabilitiesByStage
+    // Resolves a stage's linked capabilities directly as `BusinessCapabilities`
+    // entities (id/name/status via the seaography object type) instead of raw
+    // `StageCapabilities` join rows. Used by the value-stream stage detail UI.
+    let caps_by_stage = Field::new(
+        "capabilitiesByStage",
+        TypeRef::named_nn_list_nn("BusinessCapabilities"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let stage_id = parse_uuid_arg(&ctx, "stageId")?;
+                let space_id = space_of_stage(db, stage_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let links = stage_capability::Entity::find()
+                    .filter(stage_capability::Column::StageId.eq(stage_id))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let cap_ids: Vec<Uuid> = links.iter().map(|l| l.capability_id).collect();
+                let rows = if cap_ids.is_empty() {
+                    Vec::new()
+                } else {
+                    business_capability::Entity::find()
+                        .filter(business_capability::Column::Id.is_in(cap_ids))
+                        .all(db)
+                        .await
+                        .map_err(db_err_to_graphql)?
+                };
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("stageId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(caps_by_stage);
+
+    // capabilitiesByProcess
+    // Lists the capabilities currently linked to a process. Used by the
+    // publish-version confirmation dialog to show which capabilities would be
+    // affected (their links would point at the soon-deprecated old version).
+    let caps_by_process = Field::new(
+        "capabilitiesByProcess",
+        TypeRef::named_nn_list_nn("BusinessCapabilities"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let process_id = parse_uuid_arg(&ctx, "processId")?;
+                let space_id = space_of_process(db, process_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let links = capability_process::Entity::find()
+                    .filter(capability_process::Column::ProcessId.eq(process_id))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let cap_ids: Vec<Uuid> = links.iter().map(|l| l.capability_id).collect();
+                let rows = if cap_ids.is_empty() {
+                    Vec::new()
+                } else {
+                    business_capability::Entity::find()
+                        .filter(business_capability::Column::Id.is_in(cap_ids))
+                        .all(db)
+                        .await
+                        .map_err(db_err_to_graphql)?
+                };
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("processId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(caps_by_process);
 
     // ── Application-architecture by-space / by-parent queries ─────────
     // Non-admin reads of the new P2/P3 entities go through these queries,

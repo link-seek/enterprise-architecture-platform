@@ -368,4 +368,32 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     // Verify removal
     await expect(page.getByText('更新后的CRUD流程')).not.toBeVisible({ timeout: 10000 });
   });
+
+  test('流程表单支持输入/输出字段', { tag: '@regression' }, async ({ page }) => {
+    // R2：新建流程时填写「输入/输出」（换行分隔）
+    await page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    const name = `E2E流程_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
+    await page.getByRole('textbox', { name: /输入|Input/ }).fill('需求\nIssue');
+    await page.getByRole('textbox', { name: /输出|Output/ }).fill('ADR');
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
+    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 15000 });
+
+    // 列表展示输入/输出 Badge
+    const row = page.locator('tr').filter({ hasText: name });
+    await expect(row).toBeVisible({ timeout: 15000 });
+    await expect(row.getByText('ADR', { exact: true })).toBeVisible();
+    await expect(row.getByText('Issue', { exact: true })).toBeVisible();
+
+    // 编辑对话框回填输入/输出
+    await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-pencil"]') }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    const inputField = page.getByRole('textbox', { name: /输入|Input/ });
+    await expect(inputField).toHaveValue('需求\nIssue');
+    await expect(page.getByRole('textbox', { name: /输出|Output/ })).toHaveValue('ADR');
+    await page.getByRole('button', { name: /取消|Cancel/ }).or(page.locator('button[aria-label="Close"]')).click();
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+  });
 });

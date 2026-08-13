@@ -58,6 +58,7 @@ mod m20250101_000055_create_module_containments;
 mod m20250101_000056_create_interface_exposures;
 mod m20250101_000057_create_process_references;
 mod m20250101_000058_create_orchestrations;
+mod m20250101_000059_add_process_inputs_outputs;
 
 pub struct Migrator;
 
@@ -123,6 +124,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000056_create_interface_exposures::Migration),
             Box::new(m20250101_000057_create_process_references::Migration),
             Box::new(m20250101_000058_create_orchestrations::Migration),
+            Box::new(m20250101_000059_add_process_inputs_outputs::Migration),
         ]
     }
 }

@@ -90,6 +90,12 @@ pub enum LifecycleStatus {
     #[sea_orm(string_value = "active")]
     #[serde(rename = "active")]
     Active,
+    /// Compatibility window: still valid for dependencies, pending manual
+    /// archival. Introduced by the v2.1 lifecycle state machine
+    /// `Active → Deprecated → Archived` for business processes.
+    #[sea_orm(string_value = "deprecated")]
+    #[serde(rename = "deprecated")]
+    Deprecated,
     #[sea_orm(string_value = "archived")]
     #[serde(rename = "archived")]
     Archived,

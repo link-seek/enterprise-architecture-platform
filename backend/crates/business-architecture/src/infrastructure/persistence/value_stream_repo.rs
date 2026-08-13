@@ -4,6 +4,7 @@ use sea_orm::{
     Set, QueryOrder, TransactionTrait,
 };
 use shared_common::enums::LifecycleStatus;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::domain::error::DomainError;
@@ -365,6 +366,57 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
                     stage.id
                 ))
             })?;
+        }
+
+        // 4. Copy `stage_capabilities` associations from the old stages to the
+        //    corresponding new stages (matched by sequence_order). Without this
+        //    the new version's stages would have no capability links while the
+        //    old links remain attached to the just-archived stage rows.
+        let old_stages = value_stream_stage::Entity::find()
+            .filter(value_stream_stage::Column::ValueStreamId.eq(current.id))
+            .all(&txn)
+            .await
+            .map_err(|e| {
+                DomainError::Database(format!(
+                    "save_version_atomic: list old stages of {}: {e}",
+                    current.id
+                ))
+            })?;
+        let old_stage_id_by_seq: HashMap<i32, Uuid> = old_stages
+            .iter()
+            .map(|s| (s.sequence_order, s.id))
+            .collect();
+        for stage in new_stages {
+            let Some(old_stage_id) = old_stage_id_by_seq.get(&stage.sequence_order) else {
+                continue;
+            };
+            let links = stage_capability::Entity::find()
+                .filter(stage_capability::Column::StageId.eq(*old_stage_id))
+                .all(&txn)
+                .await
+                .map_err(|e| {
+                    DomainError::Database(format!(
+                        "save_version_atomic: list stage_capabilities of stage {old_stage_id}: {e}"
+                    ))
+                })?;
+            for link in links {
+                let active = stage_capability::ActiveModel {
+                    stage_id: Set(stage.id),
+                    capability_id: Set(link.capability_id),
+                };
+                stage_capability::Entity::insert(active)
+                    .on_conflict(sea_orm::sea_query::OnConflict::new().do_nothing().to_owned())
+                    .exec(&txn)
+                    .await
+                    .map_err(|e| {
+                        DomainError::Database(format!(
+                            "save_version_atomic: copy stage_capability ({}, {}) → {}: {e}",
+                            old_stage_id,
+                            link.capability_id,
+                            stage.id
+                        ))
+                    })?;
+            }
         }
 
         txn.commit().await?;

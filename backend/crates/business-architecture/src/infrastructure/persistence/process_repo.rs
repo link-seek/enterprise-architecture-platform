@@ -8,9 +8,11 @@ use uuid::Uuid;
 
 use crate::application::version::bump_minor;
 use crate::domain::error::DomainError;
-use crate::domain::process::entity::{BusinessProcess, ProcessStep};
+use crate::domain::process::entity::{
+    AffectedProcessLink, BusinessProcess, ProcessStep, PublishVersionResult,
+};
 use crate::domain::process::repository::{ProcessRepository, ProcessStepRepository};
-use crate::infrastructure::persistence::entities::{business_process, process_step};
+use crate::infrastructure::persistence::entities::{business_capability, business_process, capability_process, process_step};
 
 impl From<business_process::Model> for BusinessProcess {
     fn from(m: business_process::Model) -> Self {
@@ -21,6 +23,8 @@ impl From<business_process::Model> for BusinessProcess {
             status: m.status,
             name: m.name,
             description: m.description,
+            inputs: m.inputs,
+            outputs: m.outputs,
             sla: m.sla,
             cost_per_transaction: m.cost_per_transaction,
             cycle_time: m.cycle_time,
@@ -33,6 +37,33 @@ impl From<business_process::Model> for BusinessProcess {
             updated_at: m.updated_at,
             deleted_at: m.deleted_at,
             space_id: m.space_id,
+        }
+    }
+}
+
+impl From<&BusinessProcess> for business_process::Model {
+    fn from(p: &BusinessProcess) -> Self {
+        business_process::Model {
+            id: p.id,
+            logical_id: p.logical_id,
+            business_version: p.business_version.clone(),
+            status: p.status,
+            name: p.name.clone(),
+            description: p.description.clone(),
+            inputs: p.inputs.clone(),
+            outputs: p.outputs.clone(),
+            sla: p.sla.clone(),
+            cost_per_transaction: p.cost_per_transaction,
+            cycle_time: p.cycle_time,
+            automation_level: p.automation_level,
+            maturity: p.maturity,
+            owner_id: p.owner_id,
+            created_by: p.created_by,
+            updated_by: p.updated_by,
+            created_at: p.created_at,
+            updated_at: p.updated_at,
+            deleted_at: p.deleted_at,
+            space_id: p.space_id,
         }
     }
 }
@@ -130,6 +161,8 @@ impl ProcessRepository for SeaOrmProcessRepo {
             active.status = Set(proc.status);
             active.name = Set(proc.name.clone());
             active.description = Set(proc.description.clone());
+            active.inputs = Set(proc.inputs.clone());
+            active.outputs = Set(proc.outputs.clone());
             active.sla = Set(proc.sla.clone());
             active.cost_per_transaction = Set(proc.cost_per_transaction);
             active.cycle_time = Set(proc.cycle_time);
@@ -147,6 +180,8 @@ impl ProcessRepository for SeaOrmProcessRepo {
                 status: Set(proc.status),
                 name: Set(proc.name.clone()),
                 description: Set(proc.description.clone()),
+                inputs: Set(proc.inputs.clone()),
+                outputs: Set(proc.outputs.clone()),
                 sla: Set(proc.sla.clone()),
                 cost_per_transaction: Set(proc.cost_per_transaction),
                 cycle_time: Set(proc.cycle_time),
@@ -172,8 +207,19 @@ impl ProcessRepository for SeaOrmProcessRepo {
             .await?
             .ok_or(DomainError::ProcessNotFound)?;
 
+        // Enforce the `Deprecated → Archived` edge so the compatibility window
+        // cannot be skipped by archiving an `Active` process directly.
+        if model.status != LifecycleStatus::Deprecated {
+            return Err(DomainError::InvalidTransition {
+                from: format!("{:?}", model.status),
+                to: "Archived".to_string(),
+                entity: "BusinessProcess".to_string(),
+            });
+        }
+
         let mut active: business_process::ActiveModel = model.into();
         active.status = Set(LifecycleStatus::Archived);
+        active.updated_at = Set(chrono::Utc::now());
         active.update(&self.db).await?;
 
         Ok(())
@@ -256,10 +302,19 @@ impl ProcessStepRepository for SeaOrmProcessRepo {
 }
 
 impl SeaOrmProcessRepo {
+    /// Publish a new minor version of the active process identified by
+    /// `logical_id`. The old active version transitions to `Deprecated`
+    /// (compatibility window) instead of being archived immediately; a new
+    /// `Active` row is inserted with the same `logical_id` and `bump_minor`
+    /// version. All of this runs inside a single transaction.
+    ///
+    /// The result also carries the capability links that still reference the
+    /// old (now deprecated) version, so the caller can warn about version
+    /// anchoring before/after the publish.
     pub async fn publish_new_version(
         &self,
         logical_id: Uuid,
-    ) -> Result<BusinessProcess, DomainError> {
+    ) -> Result<PublishVersionResult, DomainError> {
         let txn = self.db.begin().await?;
 
         let old = business_process::Entity::find()
@@ -272,8 +327,43 @@ impl SeaOrmProcessRepo {
 
         let new_version = bump_minor(&old.business_version)?;
 
+        // Collect capability links pointing at the old version row before it is
+        // deprecated (transactions see a consistent snapshot).
+        let links = capability_process::Entity::find()
+            .filter(capability_process::Column::ProcessId.eq(old.id))
+            .all(&txn)
+            .await?;
+        let cap_ids: Vec<Uuid> = links.iter().map(|l| l.capability_id).collect();
+        let cap_names: Vec<(Uuid, String)> = if cap_ids.is_empty() {
+            Vec::new()
+        } else {
+            business_capability::Entity::find()
+                .filter(business_capability::Column::Id.is_in(cap_ids.clone()))
+                .all(&txn)
+                .await?
+                .into_iter()
+                .map(|c| (c.id, c.name))
+                .collect()
+        };
+        let cap_name_by_id: std::collections::HashMap<Uuid, String> =
+            cap_names.into_iter().collect();
+        let affected_links: Vec<AffectedProcessLink> = links
+            .iter()
+            .map(|l| AffectedProcessLink {
+                capability_id: l.capability_id,
+                capability_name: cap_name_by_id
+                    .get(&l.capability_id)
+                    .cloned()
+                    .unwrap_or_default(),
+                old_version: old.business_version.clone(),
+                new_version: new_version.clone(),
+            })
+            .collect();
+
+        // Old active version → Deprecated (compatibility window).
         let mut old_active: business_process::ActiveModel = old.clone().into();
-        old_active.status = Set(LifecycleStatus::Archived);
+        old_active.status = Set(LifecycleStatus::Deprecated);
+        old_active.updated_at = Set(chrono::Utc::now());
         old_active.update(&txn).await?;
 
         let now = chrono::Utc::now();
@@ -285,6 +375,8 @@ impl SeaOrmProcessRepo {
             status: Set(LifecycleStatus::Active),
             name: Set(old.name.clone()),
             description: Set(old.description.clone()),
+            inputs: Set(old.inputs.clone()),
+            outputs: Set(old.outputs.clone()),
             sla: Set(old.sla.clone()),
             cost_per_transaction: Set(old.cost_per_transaction),
             cycle_time: Set(old.cycle_time),
@@ -302,6 +394,9 @@ impl SeaOrmProcessRepo {
 
         txn.commit().await?;
 
-        Ok(new_model.into())
+        Ok(PublishVersionResult {
+            new_process: new_model.into(),
+            affected_links,
+        })
     }
 }

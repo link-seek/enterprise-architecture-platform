@@ -254,6 +254,8 @@ async fn seed_business_architecture(db: &DatabaseConnection) -> anyhow::Result<(
                 status: LifecycleStatus::Active,
                 name: spec.name.into(),
                 description: spec.description.into(),
+                inputs: sv(spec.inputs),
+                outputs: sv(spec.outputs),
                 sla: spec.sla.map(Into::into),
                 cost_per_transaction: None,
                 cycle_time: None,
@@ -323,6 +325,8 @@ struct ProcessSpec {
     id: Uuid,
     name: &'static str,
     description: &'static str,
+    inputs: &'static [&'static str],
+    outputs: &'static [&'static str],
     sla: Option<&'static str>,
     automation: Option<AutomationLevel>,
     maturity: Option<MaturityLevel>,
@@ -356,6 +360,8 @@ fn business_processes() -> [ProcessSpec; 9] {
         ProcessSpec {
             id: bp::REQUIREMENT_INTAKE,
             name: "需求受理",
+            inputs: &["用户需求"],
+            outputs: &["结构化 Issue"],
             description: "接收并结构化用户需求",
             sla: Some("1 工作日"),
             automation: Some(AutomationLevel::SemiAutomated),
@@ -368,6 +374,8 @@ fn business_processes() -> [ProcessSpec; 9] {
         ProcessSpec {
             id: bp::DESIGN_REVIEW,
             name: "设计评审",
+            inputs: &["结构化 Issue"],
+            outputs: &["ADR"],
             description: "评审架构设计方案并产出 ADR",
             sla: Some("2 工作日"),
             automation: Some(AutomationLevel::Manual),
@@ -380,6 +388,8 @@ fn business_processes() -> [ProcessSpec; 9] {
         ProcessSpec {
             id: bp::TASK_ASSIGNMENT,
             name: "任务分配",
+            inputs: &["结构化 Issue"],
+            outputs: &["已分配 Issue"],
             description: "将 Issue 分配给开发人员",
             sla: Some("0.5 工作日"),
             automation: Some(AutomationLevel::FullyAutomated),
@@ -391,6 +401,8 @@ fn business_processes() -> [ProcessSpec; 9] {
         ProcessSpec {
             id: bp::CODE_VERIFICATION,
             name: "代码验证",
+            inputs: &["PR"],
+            outputs: &["lint 报告", "测试报告"],
             description: "PR 合并前的 lint、测试与审查",
             sla: Some("0.5 工作日"),
             automation: Some(AutomationLevel::FullyAutomated),
@@ -403,6 +415,8 @@ fn business_processes() -> [ProcessSpec; 9] {
         ProcessSpec {
             id: bp::AUTO_REMEDIATION,
             name: "自动修复",
+            inputs: &["失败信号"],
+            outputs: &["修复 PR"],
             description: "AI 智能体自动修复失败用例",
             sla: Some("1 工作日"),
             automation: Some(AutomationLevel::FullyAutomated),
@@ -414,6 +428,8 @@ fn business_processes() -> [ProcessSpec; 9] {
         ProcessSpec {
             id: bp::BUILD_RELEASE,
             name: "构建发布",
+            inputs: &["PR"],
+            outputs: &["已发布镜像"],
             description: "构建镜像并推送至仓库",
             sla: Some("0.5 工作日"),
             automation: Some(AutomationLevel::FullyAutomated),
@@ -426,6 +442,8 @@ fn business_processes() -> [ProcessSpec; 9] {
         ProcessSpec {
             id: bp::DEPLOYMENT,
             name: "部署",
+            inputs: &["已发布镜像"],
+            outputs: &["运行实例"],
             description: "将镜像部署至目标环境",
             sla: Some("0.5 工作日"),
             automation: Some(AutomationLevel::FullyAutomated),
@@ -437,6 +455,8 @@ fn business_processes() -> [ProcessSpec; 9] {
         ProcessSpec {
             id: bp::SMOKE_VERIFICATION,
             name: "冒烟验证",
+            inputs: &["运行实例"],
+            outputs: &["冒烟报告"],
             description: "部署后执行冒烟测试",
             sla: Some("0.25 工作日"),
             automation: Some(AutomationLevel::FullyAutomated),
@@ -448,6 +468,8 @@ fn business_processes() -> [ProcessSpec; 9] {
         ProcessSpec {
             id: bp::INCIDENT_RESPONSE,
             name: "故障响应",
+            inputs: &["监控指标"],
+            outputs: &["恢复确认"],
             description: "检测故障并自动恢复",
             sla: Some("0.25 工作日"),
             automation: Some(AutomationLevel::SemiAutomated),

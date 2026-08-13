@@ -5,10 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ArrowLeft, Plus, Pencil, Trash2 } from 'lucide-react'
+import { ArrowLeft, Plus, Pencil, Trash2, Link2 } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
-import { StageCrudDialog, StageDeleteDialog, type ValueStreamStage } from './value-stream-stages'
+import { StageCrudDialog, StageDeleteDialog, StageCapabilitiesCell, StageCapabilityDialog, type ValueStreamStage } from './value-stream-stages'
 
 export const GET_VALUE_STREAM_DETAIL = gql`
   query GetValueStreamDetail($spaceId: String!, $id: String!) {
@@ -73,6 +73,7 @@ export default function ValueStreamDetail() {
   const [stageDialogOpen, setStageDialogOpen] = useState(false)
   const [editingStage, setEditingStage] = useState<ValueStreamStage | null>(null)
   const [deletingStage, setDeletingStage] = useState<ValueStreamStage | null>(null)
+  const [capabilityStage, setCapabilityStage] = useState<ValueStreamStage | null>(null)
 
   const vs = data?.valueStreamById
   const stages = useMemo(
@@ -182,6 +183,7 @@ export default function ValueStreamDetail() {
                       <TableHead>输入</TableHead>
                       <TableHead>输出</TableHead>
                       <TableHead>目标指标</TableHead>
+                      <TableHead>关联能力</TableHead>
                       {isEntityOwner(vs.ownerId) && <TableHead>操作</TableHead>}
                     </TableRow>
                   </TableHeader>
@@ -206,9 +208,21 @@ export default function ValueStreamDetail() {
                             </ul>
                           ) : '-'}
                         </TableCell>
+                        <TableCell className="max-w-[180px]">
+                          <StageCapabilitiesCell stageId={stage.id} />
+                        </TableCell>
                         {isEntityOwner(vs.ownerId) && (
                           <TableCell>
                             <div className="flex gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                aria-label="关联能力"
+                                title="关联能力"
+                                onClick={() => setCapabilityStage(stage)}
+                              >
+                                <Link2 className="h-3.5 w-3.5" />
+                              </Button>
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -251,6 +265,12 @@ export default function ValueStreamDetail() {
                 onConfirm={() => setDeletingStage(null)}
                 spaceId={spaceId}
                 valueStreamId={id}
+              />
+              <StageCapabilityDialog
+                stage={capabilityStage}
+                spaceId={spaceId}
+                open={!!capabilityStage}
+                onOpenChange={(v) => { if (!v) setCapabilityStage(null) }}
               />
             </>
           )}
