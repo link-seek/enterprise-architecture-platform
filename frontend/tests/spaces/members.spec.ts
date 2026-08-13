@@ -16,7 +16,9 @@ test.describe('Space Member Management', () => {
 
     // The owner appears in the member list (scope to the table to avoid the
     // role-select combobox option which also contains the text '拥有者').
-    await expect(page.getByRole('table').getByText('拥有者')).toBeVisible({ timeout: 10000 });
+    // Use .first() because the test space may have multiple owners (e.g. the
+    // seeded admin and the e2e test user are both owners in dev/CI).
+    await expect(page.getByRole('table').getByText('拥有者').first()).toBeVisible({ timeout: 10000 });
   });
 
   test('Owner can add member by email with editor role', { tag: '@regression' }, async ({ page }) => {
