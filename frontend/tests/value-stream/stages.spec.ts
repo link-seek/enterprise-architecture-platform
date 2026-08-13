@@ -13,7 +13,7 @@ test.describe('Value Stream Stages - 阶段管理', () => {
     await expect(page.getByRole('button', { name: '新建价值流' })).toBeVisible({ timeout: 30000 });
   });
 
-  test('创建价值流后，在详情页添加阶段', async ({ page }) => {
+  test('创建价值流后，在详情页添加阶段', { tag: '@regression' }, async ({ page }) => {
     const vsName = `阶段UI测试流${suffix}`;
     const stageName = `需求分析${suffix}`;
     await page.getByRole('button', { name: '新建价值流' }).click();
@@ -36,7 +36,7 @@ test.describe('Value Stream Stages - 阶段管理', () => {
     await expect(page.getByText(stageName)).toBeVisible({ timeout: 15000 });
   });
 
-  test('在详情页编辑和删除阶段', async ({ page }) => {
+  test('在详情页编辑和删除阶段', { tag: '@regression' }, async ({ page }) => {
     const vsName = `阶段CRUD流${suffix}`;
     const stageName = `设计${suffix}`;
     const editedName = `详细设计${suffix}`;

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test('debug login', async ({ page }) => {
+test('debug login', { tag: '@smoke' }, async ({ page }) => {
   page.on('console', msg => console.log('CONSOLE:', msg.type(), msg.text()));
   page.on('pageerror', err => console.log('PAGEERROR:', err.message));
   page.on('requestfailed', req => console.log('REQFAIL:', req.url(), req.failure()?.errorText));
