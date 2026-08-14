@@ -109,40 +109,42 @@ test.describe('Value Stream Management - CRUD Operations', () => {
   test('Happy Path - Delete Value Stream', { tag: '@regression' }, async ({ page }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `待删除价值流_${Date.now()}`;
-    // First, create a value stream to delete (archive)
+    // First, create a value stream to delete
     await page.getByRole('button', { name: '新建价值流' }).click();
     await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这个将被删除');
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
-    
+
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
     await statusField.selectOption('active');
-    
+
     const importanceField = page.getByRole('combobox', { name: /重要性|Importance/ }).or(page.getByRole('textbox', { name: /重要性|Importance/ }));
     await importanceField.selectOption('Low');
-    
+
     await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Find the created value stream
     const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible();
-    
+
     // Click delete (trash) button
     await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-trash-2"]') }).click();
-    
-    // Verify delete confirmation dialog opens
-    await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByText(/确认归档|确认删除|Confirm/)).toBeVisible();
-    
-    // Click "归档" button
-    await page.getByRole('button', { name: /确认|归档|Confirm|Archive/ }).click();
-    
+
+    // Verify delete confirmation dialog opens with the delete wording
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText(/确认删除/)).toBeVisible();
+    await expect(dialog.getByText(/不可恢复/)).toBeVisible();
+
+    // Click "删除" button
+    await dialog.getByRole('button', { name: '删除' }).click();
+
     // Verify dialog closes
-    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
-    // Delete is implemented as archive: verify the row's status becomes "archived"
-    await expect(row.getByText('archived')).toBeVisible({ timeout: 10000 });
+    await expect(dialog).not.toBeVisible({ timeout: 10000 });
+
+    // Soft delete removes the row from the list
+    await expect(row).not.toBeVisible({ timeout: 10000 });
   });
 
   test('Edge Case - Create Value Stream Validation', { tag: '@regression' }, async ({ page }) => {

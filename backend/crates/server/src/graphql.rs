@@ -769,6 +769,43 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
 
     builder.mutations.push(archive_field);
 
+    // ── valueStreamDelete ─────────────────────────────────────────────
+    // Soft-delete: sets `deleted_at` (row kept for audit/recovery), unlike
+    // `valueStreamArchive` which only flips the lifecycle status. Same auth
+    // chain as archive (role permission + space ACL + entity owner/admin).
+    let delete_field = Field::new(
+        "valueStreamDelete",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Delete)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let repo = SeaOrmValueStreamRepo::new(db.clone());
+                // Enforce space-level ACL + entity ownership before deleting.
+                let existing = repo
+                    .find_by_id(id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Value stream not found."))?;
+                ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
+
+                let service = ValueStreamService::new(repo);
+                service
+                    .delete(id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+
+    builder.mutations.push(delete_field);
+
     // ── valueStreamCreateVersion ───────────────────────────────────────
     let create_version_field = Field::new(
         "valueStreamCreateVersion",
