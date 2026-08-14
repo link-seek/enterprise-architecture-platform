@@ -30,9 +30,9 @@ const UPDATE_VALUE_STREAM = gql`
   }
 `
 
-const ARCHIVE_VALUE_STREAM = gql`
-  mutation ValueStreamArchive($id: String!) {
-    valueStreamArchive(id: $id)
+const DELETE_VALUE_STREAM = gql`
+  mutation ValueStreamDelete($id: String!) {
+    valueStreamDelete(id: $id)
   }
 `
 
@@ -224,20 +224,20 @@ export function ValueStreamDeleteDialog({ item, onConfirm, spaceId }: {
   onConfirm: () => void
   spaceId?: string
 }) {
-  const [archiveMut] = useMutation(ARCHIVE_VALUE_STREAM)
+  const [deleteMut] = useMutation(DELETE_VALUE_STREAM)
   const [loading, setLoading] = useState(false)
 
   async function handleDelete() {
     if (!item) return
     setLoading(true)
     try {
-      await archiveMut({
+      await deleteMut({
         variables: { id: item.id },
         refetchQueries: [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
       })
       onConfirm()
     } catch (err) {
-      console.error('Archive failed:', err)
+      console.error('Delete failed:', err)
     } finally {
       setLoading(false)
     }
@@ -247,15 +247,15 @@ export function ValueStreamDeleteDialog({ item, onConfirm, spaceId }: {
     <Dialog open={!!item} onOpenChange={() => onConfirm()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>确认归档</DialogTitle>
+          <DialogTitle>确认删除</DialogTitle>
         </DialogHeader>
         <p className="py-4 text-sm text-muted-foreground">
-          确定要归档价值流「{item?.name}」吗？归档后不可修改，但可通过版本控制创建新版本。
+          确定要删除价值流「{item?.name}」吗？删除后将从列表移除，此操作不可恢复。
         </p>
         <DialogFooter>
           <Button variant="outline" onClick={onConfirm}>取消</Button>
           <Button variant="destructive" onClick={handleDelete} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : '归档'}
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : '删除'}
           </Button>
         </DialogFooter>
       </DialogContent>

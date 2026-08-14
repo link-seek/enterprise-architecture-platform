@@ -49,6 +49,13 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         self.repo.archive(id).await
     }
 
+    /// Soft-delete a value stream by id.
+    /// Sets `deleted_at` so the value stream disappears from active listings
+    /// while the row stays in the database for audit/recovery.
+    pub async fn delete(&self, id: Uuid) -> Result<(), DomainError> {
+        self.repo.soft_delete(id).await
+    }
+
     /// Create a new version of an existing value stream.
     /// The current active version is archived, and a new version is created
     /// with the same logical_id. The current version's stages are copied to
