@@ -14,20 +14,20 @@ permissions:
   checks: write
 
 jobs:
+  e2e-test:
+    uses: link-seek/issue-resolver-l1/.github/workflows/e2e-test.yml@main
+    with:
+      ref: ''
+    secrets: inherit
+
   ci-cd:
+    needs: e2e-test
+    if: needs.e2e-test.result == 'success'
     uses: link-seek/issue-resolver-l1/.github/workflows/ci-cd-acr.yml@main
     with:
       ghcr-image: ghcr.io/link-seek/eap-backend
       oss-bucket: eap-frontend-xyc
       frontend-build-env: '["VITE_API_URL=https://api.xieyucheng.top/api"]'
-    secrets: inherit
-
-  e2e-test:
-    needs: ci-cd
-    if: needs.ci-cd.result == 'success'
-    uses: link-seek/issue-resolver-l1/.github/workflows/e2e-test.yml@main
-    with:
-      ref: ''
     secrets: inherit
 
   create-e2e-issue:
