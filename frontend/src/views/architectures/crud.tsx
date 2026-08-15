@@ -219,6 +219,21 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: 
   )
 }
 
+// Map a failed delete mutation's GraphQL error code to a user-friendly
+// message. Mutations use Apollo's default errorPolicy ('none'), so GraphQL
+// errors reject the promise. Apollo Client v4 exposes the GraphQL errors as
+// `err.errors` (v3 used `err.graphQLErrors`); check both for robustness.
+function friendlyDeleteError(err: unknown): string {
+  const e = err as { graphQLErrors?: { extensions?: { code?: string } }[]; errors?: { extensions?: { code?: string } }[] } | null
+  const code = e?.graphQLErrors?.[0]?.extensions?.code ?? e?.errors?.[0]?.extensions?.code
+  if (code === 'FORBIDDEN') return '您不是该价值流的创建者，无法删除'
+  if (code === 'FORBIDDEN_SPACE_NOT_MEMBER') return '您不是该空间的成员，无法删除'
+  if (code === 'FORBIDDEN_SPACE_NOT_EDITOR') return '您没有该空间的编辑权限，无法删除'
+  if (code === 'FORBIDDEN_SPACE_NOT_OWNER') return '您不是该空间的拥有者，无法执行此操作'
+  if (err instanceof Error) return err.message
+  return '删除失败'
+}
+
 export function ValueStreamDeleteDialog({ item, onConfirm, spaceId }: {
   item: ValueStream | null
   onConfirm: () => void
@@ -226,10 +241,17 @@ export function ValueStreamDeleteDialog({ item, onConfirm, spaceId }: {
 }) {
   const [deleteMut] = useMutation(DELETE_VALUE_STREAM)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Clear any stale error when the dialog targets a new item (open/reopen).
+  useEffect(() => {
+    setError(null)
+  }, [item])
 
   async function handleDelete() {
     if (!item) return
     setLoading(true)
+    setError(null)
     try {
       await deleteMut({
         variables: { id: item.id },
@@ -237,7 +259,7 @@ export function ValueStreamDeleteDialog({ item, onConfirm, spaceId }: {
       })
       onConfirm()
     } catch (err) {
-      console.error('Delete failed:', err)
+      setError(friendlyDeleteError(err))
     } finally {
       setLoading(false)
     }
@@ -252,6 +274,7 @@ export function ValueStreamDeleteDialog({ item, onConfirm, spaceId }: {
         <p className="py-4 text-sm text-muted-foreground">
           确定要删除价值流「{item?.name}」吗？删除后将从列表移除，此操作不可恢复。
         </p>
+        {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
         <DialogFooter>
           <Button variant="outline" onClick={onConfirm}>取消</Button>
           <Button variant="destructive" onClick={handleDelete} disabled={loading}>
