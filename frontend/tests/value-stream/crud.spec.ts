@@ -1,5 +1,5 @@
 // spec: specs/eap-test-plan.md
-import { test, expect } from '../helpers/graphql-aware';
+import { test, testWithError, expect } from '../helpers/graphql-aware';
 import { login, SPACE_BASE } from '../helpers/auth';
 
 test.describe('Value Stream Management - CRUD Operations', () => {
@@ -106,7 +106,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(updatedRow.getByText('active')).toBeVisible();
   });
 
-  test('Happy Path - Delete Value Stream', { tag: '@regression' }, async ({ page }) => {
+  test('Happy Path - Delete Value Stream', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `待删除价值流_${Date.now()}`;
     // First, create a value stream to delete
@@ -255,5 +255,76 @@ test.describe('Value Stream Management - CRUD Operations', () => {
       await page.goBack();
       await expect(page).toHaveURL(`${SPACE_BASE}/value-streams`);
     }
+  });
+});
+
+// Error-handling tests that intentionally trigger GraphQL errors. These use
+// testWithError which suppresses the automatic GraphQL error detection.
+testWithError.describe('Value Stream Delete - Error Handling', () => {
+  testWithError.beforeEach(async ({ page }) => {
+    await login(page);
+    await page.goto(`${SPACE_BASE}/value-streams`);
+  });
+
+  testWithError('非 owner 删除价值流应显示错误提示', { tag: '@regression' }, async ({ page }) => {
+    // The list gates the delete button on client-side ownership (isEntityOwner),
+    // so a real non-owner cannot see it in the UI. To verify the delete dialog
+    // surfaces backend permission errors instead of silently swallowing them,
+    // intercept the valueStreamDelete mutation and return the FORBIDDEN error
+    // the backend returns for NotEntityOwner — the exact failure mode users hit
+    // when their client-side ownership view is stale relative to the backend.
+    await page.route('**/graphql', async (route) => {
+      const postData = route.request().postData();
+      if (postData && postData.includes('valueStreamDelete')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: null,
+            errors: [{ message: 'Not entity owner', extensions: { code: 'FORBIDDEN' } }],
+          }),
+        });
+      } else {
+        await route.continue();
+      }
+    });
+
+    // Create a value stream as the current (owner) user so the delete button
+    // is visible, then attempt to delete it — the mocked FORBIDDEN response
+    // simulates a non-owner delete. The name is deliberately free of words
+    // the error assertion matches on (无法删除) so the assertion can only
+    // pass via the rendered error div, not the confirmation message.
+    const name = `非属主删除测试_${Date.now()}`;
+    await page.getByRole('button', { name: '新建价值流' }).click();
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
+    await page.getByRole('textbox', { name: /描述|Description/ }).fill('用于测试删除错误提示');
+    await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
+
+    const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
+    await statusField.selectOption('active');
+
+    const importanceField = page.getByRole('combobox', { name: /重要性|Importance/ }).or(page.getByRole('textbox', { name: /重要性|Importance/ }));
+    await importanceField.selectOption('Low');
+
+    await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
+    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
+
+    // Find the created value stream and open the delete confirmation dialog.
+    const row = page.locator('tr').filter({ hasText: name });
+    await expect(row).toBeVisible();
+    await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-trash-2"]') }).click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText(/确认删除/)).toBeVisible();
+
+    // Click "删除" — the mocked FORBIDDEN should surface as a friendly error
+    // message and the dialog must stay open (not silently close). The text
+    // "无法删除" only appears in the error div, never in the confirmation
+    // message, so this can only pass once the fix renders the error.
+    await dialog.getByRole('button', { name: '删除' }).click();
+
+    await expect(dialog.getByText(/无法删除/i)).toBeVisible({ timeout: 5000 });
+    await expect(dialog).toBeVisible();
   });
 });
