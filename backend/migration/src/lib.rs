@@ -60,6 +60,7 @@ mod m20250101_000057_create_process_references;
 mod m20250101_000058_create_orchestrations;
 mod m20250101_000059_add_process_inputs_outputs;
 mod m20250101_000060_add_pipeline_test_1786938378_to_organizations;
+mod m20250101_000061_add_pipeline_test_1786939357_to_organizations;
 
 pub struct Migrator;
 
@@ -127,6 +128,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000058_create_orchestrations::Migration),
             Box::new(m20250101_000059_add_process_inputs_outputs::Migration),
             Box::new(m20250101_000060_add_pipeline_test_1786938378_to_organizations::Migration),
+            Box::new(m20250101_000061_add_pipeline_test_1786939357_to_organizations::Migration),
         ]
     }
 }
