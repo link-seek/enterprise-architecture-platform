@@ -223,7 +223,7 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: 
 // message. Mutations use Apollo's default errorPolicy ('none'), so GraphQL
 // errors reject the promise. Apollo Client v4 exposes the GraphQL errors as
 // `err.errors` (v3 used `err.graphQLErrors`); check both for robustness.
-function friendlyDeleteError(err: unknown): string {
+export function friendlyDeleteError(err: unknown): string {
   const e = err as { graphQLErrors?: { extensions?: { code?: string } }[]; errors?: { extensions?: { code?: string } }[] } | null
   const code = e?.graphQLErrors?.[0]?.extensions?.code ?? e?.errors?.[0]?.extensions?.code
   if (code === 'FORBIDDEN') return '您不是该价值流的创建者，无法删除'

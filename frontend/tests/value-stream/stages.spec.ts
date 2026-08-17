@@ -1,5 +1,5 @@
 // spec: specs/eap-test-plan.md
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../helpers/graphql-aware';
 import { login, SPACE_BASE } from '../helpers/auth';
 
 // 使用时间戳后缀保证多次运行不产生同名价值流与阶段，避免列表行/文本匹配歧义
@@ -36,7 +36,7 @@ test.describe('Value Stream Stages - 阶段管理', () => {
     await expect(page.getByText(stageName)).toBeVisible({ timeout: 15000 });
   });
 
-  test('在详情页编辑和删除阶段', { tag: '@regression' }, async ({ page }) => {
+  test('在详情页编辑和删除阶段', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     const vsName = `阶段CRUD流${suffix}`;
     const stageName = `设计${suffix}`;
     const editedName = `详细设计${suffix}`;
@@ -68,6 +68,11 @@ test.describe('Value Stream Stages - 阶段管理', () => {
     // 删除阶段（带二次确认）；断言限定在表格内，避免匹配到确认对话框描述文本
     await page.locator('tr').filter({ hasText: editedName }).getByRole('button', { name: /删除/ }).click();
     await page.getByRole('button', { name: /确认删除/ }).click();
+    await expect(page.locator('table').getByText(editedName)).not.toBeVisible({ timeout: 15000 });
+
+    // Reload and re-assert to catch optimistic-update "fake deletes" (#403).
+    await page.reload();
+    await expect(page.getByRole('heading', { name: '价值流阶段' })).toBeVisible({ timeout: 30000 });
     await expect(page.locator('table').getByText(editedName)).not.toBeVisible({ timeout: 15000 });
   });
 });

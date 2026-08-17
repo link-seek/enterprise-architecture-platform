@@ -84,3 +84,4 @@ Schema 由 `async-graphql` + `seaography` 自动生成。实体需 derive `Entit
   accessible name 含实体名（如 `价值流 1 …`），会与侧边栏链接子串冲突，故侧边栏断言需 `exact: true`；
   分组标题「业务架构/应用架构」同时出现在侧边栏 h3 与总览页 h2，需按 `navigation`/`main` 作用域区分。
 - 登录默认落点改为 overview 后，value-stream 类测试需显式 `goto SPACE_BASE + "/value-streams"`。
+- **E2E Delete 测试规范**（#403 防护）：Delete/Archive/Full CRUD 测试必须 ① 用 `Date.now()` 生成唯一名称（禁硬编码），  ② 删除断言后追加 `page.reload()` + 再次断言数据消失（区分后端真删除与前端乐观更新假删除），  ③ 含写操作的 spec 用 `graphql-aware` 的 `test`（非 `@playwright/test`），④ 标注 `@smoke`。  前端删除对话框 `handleDelete` 的 catch 块用 `setError(friendlyDeleteError(err))`（已从 `crud.tsx` 导出），  而非裸 `console.error`，使后端删除失败时对话框保持打开并显示错误。`value-stream/crud.spec.ts` 中文为乱码编码，仅追加纯 ASCII 行。

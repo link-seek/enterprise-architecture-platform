@@ -67,7 +67,7 @@ test.describe('Value Stream Management - Version Control', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
-  test('Happy Path - Archive Value Stream', { tag: '@regression' }, async ({ page }) => {
+  test('Happy Path - Archive Value Stream', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `待归档测试_${Date.now()}`;
     // Create an active value stream

@@ -153,32 +153,39 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     // Create a capability to delete
     const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
-    
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('待删除能力');
+
+    const name = `待删除能力_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这个将被删除');
-    
+
     await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Find the created capability
-    const row = page.locator('tr').filter({ hasText: '待删除能力' });
+    const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible();
-    
+
     // Click delete (trash) button
     await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-trash-2"]') }).click();
-    
+
     // Verify delete confirmation dialog opens
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByText(/确认删除|Confirm delete/)).toBeVisible();
-    
+
     // Click "确认" button
     await page.getByRole('button', { name: /确认|删除|Confirm|Delete/ }).click();
-    
+
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Verify capability removed from table
-    await expect(page.getByText('待删除能力')).not.toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(name, { exact: true })).not.toBeVisible({ timeout: 10000 });
+
+    // Reload and re-assert to distinguish a real backend delete from an
+    // optimistic-update "fake delete" (frontend removes the row but the
+    // backend mutation failed silently — see #403).
+    await page.reload();
+    await expect(page.getByText(name, { exact: true })).not.toBeVisible({ timeout: 10000 });
   });
 
   test('Edge Case - Form Validation', { tag: '@regression' }, async ({ page }) => {
@@ -221,46 +228,52 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
-  test('Full CRUD Cycle', { tag: '@regression' }, async ({ page }) => {
+  test('Full CRUD Cycle', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     // Create
     const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();
-    
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('完整CRUD测试');
+
+    const name = `完整CRUD测试_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('完整的创建、读取、更新、删除测试');
-    
+
     const maturityField = page.getByRole('combobox', { name: /成熟度|Maturity/ }).or(page.getByRole('textbox', { name: /成熟度|Maturity/ }));
     if (await maturityField.isVisible()) {
       await maturityField.fill('发展中');
     }
-    
+
     await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Read
-    await expect(page.getByText('完整CRUD测试')).toBeVisible({ timeout: 10000 });
-    const row = page.locator('tr').filter({ hasText: '完整CRUD测试' });
+    await expect(page.getByText(name)).toBeVisible({ timeout: 10000 });
+    const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible();
-    
+
     // Update
     await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-pencil"]') }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
-    
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('更新后的CRUD测试');
+
+    const updatedName = `更新后的CRUD测试_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(updatedName);
     await page.getByRole('button', { name: /保存|Save/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
-    await expect(page.getByText('更新后的CRUD测试')).toBeVisible({ timeout: 10000 });
-    
+
+    await expect(page.getByText(updatedName)).toBeVisible({ timeout: 10000 });
+
     // Delete
-    const updatedRow = page.locator('tr').filter({ hasText: '更新后的CRUD测试' });
+    const updatedRow = page.locator('tr').filter({ hasText: updatedName });
     await updatedRow.getByRole('button').filter({ has: page.locator('svg[class*="lucide-trash-2"]') }).click();
-    
+
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.getByRole('button', { name: /确认|删除|Confirm|Delete/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Verify removal
-    await expect(page.getByText('更新后的CRUD测试')).not.toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(updatedName, { exact: true })).not.toBeVisible({ timeout: 10000 });
+
+    // Reload and re-assert to catch optimistic-update "fake deletes" (#403).
+    await page.reload();
+    await expect(page.getByText(updatedName, { exact: true })).not.toBeVisible({ timeout: 10000 });
   });
 });

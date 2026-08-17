@@ -145,6 +145,10 @@ test.describe('Value Stream Management - CRUD Operations', () => {
 
     // Soft delete removes the row from the list
     await expect(row).not.toBeVisible({ timeout: 10000 });
+
+    // Reload and re-assert to catch optimistic-update "fake deletes" (#403).
+    await page.reload();
+    await expect(page.getByText(name, { exact: true })).not.toBeVisible({ timeout: 10000 });
   });
 
   test('Edge Case - Create Value Stream Validation', { tag: '@regression' }, async ({ page }) => {

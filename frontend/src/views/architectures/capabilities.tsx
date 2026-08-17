@@ -15,6 +15,7 @@ import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { useIsMobile } from '@/hooks/use-media-query'
 import { TransferOwnershipDialog } from './transfer-ownership-dialog'
 import { CrossDomainDialog, type CrossDomainItem } from './cross-domain-dialog'
+import { friendlyDeleteError } from './crud'
 
 const GET_CAPABILITIES = gql`
   query GetCapabilities($spaceId: String!) {
@@ -400,16 +401,19 @@ function CapabilityCrudDialog({ open, onOpenChange, editing, spaceId }: {
 function CapabilityDeleteDialog({ item, onConfirm, spaceId }: { item: Capability | null; onConfirm: () => void; spaceId?: string }) {
   const [deleteMut] = useMutation(DELETE_CAPABILITY)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => { setError(null) }, [item])
   async function handleDelete() {
-    if (!item) return; setLoading(true)
+    if (!item) return; setLoading(true); setError(null)
     try { await deleteMut({ variables: { id: item.id }, refetchQueries: [{ query: GET_CAPABILITIES, variables: { spaceId } }] }); onConfirm() }
-    catch (err) { console.error(err) } finally { setLoading(false) }
+    catch (err) { setError(friendlyDeleteError(err)) } finally { setLoading(false) }
   }
   return (
     <Dialog open={!!item} onOpenChange={onConfirm}>
       <DialogContent>
         <DialogHeader><DialogTitle>确认删除</DialogTitle></DialogHeader>
         <p className="py-4 text-sm text-muted-foreground">确定要删除能力「{item?.name}」吗？</p>
+        {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
         <DialogFooter>
           <Button variant="outline" onClick={onConfirm}>取消</Button>
           <Button variant="destructive" onClick={handleDelete} disabled={loading}>{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : '删除'}</Button>
