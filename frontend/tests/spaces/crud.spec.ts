@@ -13,7 +13,7 @@ test.describe('Spaces - CRUD Main Flow', () => {
     await expect(page.getByRole('heading', { name: '所有空间' })).toBeVisible();
   });
 
-  test('Happy Path - Create, edit, and archive a space', { tag: '@regression' }, async ({ page }) => {
+  test('Happy Path - Create, edit, and archive a space', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     const spaceName = `E2E空间_${Date.now()}`;
     const editedName = `${spaceName}_已编辑`;
 

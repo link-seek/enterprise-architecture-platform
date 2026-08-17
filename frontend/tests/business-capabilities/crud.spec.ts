@@ -12,7 +12,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     await expect(page).toHaveURL(`${SPACE_BASE}/capabilities`);
   });
 
-  test('Happy Path - Create Business Capability', { tag: '@regression' }, async ({ page }) => {
+  test('Happy Path - Create Business Capability', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     // Click "新建业务能力" button
     const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await expect(createButton).toBeVisible();
@@ -149,7 +149,7 @@ test.describe('Business Capabilities Management - CRUD Operations', () => {
     }
   });
 
-  test('Happy Path - Delete Business Capability', { tag: '@regression' }, async ({ page }) => {
+  test('Happy Path - Delete Business Capability', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     // Create a capability to delete
     const createButton = page.getByRole('button', { name: /新建能力|新建业务能力|New Business Capability/ });
     await createButton.click();

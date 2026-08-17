@@ -10,7 +10,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await page.goto(`${SPACE_BASE}/value-streams`);
   });
 
-  test('Happy Path - Create Value Stream', { tag: '@regression' }, async ({ page }) => {
+  test('Happy Path - Create Value Stream', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     // Click "新建价值流" button
     await page.getByRole('button', { name: '新建价值流' }).click();
     

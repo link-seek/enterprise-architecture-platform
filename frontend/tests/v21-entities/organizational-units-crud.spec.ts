@@ -7,7 +7,7 @@ test.describe('Organizational Units - CRUD Operations', () => {
     await page.goto(`${SPACE_BASE}/organizational-units`);
   });
 
-  test('Create organizational unit', { tag: '@regression' }, async ({ page }) => {
+  test('Create organizational unit', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     const createButton = page.getByRole('button', { name: /新建组织单元/ });
     await expect(createButton).toBeVisible();
     await createButton.click();
@@ -20,7 +20,7 @@ test.describe('Organizational Units - CRUD Operations', () => {
     await expect(page.getByText(name)).toBeVisible();
   });
 
-  test('Delete organizational unit', { tag: '@regression' }, async ({ page }) => {
+  test('Delete organizational unit', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     // First create one to delete
     await page.getByRole('button', { name: /新建组织单元/ }).click();
     const name = `删除测试_${Date.now()}`;
