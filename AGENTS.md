@@ -84,4 +84,45 @@ Schema 由 `async-graphql` + `seaography` 自动生成。实体需 derive `Entit
   accessible name 含实体名（如 `价值流 1 …`），会与侧边栏链接子串冲突，故侧边栏断言需 `exact: true`；
   分组标题「业务架构/应用架构」同时出现在侧边栏 h3 与总览页 h2，需按 `navigation`/`main` 作用域区分。
 - 登录默认落点改为 overview 后，value-stream 类测试需显式 `goto SPACE_BASE + "/value-streams"`。
-- **E2E Delete 测试规范**（#403 防护）：Delete/Archive/Full CRUD 测试必须 ① 用 `Date.now()` 生成唯一名称（禁硬编码），  ② 删除断言后追加 `page.reload()` + 再次断言数据消失（区分后端真删除与前端乐观更新假删除），  ③ 含写操作的 spec 用 `graphql-aware` 的 `test`（非 `@playwright/test`），④ 标注 `@smoke`。  前端删除对话框 `handleDelete` 的 catch 块用 `setError(friendlyDeleteError(err))`（已从 `crud.tsx` 导出），  而非裸 `console.error`，使后端删除失败时对话框保持打开并显示错误。`value-stream/crud.spec.ts` 中文为乱码编码，仅追加纯 ASCII 行。
+
+## E2E 测试编写规范
+
+### 命名与隔离
+
+- **所有 Create/Delete/Archive 测试必须用 `Date.now()` 或 `crypto.randomUUID()` 生成唯一名称**，禁止硬编码如 `待删除能力`。
+  原因：硬编码名称在残留数据时会导致 `not.toBeVisible()` 误判通过（上次同名项已被删除，断言照过）。
+- Create 测试同理，用唯一名称避免与已有数据冲突。
+
+### 删除验证
+
+- **Delete/Archive 测试必须在删除操作后刷新页面，再次断言数据消失**：
+  ```ts
+  // 点击删除确认
+  await dialog.getByRole('button', { name: '删除' }).click();
+  await expect(dialog).not.toBeVisible();
+
+  // 刷新页面验证后端确实删除了，而非仅前端乐观更新
+  await page.reload();
+  await expect(page.getByText(name, { exact: true })).not.toBeVisible();
+  ```
+  原因：仅验证 UI 行消失无法区分「后端真删除」和「前端乐观更新但后端失败」。
+  #403 bug 就是删除对话框静默吞掉 GraphQL 错误的典型案例。
+
+### GraphQL 错误检测
+
+- 所有 E2E 测试默认使用 `graphql-aware` fixture（`import { test } from '../helpers/graphql-aware'`），
+  该 fixture 自动检测 GraphQL errors 并让测试失败。
+- **禁止** `import { test } from '@playwright/test'` 绕过 GraphQL 错误检测。
+
+### 标签
+
+- 页面加载/导航类轻量测试：`@smoke`
+- CRUD/权限/成员管理等功能测试：`@regression`
+- **Create + Delete 必须同时有 `@smoke` 和 `@regression`**，确保 Smoke Test 覆盖 CRUD 完整流程。
+- 标签格式：`{ tag: ['@smoke', '@regression'] }`（数组，不覆盖其他标签）
+
+### 断言
+
+- 用 `exact: true` 匹配特定文本，避免子串匹配误判。
+- 用 `page.locator('tr').filter({ hasText: name })` 精确定位行，而非全局 `page.getByText()`。
+- 删除后断言用唯一名称 + `exact: true`，避免匹配到其他含相同子串的文本。
