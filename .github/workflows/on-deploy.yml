@@ -89,6 +89,8 @@ jobs:
       backup-script: scripts/deploy/backup.sh
       rollback-script: scripts/deploy/rollback.sh
       consumer-repo: link-seek/enterprise-architecture-platform
+      oss-bucket: eap-frontend-xyc
+      oss-region: oss-cn-shenzhen.aliyuncs.com
     secrets:
       ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
       ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
@@ -109,3 +111,5 @@ jobs:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
       GHCR_PAT: ${{ secrets.GHCR_PAT }}
+      ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+      ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}

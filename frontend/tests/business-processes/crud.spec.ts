@@ -12,7 +12,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     await expect(page).toHaveURL(`${SPACE_BASE}/processes`);
   });
 
-  test('Happy Path - Create Business Process', { tag: '@regression' }, async ({ page }) => {
+  test('Happy Path - Create Business Process', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     // Click "新建业务流程" button
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await expect(createButton).toBeVisible();
@@ -208,7 +208,7 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     }
   });
 
-  test('Happy Path - Delete Business Process', { tag: '@regression' }, async ({ page }) => {
+  test('Happy Path - Delete Business Process', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     // Create a process to delete
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
