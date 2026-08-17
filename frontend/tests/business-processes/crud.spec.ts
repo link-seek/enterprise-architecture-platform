@@ -212,32 +212,37 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     // Create a process to delete
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
-    
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('待删除流程');
+
+    const name = `待删除流程_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这个将被删除');
-    
+
     await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Find the created process
-    const row = page.locator('tr').filter({ hasText: '待删除流程' });
+    const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible();
-    
+
     // Click delete (trash) button
     await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-trash-2"]') }).click();
-    
+
     // Verify delete confirmation dialog opens
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByText(/确认删除|Confirm delete/)).toBeVisible();
-    
+
     // Click "确认" button
     await page.getByRole('button', { name: /确认|删除|Confirm|Delete/ }).click();
-    
+
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Verify process removed from table
-    await expect(page.getByText('待删除流程')).not.toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(name, { exact: true })).not.toBeVisible({ timeout: 10000 });
+
+    // Reload and re-assert to catch optimistic-update "fake deletes" (#403).
+    await page.reload();
+    await expect(page.getByText(name, { exact: true })).not.toBeVisible({ timeout: 10000 });
   });
 
   test('Edge Case - Numeric Input Validation', { tag: '@regression' }, async ({ page }) => {
@@ -296,77 +301,83 @@ test.describe('Business Processes Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
-  test('Full CRUD Cycle with Numeric Fields', { tag: '@regression' }, async ({ page }) => {
+  test('Full CRUD Cycle with Numeric Fields', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     // Create
     const createButton = page.getByRole('button', { name: /新建流程|新建业务流程|New Business Process/ });
     await createButton.click();
-    
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('完整CRUD流程');
+
+    const name = `完整CRUD流程_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('完整的创建、读取、更新、删除测试流程');
-    
+
     // Fill numeric fields if they exist
     const slaField = page.getByRole('spinbutton', { name: /SLA|服务级别协议/ }).or(page.getByRole('textbox', { name: /SLA|服务级别协议/ }));
     if (await slaField.isVisible()) {
       await slaField.fill('99.9');
     }
-    
+
     const cycleTimeField = page.getByRole('spinbutton', { name: /周期时间|Cycle Time/ }).or(page.getByRole('textbox', { name: /周期时间|Cycle Time/ }));
     if (await cycleTimeField.isVisible()) {
       await cycleTimeField.fill('24');
     }
-    
+
     const costField = page.getByRole('spinbutton', { name: /成本|Cost/ }).or(page.getByRole('textbox', { name: /成本|Cost/ }));
     if (await costField.isVisible()) {
       await costField.fill('10000');
     }
-    
+
     await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Read
-    await expect(page.getByText('完整CRUD流程')).toBeVisible({ timeout: 10000 });
-    const row = page.locator('tr').filter({ hasText: '完整CRUD流程' });
+    await expect(page.getByText(name)).toBeVisible({ timeout: 10000 });
+    const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible();
     await expect(row.getByText('完整的创建、读取、更新、删除测试流程')).toBeVisible();
-    
+
     if (await slaField.isVisible()) {
       await expect(row.getByText('99.9')).toBeVisible();
     }
-    
+
     if (await cycleTimeField.isVisible()) {
       await expect(row.getByText('24')).toBeVisible();
     }
-    
+
     if (await costField.isVisible()) {
       await expect(row.getByText('10000')).toBeVisible();
     }
-    
+
     // Update
     await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-pencil"]') }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
-    
-    await page.getByRole('textbox', { name: /名称|Name/ }).fill('更新后的CRUD流程');
-    
+
+    const updatedName = `更新后的CRUD流程_${Date.now()}`;
+    await page.getByRole('textbox', { name: /名称|Name/ }).fill(updatedName);
+
     if (await slaField.isVisible()) {
       const editSlaField = page.getByRole('spinbutton', { name: /SLA|服务级别协议/ }).or(page.getByRole('textbox', { name: /SLA|服务级别协议/ }));
       await editSlaField.fill('99.99');
     }
-    
+
     await page.getByRole('button', { name: /保存|创建|Save|Create/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
-    await expect(page.getByText('更新后的CRUD流程')).toBeVisible({ timeout: 10000 });
-    
+
+    await expect(page.getByText(updatedName)).toBeVisible({ timeout: 10000 });
+
     // Delete
-    const updatedRow = page.locator('tr').filter({ hasText: '更新后的CRUD流程' });
+    const updatedRow = page.locator('tr').filter({ hasText: updatedName });
     await updatedRow.getByRole('button').filter({ has: page.locator('svg[class*="lucide-trash-2"]') }).click();
-    
+
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.getByRole('button', { name: /确认|删除|Confirm|Delete/ }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
+
     // Verify removal
-    await expect(page.getByText('更新后的CRUD流程')).not.toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(updatedName, { exact: true })).not.toBeVisible({ timeout: 10000 });
+
+    // Reload and re-assert to catch optimistic-update "fake deletes" (#403).
+    await page.reload();
+    await expect(page.getByText(updatedName, { exact: true })).not.toBeVisible({ timeout: 10000 });
   });
 
   test('流程表单支持输入/输出字段', { tag: '@regression' }, async ({ page }) => {

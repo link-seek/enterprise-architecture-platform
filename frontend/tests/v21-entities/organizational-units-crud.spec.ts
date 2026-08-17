@@ -35,5 +35,9 @@ test.describe('Organizational Units - CRUD Operations', () => {
     await page.getByRole('button', { name: '删除' }).click();
 
     await expect(page.getByText(name, { exact: true })).not.toBeVisible();
+
+    // Reload and re-assert to catch optimistic-update "fake deletes" (#403).
+    await page.reload();
+    await expect(page.getByText(name, { exact: true })).not.toBeVisible({ timeout: 10000 });
   });
 });

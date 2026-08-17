@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useParams } from 'react-router-dom'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
+import { friendlyDeleteError } from './crud'
 
 const GET_ORG_UNITS = gql`
   query GetOrgUnits($spaceId: String!) {
@@ -190,16 +191,19 @@ function OrgUnitCrudDialog({ open, onOpenChange, editing, spaceId }: {
 function OrgUnitDeleteDialog({ item, onConfirm, spaceId }: { item: OrgUnit | null; onConfirm: () => void; spaceId?: string }) {
   const [deleteMut] = useMutation(DELETE_ORG_UNIT)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => { setError(null) }, [item])
   async function handleDelete() {
-    if (!item) return; setLoading(true)
+    if (!item) return; setLoading(true); setError(null)
     try { await deleteMut({ variables: { id: item.id }, refetchQueries: [{ query: GET_ORG_UNITS, variables: { spaceId } }] }); onConfirm() }
-    catch (err) { console.error(err) } finally { setLoading(false) }
+    catch (err) { setError(friendlyDeleteError(err)) } finally { setLoading(false) }
   }
   return (
     <Dialog open={!!item} onOpenChange={onConfirm}>
       <DialogContent>
         <DialogHeader><DialogTitle>确认删除</DialogTitle></DialogHeader>
         <p className="py-4 text-sm text-muted-foreground">确定要删除组织单元「{item?.name}」吗？</p>
+        {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
         <DialogFooter>
           <Button variant="outline" onClick={onConfirm}>取消</Button>
           <Button variant="destructive" onClick={handleDelete} disabled={loading}>{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : '删除'}</Button>

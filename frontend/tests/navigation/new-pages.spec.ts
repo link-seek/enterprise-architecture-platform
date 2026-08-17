@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../helpers/graphql-aware';
 import { login, SPACE_BASE } from '../helpers/auth';
 
 test.describe('v2.0 MVP - New Application Architecture Pages', () => {
@@ -29,7 +29,7 @@ test.describe('v2.0 MVP - New Application Architecture Pages', () => {
     await expect(page.getByText('业务能力 → 流程（v2.1）')).toBeVisible();
   });
 
-  test('应用组件 create dialog opens and submits', { tag: '@regression' }, async ({ page }) => {
+  test('应用组件 create dialog opens and submits', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     await page.getByRole('link', { name: '应用组件', exact: true }).click();
     await page.getByRole('button', { name: '新建组件' }).click();
     const dialog = page.getByRole('dialog');
@@ -42,7 +42,7 @@ test.describe('v2.0 MVP - New Application Architecture Pages', () => {
     await expect(page.getByText(name)).toBeVisible({ timeout: 10000 });
   });
 
-  test('应用流程 create dialog opens and submits', { tag: '@regression' }, async ({ page }) => {
+  test('应用流程 create dialog opens and submits', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
     await page.getByRole('link', { name: '应用流程', exact: true }).click();
     await page.getByRole('button', { name: '新建流程' }).click();
     const dialog = page.getByRole('dialog');
