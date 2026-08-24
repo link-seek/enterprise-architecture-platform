@@ -20,6 +20,13 @@ export const STRANGER_EMAIL = process.env.E2E_STRANGER_EMAIL || process.env.APP_
 export const STRANGER_PASSWORD = process.env.E2E_STRANGER_PASSWORD || process.env.APP_SEED_STRANGER_PASSWORD || 'stranger123456';
 export const STRANGER_NAME = process.env.E2E_STRANGER_NAME || process.env.APP_SEED_STRANGER_NAME || 'Stranger';
 
+// Admin credentials — env-driven so smoke tests resolve the real seed admin
+// in production (SMOKE_TEST_* / APP_SEED_ADMIN_* secrets) instead of the
+// local/CI default admin@test.com / admin123456. Used by tests that need
+// admin-only privileges (e.g. bypassing the 3-space quota).
+export const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL || process.env.SMOKE_TEST_EMAIL || process.env.APP_SEED_ADMIN_EMAIL || 'admin@test.com';
+export const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD || process.env.SMOKE_TEST_PASSWORD || process.env.APP_SEED_ADMIN_PASSWORD || 'admin123456';
+
 // Test space id — env-driven, mirrors backend migration TEST_SPACE_ID.
 export const TEST_SPACE_ID = process.env.E2E_TEST_SPACE_ID || '00000000-0000-0000-0000-000000000010';
 export const SPACE_BASE = `/spaces/${TEST_SPACE_ID}/architectures`;
@@ -30,6 +37,13 @@ export const SPACE_BASE = `/spaces/${TEST_SPACE_ID}/architectures`;
  */
 export async function login(page: Page) {
   await loginAs(page, TEST_EMAIL, TEST_PASSWORD);
+}
+
+/**
+ * Login as the fixed admin account (env-driven; bypasses the 3-space quota).
+ */
+export async function loginAsAdmin(page: Page) {
+  await loginAs(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 }
 
 /**

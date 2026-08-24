@@ -1,12 +1,15 @@
 // spec: specs/eap-test-plan.md
 import { test, expect } from '../helpers/graphql-aware';
-import { loginAs } from '../helpers/auth';
+import { loginAsAdmin } from '../helpers/auth';
 
 test.describe('Spaces - CRUD Main Flow', () => {
   test.beforeEach(async ({ page }) => {
     // Use admin login to bypass the 3-space quota for non-admin users.
     // Previous test runs leave archived spaces that count toward the quota.
-    await loginAs(page, 'admin@test.com', 'admin123456');
+    // Credentials are env-driven so production smoke tests resolve the real
+    // seed admin (SMOKE_TEST_* / APP_SEED_ADMIN_* secrets) instead of the
+    // local/CI default admin@test.com / admin123456.
+    await loginAsAdmin(page);
 
     // Go to the spaces list page.
     await page.goto('/spaces');
