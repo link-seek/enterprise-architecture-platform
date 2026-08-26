@@ -66,7 +66,7 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: 
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [version, setVersion] = useState('v1.0')
+  const [version, setVersion] = useState('1.0.0')
   const [status, setStatus] = useState('active')
   const [importance, setImportance] = useState('High')
   const [triggeringEvent, setTriggeringEvent] = useState('')
@@ -95,7 +95,7 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: 
       } else {
         setName('')
         setDescription('')
-        setVersion('v1.0')
+        setVersion('1.0.0')
         setStatus('active')
         setImportance('High')
         setTriggeringEvent('')
