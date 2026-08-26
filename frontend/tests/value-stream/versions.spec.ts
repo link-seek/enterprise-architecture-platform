@@ -1,6 +1,16 @@
 // spec: specs/eap-test-plan.md
 import { test, expect } from '../helpers/graphql-aware';
 import { login, SPACE_BASE } from '../helpers/auth';
+import { cleanupValueStreamsByNamePrefix } from '../helpers/graphql-api';
+
+// Name prefixes used by tests in this file — cleaned up in afterAll to prevent
+// residual data from accumulating across runs (production data pollution root cause).
+const TEST_NAME_PREFIXES = [
+  '版本控制测试_',
+  '待归档测试_',
+  '历史测试_',
+  '版本验证测试_',
+];
 
 test.describe('Value Stream Management - Version Control', () => {
   test.beforeEach(async ({ page }) => {
@@ -10,6 +20,10 @@ test.describe('Value Stream Management - Version Control', () => {
     await page.goto(`${SPACE_BASE}/value-streams`);
   });
 
+  test.afterAll(async ({ request }) => {
+    await cleanupValueStreamsByNamePrefix(request, TEST_NAME_PREFIXES);
+  });
+
   test('Happy Path - Create New Version', { tag: '@regression' }, async ({ page }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `版本控制测试_${Date.now()}`;
@@ -17,7 +31,7 @@ test.describe('Value Stream Management - Version Control', () => {
     await page.getByRole('button', { name: '新建价值流' }).click();
     await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('用于版本控制测试');
-    await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
+    await page.getByRole('textbox', { name: /版本|Version/ }).fill('1.0.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
     await statusField.selectOption('active');
@@ -37,7 +51,7 @@ test.describe('Value Stream Management - Version Control', () => {
     await expect(page.getByRole('heading', { name: /新建版本|Create New Version/ })).toBeVisible();
     
     // Enter new version name
-    await page.getByRole('textbox', { name: /版本|Version/ }).fill('v2.0');
+    await page.getByRole('textbox', { name: /版本|Version/ }).fill('2.0.0');
     
     // Click "创建" button
     await page.getByRole('button', { name: /创建|Create/ }).click();
@@ -48,7 +62,7 @@ test.describe('Value Stream Management - Version Control', () => {
     // Verify success message or UI update
     // The UI should reflect the new version somehow
     
-    // After versioning there are two rows (v1.0 archived + v2.0 active);
+    // After versioning there are two rows (1.0.0 archived + 2.0.0 active);
     // click history (History) button on the active row
     const activeRow = page.locator('tr').filter({ hasText: name }).filter({ hasText: 'active' });
     await activeRow.getByRole('button', { name: '历史' }).click();
@@ -57,10 +71,10 @@ test.describe('Value Stream Management - Version Control', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByRole('heading', { name: /版本历史|Version History/ })).toBeVisible();
 
-    // Verify both versions (v1.0 and v2.0) listed inside the dialog
+    // Verify both versions (1.0.0 and 2.0.0) listed inside the dialog
     const historyDialog = page.getByRole('dialog');
-    await expect(historyDialog.getByText('v1.0')).toBeVisible();
-    await expect(historyDialog.getByText('v2.0')).toBeVisible();
+    await expect(historyDialog.getByText('1.0.0')).toBeVisible();
+    await expect(historyDialog.getByText('2.0.0')).toBeVisible();
 
     // Close history dialog
     await historyDialog.getByRole('button', { name: '关闭' }).click();
@@ -74,7 +88,7 @@ test.describe('Value Stream Management - Version Control', () => {
     await page.getByRole('button', { name: '新建价值流' }).click();
     await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这个将被归档');
-    await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
+    await page.getByRole('textbox', { name: /版本|Version/ }).fill('1.0.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
     await statusField.selectOption('active');
@@ -125,7 +139,7 @@ test.describe('Value Stream Management - Version Control', () => {
     await page.getByRole('button', { name: '新建价值流' }).click();
     await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('用于历史测试');
-    await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
+    await page.getByRole('textbox', { name: /版本|Version/ }).fill('1.0.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
     await statusField.selectOption('active');
@@ -137,15 +151,15 @@ test.describe('Value Stream Management - Version Control', () => {
     const row = page.locator('tr').filter({ hasText: name });
     await expect(row).toBeVisible();
     
-    // After versioning there are two rows (v1.0 archived + v2.0 active);
+    // After versioning there are two rows (1.0.0 archived + 2.0.0 active);
     // click history (History) button on the active row
     const activeRow = page.locator('tr').filter({ hasText: name }).filter({ hasText: 'active' });
     await activeRow.getByRole('button', { name: '历史' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
 
-    // Look for restore button on v1.0 (inside the history dialog)
+    // Look for restore button on 1.0.0 (inside the history dialog)
     const historyDialog = page.getByRole('dialog');
-    const v1Row = historyDialog.locator('tr').filter({ hasText: 'v1.0' });
+    const v1Row = historyDialog.locator('tr').filter({ hasText: '1.0.0' });
 
     // If restore functionality exists, test it
     const restoreButton = v1Row.getByRole('button').filter({ hasText: /恢复|Restore/ });
@@ -173,7 +187,7 @@ test.describe('Value Stream Management - Version Control', () => {
     await page.getByRole('button', { name: '新建价值流' }).click();
     await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('用于版本验证测试');
-    await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
+    await page.getByRole('textbox', { name: /版本|Version/ }).fill('1.0.0');
 
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
     await statusField.selectOption('active');

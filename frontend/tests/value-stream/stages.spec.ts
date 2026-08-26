@@ -1,9 +1,17 @@
 // spec: specs/eap-test-plan.md
 import { test, expect } from '../helpers/graphql-aware';
 import { login, SPACE_BASE } from '../helpers/auth';
+import { cleanupValueStreamsByNamePrefix } from '../helpers/graphql-api';
 
 // 使用时间戳后缀保证多次运行不产生同名价值流与阶段，避免列表行/文本匹配歧义
 const suffix = Date.now().toString();
+
+// Name prefixes used by tests in this file — cleaned up in afterAll to prevent
+// residual data from accumulating across runs (production data pollution root cause).
+const TEST_NAME_PREFIXES = [
+  `阶段UI测试流${suffix}`,
+  `阶段CRUD流${suffix}`,
+];
 
 test.describe('Value Stream Stages - 阶段管理', () => {
   test.beforeEach(async ({ page }) => {
@@ -11,6 +19,10 @@ test.describe('Value Stream Stages - 阶段管理', () => {
     await page.goto(`${SPACE_BASE}/value-streams`);
     // 等待列表加载完成（新建价值流按钮可见）后再操作，避免冷启动下点击落空
     await expect(page.getByRole('button', { name: '新建价值流' })).toBeVisible({ timeout: 30000 });
+  });
+
+  test.afterAll(async ({ request }) => {
+    await cleanupValueStreamsByNamePrefix(request, TEST_NAME_PREFIXES);
   });
 
   test('创建价值流后，在详情页添加阶段', { tag: '@regression' }, async ({ page }) => {

@@ -18,6 +18,7 @@ use business_architecture::infrastructure::persistence::entities::{
 };
 use business_architecture::application::value_stream_service::ValueStreamService;
 use business_architecture::application::space_service::SpaceService;
+use business_architecture::application::version;
 use business_architecture::domain::value_stream::entity::ValueStream as DomainValueStream;
 use business_architecture::domain::value_stream::repository::ValueStreamRepository;
 use business_architecture::domain::process::entity::BusinessProcess as DomainBusinessProcess;
@@ -617,6 +618,9 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 let name = ctx.args.try_get("name")?.string()?.to_owned();
                 let description = ctx.args.get("description").and_then(|v| v.string().ok()).map(|s| s.to_owned());
                 let business_version = ctx.args.try_get("businessVersion")?.string()?.to_owned();
+                version::parse(&business_version).map_err(|e| async_graphql::Error::new(
+                    format!("Invalid business version '{business_version}': {e}. Expected semver format like '1.0.0'")
+                ))?;
                 let importance = parse_importance(ctx.args.try_get("importance")?.enum_name()?)?;
                 let stakeholders = match ctx.args.get("stakeholders") {
                     Some(_) => Some(parse_string_vec_arg(&ctx, "stakeholders")?),
@@ -821,6 +825,9 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     .map_err(|e| async_graphql::Error::new(format!("Invalid UUID: {e}")))?;
 
                 let new_version = ctx.args.try_get("newVersion")?.string()?.to_owned();
+                version::parse(&new_version).map_err(|e| async_graphql::Error::new(
+                    format!("Invalid business version '{new_version}': {e}. Expected semver format like '1.0.0'")
+                ))?;
                 let new_name = ctx.args.get("newName").and_then(|v| v.string().ok()).map(|s| s.to_owned());
                 let new_description = ctx.args.get("newDescription").and_then(|v| v.string().ok()).map(|s| s.to_owned());
 

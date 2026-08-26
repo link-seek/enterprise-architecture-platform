@@ -1,6 +1,19 @@
 // spec: specs/eap-test-plan.md
 import { test, testWithError, expect } from '../helpers/graphql-aware';
 import { login, SPACE_BASE } from '../helpers/auth';
+import { cleanupValueStreamsByNamePrefix } from '../helpers/graphql-api';
+
+// Name prefixes used by tests in this file — cleaned up in afterAll to prevent
+// residual data from accumulating across runs (production data pollution root cause).
+const TEST_NAME_PREFIXES = [
+  '测试价值流_',
+  '原始名称_',
+  'Updated_',
+  '待删除价值流_',
+  '测试取消删除_',
+  '查看详情测试_',
+  '非属主删除测试_',
+];
 
 test.describe('Value Stream Management - CRUD Operations', () => {
   test.beforeEach(async ({ page }) => {
@@ -8,6 +21,10 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     // Login now lands on the architecture overview; navigate to value-streams explicitly.
     await login(page);
     await page.goto(`${SPACE_BASE}/value-streams`);
+  });
+
+  test.afterAll(async ({ request }) => {
+    await cleanupValueStreamsByNamePrefix(request, TEST_NAME_PREFIXES);
   });
 
   test('Happy Path - Create Value Stream', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
@@ -22,7 +39,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     const name = `测试价值流_${Date.now()}`;
     await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这是一个测试价值流');
-    await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
+    await page.getByRole('textbox', { name: /版本|Version/ }).fill('1.0.0');
     
     // Select status (assuming it's a select/dropdown)
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
@@ -43,7 +60,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(row).toBeVisible({ timeout: 10000 });
     
     // Verify table shows correct data
-    await expect(row.getByText('v1.0')).toBeVisible();
+    await expect(row.getByText('1.0.0')).toBeVisible();
     await expect(row.getByText('active')).toBeVisible();
     
     // Note: Pagination count verification would require checking the table structure
@@ -56,7 +73,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     const originalName = `原始名称_${Date.now()}`;
     await page.getByRole('textbox', { name: /名称|Name/ }).fill(originalName);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('原始描述');
-    await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
+    await page.getByRole('textbox', { name: /版本|Version/ }).fill('1.0.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
     await statusField.selectOption('active');
@@ -102,7 +119,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(updatedRow.getByText('Updated Description')).toBeVisible();
     
     // Verify other fields unchanged
-    await expect(updatedRow.getByText('v1.0')).toBeVisible();
+    await expect(updatedRow.getByText('1.0.0')).toBeVisible();
     await expect(updatedRow.getByText('active')).toBeVisible();
   });
 
@@ -113,7 +130,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await page.getByRole('button', { name: '新建价值流' }).click();
     await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这个将被删除');
-    await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
+    await page.getByRole('textbox', { name: /版本|Version/ }).fill('1.0.0');
 
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
     await statusField.selectOption('active');
@@ -158,7 +175,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     // Test Case 1: Empty name field — submit button should be disabled
     await page.getByRole('textbox', { name: /名称|Name/ }).clear();
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('描述');
-    await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
+    await page.getByRole('textbox', { name: /版本|Version/ }).fill('1.0.0');
     
     const submitButton = page.getByRole('button', { name: /保存|创建|Save|Create/ });
     await expect(submitButton).toBeDisabled();
@@ -181,7 +198,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     const cancelName = `测试取消删除_${Date.now()}`;
     await page.getByRole('textbox', { name: /名称|Name/ }).fill(cancelName);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('测试取消删除描述');
-    await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
+    await page.getByRole('textbox', { name: /版本|Version/ }).fill('1.0.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
     await statusField.selectOption('active');
@@ -222,7 +239,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await page.getByRole('button', { name: '新建价值流' }).click();
     await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('这是一个用于查看详情的测试价值流');
-    await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
+    await page.getByRole('textbox', { name: /版本|Version/ }).fill('1.0.0');
     
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
     await statusField.selectOption('active');
@@ -246,7 +263,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     // Verify all value stream data displayed
     await expect(page.getByText(name)).toBeVisible();
     await expect(page.getByText('这是一个用于查看详情的测试价值流')).toBeVisible();
-    await expect(page.getByText('v1.0')).toBeVisible();
+    await expect(page.getByText('1.0.0')).toBeVisible();
     await expect(page.getByText('active')).toBeVisible();
     
     // Look for "返回列表" button and click it
@@ -268,6 +285,10 @@ testWithError.describe('Value Stream Delete - Error Handling', () => {
   testWithError.beforeEach(async ({ page }) => {
     await login(page);
     await page.goto(`${SPACE_BASE}/value-streams`);
+  });
+
+  testWithError.afterAll(async ({ request }) => {
+    await cleanupValueStreamsByNamePrefix(request, TEST_NAME_PREFIXES);
   });
 
   testWithError('非 owner 删除价值流应显示错误提示', { tag: '@regression' }, async ({ page }) => {
@@ -302,7 +323,7 @@ testWithError.describe('Value Stream Delete - Error Handling', () => {
     await page.getByRole('button', { name: '新建价值流' }).click();
     await page.getByRole('textbox', { name: /名称|Name/ }).fill(name);
     await page.getByRole('textbox', { name: /描述|Description/ }).fill('用于测试删除错误提示');
-    await page.getByRole('textbox', { name: /版本|Version/ }).fill('v1.0');
+    await page.getByRole('textbox', { name: /版本|Version/ }).fill('1.0.0');
 
     const statusField = page.getByRole('combobox', { name: /状态|Status/ }).or(page.getByRole('textbox', { name: /状态|Status/ }));
     await statusField.selectOption('active');

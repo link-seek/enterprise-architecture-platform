@@ -3,9 +3,17 @@
 // 阶段/能力均为测试自建（owner = 测试账号），后端仅允许实体 owner 或 admin 修改关联。
 import { test, expect } from '../helpers/graphql-aware';
 import { login, SPACE_BASE, TEST_EMAIL, TEST_PASSWORD, TEST_SPACE_ID } from '../helpers/auth';
+import { cleanupValueStreamsByNamePrefix } from '../helpers/graphql-api';
 import type { Page } from '@playwright/test';
 
 const suffix = Date.now().toString();
+
+// Name prefixes used by tests in this file — cleaned up in afterAll to prevent
+// residual data from accumulating across runs (production data pollution root cause).
+const TEST_NAME_PREFIXES = [
+  `关联能力测试流${suffix}`,
+  `移除关联流${suffix}`,
+];
 
 async function apiToken(page: Page): Promise<string> {
   const res = await page.request.post('/api/auth/login', {
@@ -30,6 +38,10 @@ test.describe('价值流阶段 - 关联能力', () => {
     await login(page);
     await page.goto(`${SPACE_BASE}/value-streams`);
     await expect(page.getByRole('button', { name: '新建价值流' })).toBeVisible({ timeout: 30000 });
+  });
+
+  test.afterAll(async ({ request }) => {
+    await cleanupValueStreamsByNamePrefix(request, TEST_NAME_PREFIXES);
   });
 
   test('阶段详情展示关联能力，可勾选新增且幂等保存', { tag: '@regression' }, async ({ page }) => {

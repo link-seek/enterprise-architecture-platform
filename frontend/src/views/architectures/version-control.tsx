@@ -122,11 +122,11 @@ export function CreateVersionDialog({ open, onOpenChange, currentItem, spaceId }
 
   useEffect(() => {
     if (open && currentItem) {
-      const match = currentItem.businessVersion.match(/v(\d+)\.(\d+)/)
+      const match = currentItem.businessVersion.match(/v?(\d+)\.(\d+)/)
       if (match) {
-        setNewVersion(`v${parseInt(match[1]) + 1}.0`)
+        setNewVersion(`${parseInt(match[1]) + 1}.0.0`)
       } else {
-        setNewVersion('v2.0')
+        setNewVersion('2.0.0')
       }
       setError(null)
     }
@@ -170,7 +170,7 @@ export function CreateVersionDialog({ open, onOpenChange, currentItem, spaceId }
           </p>
           <div className="space-y-2">
             <Label htmlFor="new-version">新版本号</Label>
-            <Input id="new-version" value={newVersion} onChange={e => setNewVersion(e.target.value)} placeholder="v2.0" />
+            <Input id="new-version" value={newVersion} onChange={e => setNewVersion(e.target.value)} placeholder="2.0.0" />
           </div>
         </div>
         <DialogFooter>
