@@ -1,0 +1,40 @@
+name: Health Check Test
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      KEY: ${{ secrets.DISCUSS_API_KEY_1 }}
+      BASE: ${{ secrets.DISCUSS_API_BASE }}
+    steps:
+      - run: |
+          python3 -c "
+          import os, json, urllib.request
+          API = os.environ['BASE']
+          KEY = os.environ['KEY']
+          MODELS = [
+              'mimo-v2.5-free',
+              'nemotron-3.5-lightning-free',
+              'ling-3.0-flash-fin-free',
+              'big-pickle',
+              'deepseek-v4-flash-free',
+              'muse-spark-1.2-contributor-free',
+              'nemotron-3-ultra-free',
+              'laguna-s-2.1-free',
+          ]
+          for m in MODELS:
+              try:
+                  req = urllib.request.Request(
+                      f'{API}/chat/completions',
+                      data=json.dumps({'model':m,'max_tokens':1,'messages':[{'role':'user','content':'hi'}]}).encode(),
+                      headers={'Authorization':f'Bearer {KEY}','Content-Type':'application/json'})
+                  with urllib.request.urlopen(req, timeout=10) as resp:
+                      print(f'{m}: HTTP {resp.status} OK')
+              except urllib.error.HTTPError as e:
+                  body = e.read().decode()[:200]
+                  print(f'{m}: HTTP {e.code} {e.reason} | {body}')
+              except Exception as e:
+                  print(f'{m}: FAIL {e}')
+          "
