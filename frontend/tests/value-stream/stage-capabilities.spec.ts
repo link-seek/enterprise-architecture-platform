@@ -3,16 +3,14 @@
 // 阶段/能力均为测试自建（owner = 测试账号），后端仅允许实体 owner 或 admin 修改关联。
 import { test, expect } from '../helpers/graphql-aware';
 import { login, SPACE_BASE, TEST_EMAIL, TEST_PASSWORD, TEST_SPACE_ID } from '../helpers/auth';
-import { cleanupValueStreamsByNamePrefix } from '../helpers/graphql-api';
+import { cleanupValueStreamsByNamePrefix, findResidualValueStreams } from '../helpers/graphql-api';
 import type { Page } from '@playwright/test';
 
-const suffix = Date.now().toString();
-
-// Name prefixes used by tests in this file — cleaned up in afterAll to prevent
-// residual data from accumulating across runs (production data pollution root cause).
+// Static prefixes ensure afterAll cleanup catches every run's data; the
+// per-test names carry a Date.now() suffix for uniqueness within a run.
 const TEST_NAME_PREFIXES = [
-  `关联能力测试流${suffix}`,
-  `移除关联流${suffix}`,
+  '关联能力测试流_',
+  '移除关联流_',
 ];
 
 async function apiToken(page: Page): Promise<string> {
@@ -42,10 +40,13 @@ test.describe('价值流阶段 - 关联能力', () => {
 
   test.afterAll(async ({ request }) => {
     await cleanupValueStreamsByNamePrefix(request, TEST_NAME_PREFIXES);
+    const residual = await findResidualValueStreams(request, TEST_NAME_PREFIXES);
+    expect(residual).toEqual([]);
   });
 
   test('阶段详情展示关联能力，可勾选新增且幂等保存', { tag: '@regression' }, async ({ page }) => {
-    const vsName = `关联能力测试流${suffix}`;
+    const suffix = Date.now().toString();
+    const vsName = `关联能力测试流_${suffix}`;
     const stageName = `测试阶段${suffix}`;
     const capName = `测试能力${suffix}`;
 
@@ -91,7 +92,8 @@ test.describe('价值流阶段 - 关联能力', () => {
   });
 
   test('可从阶段移除关联能力', { tag: '@regression' }, async ({ page }) => {
-    const vsName = `移除关联流${suffix}`;
+    const suffix = Date.now().toString();
+    const vsName = `移除关联流_${suffix}`;
     const stageName = `移除阶段${suffix}`;
     const capName = `待移除能力${suffix}`;
 

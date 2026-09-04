@@ -1,16 +1,13 @@
 // spec: specs/eap-test-plan.md
 import { test, expect } from '../helpers/graphql-aware';
 import { login, SPACE_BASE } from '../helpers/auth';
-import { cleanupValueStreamsByNamePrefix } from '../helpers/graphql-api';
+import { cleanupValueStreamsByNamePrefix, findResidualValueStreams } from '../helpers/graphql-api';
 
-// 使用时间戳后缀保证多次运行不产生同名价值流与阶段，避免列表行/文本匹配歧义
-const suffix = Date.now().toString();
-
-// Name prefixes used by tests in this file — cleaned up in afterAll to prevent
-// residual data from accumulating across runs (production data pollution root cause).
+// Static prefixes ensure afterAll cleanup catches every run's data; the
+// per-test names carry a Date.now() suffix for uniqueness within a run.
 const TEST_NAME_PREFIXES = [
-  `阶段UI测试流${suffix}`,
-  `阶段CRUD流${suffix}`,
+  '阶段UI测试流_',
+  '阶段CRUD流_',
 ];
 
 test.describe('Value Stream Stages - 阶段管理', () => {
@@ -23,10 +20,13 @@ test.describe('Value Stream Stages - 阶段管理', () => {
 
   test.afterAll(async ({ request }) => {
     await cleanupValueStreamsByNamePrefix(request, TEST_NAME_PREFIXES);
+    const residual = await findResidualValueStreams(request, TEST_NAME_PREFIXES);
+    expect(residual).toEqual([]);
   });
 
   test('创建价值流后，在详情页添加阶段', { tag: '@regression' }, async ({ page }) => {
-    const vsName = `阶段UI测试流${suffix}`;
+    const suffix = Date.now().toString();
+    const vsName = `阶段UI测试流_${suffix}`;
     const stageName = `需求分析${suffix}`;
     await page.getByRole('button', { name: '新建价值流' }).click();
     await page.getByRole('textbox', { name: /名称/ }).fill(vsName);
@@ -49,7 +49,8 @@ test.describe('Value Stream Stages - 阶段管理', () => {
   });
 
   test('在详情页编辑和删除阶段', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
-    const vsName = `阶段CRUD流${suffix}`;
+    const suffix = Date.now().toString();
+    const vsName = `阶段CRUD流_${suffix}`;
     const stageName = `设计${suffix}`;
     const editedName = `详细设计${suffix}`;
     await page.getByRole('button', { name: '新建价值流' }).click();

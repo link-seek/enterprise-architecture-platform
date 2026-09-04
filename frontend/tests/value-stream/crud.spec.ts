@@ -1,10 +1,9 @@
 // spec: specs/eap-test-plan.md
 import { test, testWithError, expect } from '../helpers/graphql-aware';
-import { login, SPACE_BASE } from '../helpers/auth';
-import { cleanupValueStreamsByNamePrefix } from '../helpers/graphql-api';
+import { login, SPACE_BASE, TEST_EMAIL, TEST_PASSWORD } from '../helpers/auth';
+import { cleanupValueStreamsByNamePrefix, findResidualValueStreams } from '../helpers/graphql-api';
 
-// Name prefixes used by tests in this file — cleaned up in afterAll to prevent
-// residual data from accumulating across runs (production data pollution root cause).
+// Static prefixes — afterAll cleanup catches every run's data.
 const TEST_NAME_PREFIXES = [
   '测试价值流_',
   '原始名称_',
@@ -14,6 +13,21 @@ const TEST_NAME_PREFIXES = [
   '查看详情测试_',
   '非属主删除测试_',
 ];
+
+/**
+ * Self-delete + verify: delete all value streams whose name starts with any of
+ * the given prefixes via the GraphQL API, then query back and assert zero
+ * residual. Used at the end of each test case so a single run cannot leave
+ * data behind (单例自删自证).
+ */
+async function selfDeleteAndVerify(
+  request: import('@playwright/test').APIRequestContext,
+  namePrefixes: string[],
+): Promise<void> {
+  await cleanupValueStreamsByNamePrefix(request, namePrefixes, TEST_EMAIL, TEST_PASSWORD);
+  const residual = await findResidualValueStreams(request, namePrefixes, TEST_EMAIL, TEST_PASSWORD);
+  expect(residual).toEqual([]);
+}
 
 test.describe('Value Stream Management - CRUD Operations', () => {
   test.beforeEach(async ({ page }) => {
@@ -25,9 +39,11 @@ test.describe('Value Stream Management - CRUD Operations', () => {
 
   test.afterAll(async ({ request }) => {
     await cleanupValueStreamsByNamePrefix(request, TEST_NAME_PREFIXES);
+    const residual = await findResidualValueStreams(request, TEST_NAME_PREFIXES);
+    expect(residual).toEqual([]);
   });
 
-  test('Happy Path - Create Value Stream', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
+  test('Happy Path - Create Value Stream', { tag: ['@smoke', '@regression'] }, async ({ page, request }) => {
     // Click "新建价值流" button
     await page.getByRole('button', { name: '新建价值流' }).click();
     
@@ -65,9 +81,12 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     
     // Note: Pagination count verification would require checking the table structure
     // For now, we verify the item appears in the table
+
+    // Self-delete and verify (单例自删自证)
+    await selfDeleteAndVerify(request, [name]);
   });
 
-  test('Happy Path - Edit Value Stream', { tag: '@regression' }, async ({ page }) => {
+  test('Happy Path - Edit Value Stream', { tag: '@regression' }, async ({ page, request }) => {
     // First, create a value stream to edit
     await page.getByRole('button', { name: '新建价值流' }).click();
     const originalName = `原始名称_${Date.now()}`;
@@ -121,9 +140,12 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     // Verify other fields unchanged
     await expect(updatedRow.getByText('1.0.0')).toBeVisible();
     await expect(updatedRow.getByText('active')).toBeVisible();
+
+    // Self-delete and verify (单例自删自证) — covers both original and updated names
+    await selfDeleteAndVerify(request, [originalName, updatedName]);
   });
 
-  test('Happy Path - Delete Value Stream', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
+  test('Happy Path - Delete Value Stream', { tag: ['@smoke', '@regression'] }, async ({ page, request }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `待删除价值流_${Date.now()}`;
     // First, create a value stream to delete
@@ -166,6 +188,10 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     // Reload and re-assert to catch optimistic-update "fake deletes" (#403).
     await page.reload();
     await expect(page.getByText(name, { exact: true })).not.toBeVisible({ timeout: 10000 });
+
+    // GQL回查0 — verify backend truly deleted (单例自删自证)
+    const residual = await findResidualValueStreams(request, [name], TEST_EMAIL, TEST_PASSWORD);
+    expect(residual).toEqual([]);
   });
 
   test('Edge Case - Create Value Stream Validation', { tag: '@regression' }, async ({ page }) => {
@@ -192,7 +218,7 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
-  test('Edge Case - Delete Confirmation Cancel', { tag: '@regression' }, async ({ page }) => {
+  test('Edge Case - Delete Confirmation Cancel', { tag: '@regression' }, async ({ page, request }) => {
     // Create a value stream
     await page.getByRole('button', { name: '新建价值流' }).click();
     const cancelName = `测试取消删除_${Date.now()}`;
@@ -230,9 +256,12 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     
     // Verify value stream still in table
     await expect(page.getByText(cancelName)).toBeVisible();
+
+    // Self-delete and verify (单例自删自证)
+    await selfDeleteAndVerify(request, [cancelName]);
   });
 
-  test('View Value Stream Details', { tag: '@regression' }, async ({ page }) => {
+  test('View Value Stream Details', { tag: '@regression' }, async ({ page, request }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `查看详情测试_${Date.now()}`;
     // First, create a value stream to view
@@ -276,6 +305,9 @@ test.describe('Value Stream Management - CRUD Operations', () => {
       await page.goBack();
       await expect(page).toHaveURL(`${SPACE_BASE}/value-streams`);
     }
+
+    // Self-delete and verify (单例自删自证)
+    await selfDeleteAndVerify(request, [name]);
   });
 });
 
@@ -289,9 +321,11 @@ testWithError.describe('Value Stream Delete - Error Handling', () => {
 
   testWithError.afterAll(async ({ request }) => {
     await cleanupValueStreamsByNamePrefix(request, TEST_NAME_PREFIXES);
+    const residual = await findResidualValueStreams(request, TEST_NAME_PREFIXES);
+    expect(residual).toEqual([]);
   });
 
-  testWithError('非 owner 删除价值流应显示错误提示', { tag: '@regression' }, async ({ page }) => {
+  testWithError('非 owner 删除价值流应显示错误提示', { tag: '@regression' }, async ({ page, request }) => {
     // The list gates the delete button on client-side ownership (isEntityOwner),
     // so a real non-owner cannot see it in the UI. To verify the delete dialog
     // surfaces backend permission errors instead of silently swallowing them,
@@ -351,5 +385,10 @@ testWithError.describe('Value Stream Delete - Error Handling', () => {
 
     await expect(dialog.getByText(/无法删除/i)).toBeVisible({ timeout: 5000 });
     await expect(dialog).toBeVisible();
+
+    // Self-delete and verify (单例自删自证). Use the standalone `request`
+    // fixture (not page.request) to bypass the route mock that intercepts
+    // valueStreamDelete on the page context.
+    await selfDeleteAndVerify(request, [name]);
   });
 });

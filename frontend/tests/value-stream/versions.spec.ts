@@ -1,16 +1,29 @@
 // spec: specs/eap-test-plan.md
 import { test, expect } from '../helpers/graphql-aware';
-import { login, SPACE_BASE } from '../helpers/auth';
-import { cleanupValueStreamsByNamePrefix } from '../helpers/graphql-api';
+import { login, SPACE_BASE, TEST_EMAIL, TEST_PASSWORD } from '../helpers/auth';
+import { cleanupValueStreamsByNamePrefix, findResidualValueStreams } from '../helpers/graphql-api';
 
-// Name prefixes used by tests in this file — cleaned up in afterAll to prevent
-// residual data from accumulating across runs (production data pollution root cause).
+// Static prefixes — afterAll cleanup catches every run's data.
 const TEST_NAME_PREFIXES = [
   '版本控制测试_',
   '待归档测试_',
   '历史测试_',
   '版本验证测试_',
 ];
+
+/**
+ * Self-delete + verify: delete all value streams whose name starts with any of
+ * the given prefixes via the GraphQL API, then query back and assert zero
+ * residual (单例自删自证).
+ */
+async function selfDeleteAndVerify(
+  request: import('@playwright/test').APIRequestContext,
+  namePrefixes: string[],
+): Promise<void> {
+  await cleanupValueStreamsByNamePrefix(request, namePrefixes, TEST_EMAIL, TEST_PASSWORD);
+  const residual = await findResidualValueStreams(request, namePrefixes, TEST_EMAIL, TEST_PASSWORD);
+  expect(residual).toEqual([]);
+}
 
 test.describe('Value Stream Management - Version Control', () => {
   test.beforeEach(async ({ page }) => {
@@ -22,9 +35,11 @@ test.describe('Value Stream Management - Version Control', () => {
 
   test.afterAll(async ({ request }) => {
     await cleanupValueStreamsByNamePrefix(request, TEST_NAME_PREFIXES);
+    const residual = await findResidualValueStreams(request, TEST_NAME_PREFIXES);
+    expect(residual).toEqual([]);
   });
 
-  test('Happy Path - Create New Version', { tag: '@regression' }, async ({ page }) => {
+  test('Happy Path - Create New Version', { tag: '@regression' }, async ({ page, request }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `版本控制测试_${Date.now()}`;
     // First, create a value stream to version
@@ -79,9 +94,13 @@ test.describe('Value Stream Management - Version Control', () => {
     // Close history dialog
     await historyDialog.getByRole('button', { name: '关闭' }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
+
+    // Self-delete and verify (单例自删自证) — cleanup expands by logicalId so
+    // both the archived 1.0.0 and active 2.0.0 rows are removed.
+    await selfDeleteAndVerify(request, [name]);
   });
 
-  test('Happy Path - Archive Value Stream', { tag: ['@smoke', '@regression'] }, async ({ page }) => {
+  test('Happy Path - Archive Value Stream', { tag: ['@smoke', '@regression'] }, async ({ page, request }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `待归档测试_${Date.now()}`;
     // Create an active value stream
@@ -130,9 +149,12 @@ test.describe('Value Stream Management - Version Control', () => {
     } else {
       console.log('Archive button not found - skipping archive test');
     }
+
+    // Self-delete and verify (单例自删自证)
+    await selfDeleteAndVerify(request, [name]);
   });
 
-  test('Version History Dialog Functionality', { tag: '@regression' }, async ({ page }) => {
+  test('Version History Dialog Functionality', { tag: '@regression' }, async ({ page, request }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `历史测试_${Date.now()}`;
     // Create a value stream with multiple versions
@@ -178,9 +200,12 @@ test.describe('Value Stream Management - Version Control', () => {
 
     // Close history dialog
     await historyDialog.getByRole('button', { name: '关闭' }).click();
+
+    // Self-delete and verify (单例自删自证)
+    await selfDeleteAndVerify(request, [name]);
   });
 
-  test('Create Version Validation', { tag: '@regression' }, async ({ page }) => {
+  test('Create Version Validation', { tag: '@regression' }, async ({ page, request }) => {
     // Use a unique name to avoid strict-mode violations from residual data on repeated runs
     const name = `版本验证测试_${Date.now()}`;
     // Create a value stream
@@ -211,5 +236,8 @@ test.describe('Value Stream Management - Version Control', () => {
     // Close dialog
     await page.getByRole('dialog').getByRole('button', { name: '取消' }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
+
+    // Self-delete and verify (单例自删自证)
+    await selfDeleteAndVerify(request, [name]);
   });
 });
