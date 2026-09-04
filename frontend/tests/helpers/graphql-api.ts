@@ -55,39 +55,110 @@ export async function gql(
   return (await res.json()) as GqlResponse;
 }
 
+/** Seed value-stream id — must never be deleted by cleanup. */
+export const SEED_VALUE_STREAM_ID = '00000000-0000-0000-0000-0000000000a0';
+
+export interface ValueStreamRow {
+  id: string;
+  name: string;
+  logicalId: string;
+  status: string;
+}
+
+export interface CleanupResult {
+  deleted: string[];
+  failed: string[];
+}
+
 /**
- * Teardown helper: soft-delete all value streams in the test space whose name
- * starts with one of the given prefixes. Used in `afterAll` to prevent e2e
- * test data from accumulating across runs (the root cause of production data
- * pollution). Only deletes rows the caller's token is allowed to delete (owner
- * or admin); errors are swallowed so a missing row never fails the suite.
+ * Query all non-deleted value streams in the test space, returning id/name/
+ * logicalId/status. Used by cleanup and residual-verification helpers.
+ */
+async function fetchValueStreams(
+  request: APIRequestContext,
+  token: string,
+): Promise<ValueStreamRow[]> {
+  const res = await gql(
+    request,
+    token,
+    `{ valueStreamsBySpace(spaceId: "${TEST_SPACE_ID}") { id name logicalId status } }`,
+  );
+  return (res.data?.valueStreamsBySpace ?? []) as ValueStreamRow[];
+}
+
+/**
+ * Strict teardown: soft-delete all value streams whose name starts with one of
+ * the given prefixes, expanding the delete to every row sharing the same
+ * `logicalId` (so archived versions are removed alongside the active one).
+ * The seed value stream (SEED_VALUE_STREAM_ID) is never deleted.
+ *
+ * Returns `{deleted, failed}`. Throws when any deletion fails so residual data
+ * fails the suite instead of silently accumulating.
  */
 export async function cleanupValueStreamsByNamePrefix(
   request: APIRequestContext,
   namePrefixes: string[],
   email: string = TEST_EMAIL,
   password: string = TEST_PASSWORD,
-): Promise<void> {
+): Promise<CleanupResult> {
+  const result: CleanupResult = { deleted: [], failed: [] };
   let token: string;
   try {
     const session = await apiLogin(request, email, password);
     token = session.token;
   } catch {
-    return; // cannot login → nothing to clean
+    return result; // cannot login → nothing to clean
   }
-  const res = await gql(
-    request,
-    token,
-    `{ valueStreamsBySpace(spaceId: "${TEST_SPACE_ID}") { id name } }`,
-  );
-  const streams = res.data?.valueStreamsBySpace ?? [];
+
+  const streams = await fetchValueStreams(request, token);
+
+  // Collect logicalIds of rows matching a prefix (excluding the seed).
+  const targetLogicalIds = new Set<string>();
   for (const vs of streams) {
+    if (vs.id === SEED_VALUE_STREAM_ID) continue;
     if (namePrefixes.some((p) => vs.name.startsWith(p))) {
-      try {
-        await gql(request, token, `mutation { valueStreamDelete(id: "${vs.id}") }`);
-      } catch {
-        // Swallow delete errors so cleanup never fails the suite.
-      }
+      targetLogicalIds.add(vs.logicalId);
     }
   }
+
+  // Expand delete: remove every row sharing a target logicalId.
+  for (const vs of streams) {
+    if (!targetLogicalIds.has(vs.logicalId)) continue;
+    if (vs.id === SEED_VALUE_STREAM_ID) continue;
+    try {
+      const del = await gql(request, token, `mutation { valueStreamDelete(id: "${vs.id}") }`);
+      if (del.errors) throw new Error(del.errors.map((e) => e.message).join('; '));
+      result.deleted.push(vs.id);
+    } catch {
+      result.failed.push(vs.id);
+    }
+  }
+
+  if (result.failed.length > 0) {
+    throw new Error(`cleanup failed to delete ${result.failed.length} value stream(s): ${result.failed.join(', ')}`);
+  }
+  return result;
+}
+
+/**
+ * Query residual value streams matching the given prefixes (excluding the
+ * seed). Used in afterAll to assert no test data survives cleanup.
+ */
+export async function findResidualValueStreams(
+  request: APIRequestContext,
+  namePrefixes: string[],
+  email: string = TEST_EMAIL,
+  password: string = TEST_PASSWORD,
+): Promise<ValueStreamRow[]> {
+  let token: string;
+  try {
+    const session = await apiLogin(request, email, password);
+    token = session.token;
+  } catch {
+    return []; // cannot login → cannot determine residual
+  }
+  const streams = await fetchValueStreams(request, token);
+  return streams.filter(
+    (vs) => vs.id !== SEED_VALUE_STREAM_ID && namePrefixes.some((p) => vs.name.startsWith(p)),
+  );
 }
