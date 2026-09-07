@@ -17,7 +17,7 @@ function AdminRoute() {
 export const router = createBrowserRouter([
   {
     path: '/',
-    lazy: async () => ({ Component: (await import('@/views/home')).default }),
+    lazy: async () => ({ Component: (await import('@/views/landing')).default }),
   },
   {
     path: '/login',
