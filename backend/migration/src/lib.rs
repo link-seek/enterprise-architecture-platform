@@ -63,6 +63,7 @@ mod m20250101_000060_add_pipeline_test_1786938378_to_organizations;
 mod m20250101_000061_add_pipeline_test_1787544769_to_organizations;
 mod m20250101_000062_add_pipeline_test_1787624074_to_organizations;
 mod m20250101_000063_add_pipeline_test_1788772957_to_organizations;
+mod m20250101_000064_add_pipeline_test_1788773934_to_organizations;
 
 pub struct Migrator;
 
@@ -133,6 +134,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000061_add_pipeline_test_1787544769_to_organizations::Migration),
             Box::new(m20250101_000062_add_pipeline_test_1787624074_to_organizations::Migration),
             Box::new(m20250101_000063_add_pipeline_test_1788772957_to_organizations::Migration),
+            Box::new(m20250101_000064_add_pipeline_test_1788773934_to_organizations::Migration),
         ]
     }
 }
