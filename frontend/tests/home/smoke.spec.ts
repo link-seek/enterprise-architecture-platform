@@ -1,40 +1,51 @@
-// spec: issue #297 — 首页品牌回归与真实架构概览数据展示
+// spec: issue #474 — 首页拆分为纯静态个人记录落地页（备案整改）
 import { test, expect } from '../helpers/graphql-aware';
+import { login, SPACE_BASE } from '../helpers/auth';
 
-test.describe('Home - Smoke', () => {
-  test('Home page loads with enterprise brand and real data', { tag: '@smoke' }, async ({ page }) => {
+test.describe('Landing - Smoke', () => {
+  test('Landing page loads as static personal learning record', { tag: '@smoke' }, async ({ page }) => {
+    // 跟踪 /graphql 与 /api 请求 — 落地页应为零 API 纯静态
+    const apiRequests: string[] = [];
+    page.on('request', (req) => {
+      const url = req.url();
+      if (url.includes('/graphql') || url.includes('/api')) {
+        apiRequests.push(url);
+      }
+    });
+
     await page.goto('/');
 
-    // 品牌名「企业架构平台」在 header 与 Hero H1 中可见
-    await expect(page.getByRole('heading', { name: '企业架构平台' })).toBeVisible();
+    // 个人记录口径：标题与 Hero 使用「个人技术学习记录」
+    await expect(page.getByRole('heading', { name: '个人技术学习记录' })).toBeVisible();
 
-    // 浏览器标题回归企业架构口径
-    await expect(page).toHaveTitle('企业架构平台');
+    // 去企业化：不出现企业版/SaaS/商业服务字样
+    await expect(page.getByText(/企业版|SaaS|商业服务/)).not.toBeVisible();
 
-    // Hero 副标题不再出现技术栈字样
-    await expect(page.getByText(/Rust|React|全栈/)).not.toBeVisible();
-
-    // CTA「浏览架构空间」跳转到公开的 /spaces
-    const cta = page.getByRole('link', { name: '浏览架构空间' });
-    await expect(cta).toBeVisible();
-
-    // 架构概览数据区加载完成，不出现「加载失败」
-    await expect(page.getByText(/加载失败/)).not.toBeVisible({ timeout: 10000 });
-
-    // 平台概览数字区可见（空间 / 价值流 / 业务能力 / 业务流程）
-    await expect(page.getByText('架构概览')).toBeVisible();
+    // 三个静态板块可见：学习方向 / 实践项目 / 复盘
+    await expect(page.getByRole('heading', { name: '学习方向' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '实践项目' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '复盘' })).toBeVisible();
 
     // footer 保留备案号链接与「个人技术项目」字样
     await expect(page.getByText(/个人技术项目/)).toBeVisible();
     await expect(page.getByRole('link', { name: /粤ICP备2025471124号/ })).toBeVisible();
+
+    // 落地页不发起任何 GraphQL/API 请求（纯静态）
+    expect(apiRequests).toHaveLength(0);
   });
 
-  test('Home CTA navigates to public spaces list', { tag: '@smoke' }, async ({ page }) => {
+  test('Landing CTA navigates to public spaces list', { tag: '@smoke' }, async ({ page }) => {
     await page.goto('/');
 
-    const cta = page.getByRole('link', { name: '浏览架构空间' });
+    const cta = page.getByRole('link', { name: '浏览记录' });
     await expect(cta).toBeVisible();
     await cta.click();
     await expect(page).toHaveURL('/spaces');
+  });
+
+  test('Authenticated user is redirected from landing to overview', { tag: '@smoke' }, async ({ page }) => {
+    await login(page);
+    await page.goto('/');
+    await expect(page).toHaveURL(`${SPACE_BASE}/overview`);
   });
 });
