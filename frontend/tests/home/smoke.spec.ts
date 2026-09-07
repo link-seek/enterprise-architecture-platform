@@ -34,13 +34,14 @@ test.describe('Landing - Smoke', () => {
     expect(apiRequests).toHaveLength(0);
   });
 
-  test('Landing CTA navigates to public spaces list', { tag: '@smoke' }, async ({ page }) => {
+  test('Landing CTA navigates to login', { tag: '@smoke' }, async ({ page }) => {
     await page.goto('/');
 
-    const cta = page.getByRole('link', { name: '浏览记录' });
+    // 落地页仅保留单个「进入平台」CTA，指向 /login
+    const cta = page.getByRole('link', { name: '进入平台' });
     await expect(cta).toBeVisible();
     await cta.click();
-    await expect(page).toHaveURL('/spaces');
+    await expect(page).toHaveURL('/login');
   });
 
   test('Authenticated user is redirected from landing to overview', { tag: '@smoke' }, async ({ page }) => {
