@@ -210,9 +210,6 @@ export default function Landing() {
       <header className="border-b bg-background">
         <div className="container mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
           <span className="text-lg font-semibold">个人技术学习记录</span>
-          <Link to="/login">
-            <Button variant="outline">登录</Button>
-          </Link>
         </div>
       </header>
 
@@ -229,11 +226,8 @@ export default function Landing() {
             梳理价值流、业务能力与业务流程，沉淀个人技术成长。
           </p>
           <div className="mt-8 flex items-center justify-center gap-4 flex-wrap">
-            <Link to="/spaces">
-              <Button size="lg">浏览记录</Button>
-            </Link>
             <Link to="/login">
-              <Button size="lg" variant="outline">登录</Button>
+              <Button size="lg">进入平台</Button>
             </Link>
           </div>
         </section>
