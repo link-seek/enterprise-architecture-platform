@@ -7,7 +7,13 @@ test.describe('Landing View', () => {
     const apiRequests: string[] = [];
     page.on('request', (req) => {
       const url = req.url();
-      if (url.includes('/graphql') || url.includes('/api')) apiRequests.push(url);
+      let pathname: string;
+      try {
+        pathname = new URL(url).pathname;
+      } catch {
+        pathname = url;
+      }
+      if (pathname.startsWith('/api') || pathname.startsWith('/graphql')) apiRequests.push(url);
     });
     await page.goto('/');
     await expect(page.getByRole('heading', { name: '个人技术学习记录' })).toBeVisible();

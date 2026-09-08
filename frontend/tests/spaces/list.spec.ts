@@ -26,7 +26,8 @@ test.describe('Spaces - Browse Spaces Main Flow', () => {
     await expect(page.getByText(/加载失败/)).not.toBeVisible();
 
     // Wait for the seeded test space card to appear - list loaded successfully.
-    const testSpaceCard = page.getByRole('link', { name: /测试空间/ });
+    // Use first() to avoid strict-mode violation when multiple spaces contain "测试空间" (e.g. leftover E2E data).
+    const testSpaceCard = page.getByRole('link', { name: /测试空间/ }).first();
     await expect(testSpaceCard).toBeVisible({ timeout: 10000 });
 
     // Assert no 405 was returned while loading the list.
