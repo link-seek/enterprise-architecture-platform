@@ -27,7 +27,7 @@ async function selfDeleteAndVerify(
 
 test.describe('Value Stream Management - Version Control', () => {
   test.beforeEach(async ({ page }) => {
-    // Login before each test (env-driven credentials for multi-environment reuse).
+    // Login before each case - env-driven credentials for multi-environment reuse.
     // Login now lands on the architecture overview; navigate to value-streams explicitly.
     await login(page);
     await page.goto(`${SPACE_BASE}/value-streams`);

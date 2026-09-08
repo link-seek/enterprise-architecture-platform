@@ -1840,6 +1840,7 @@ async fn space_of_application_process(
 }
 
 /// Resolve the `space_id` of an application process step (via its process).
+#[allow(dead_code)]
 async fn space_of_application_process_step(
     db: &DatabaseConnection,
     id: Uuid,
@@ -1854,6 +1855,7 @@ async fn space_of_application_process_step(
 }
 
 /// Resolve the `space_id` of a business process step (via its process).
+#[allow(dead_code)]
 async fn space_of_process_step(db: &DatabaseConnection, step_id: Uuid) -> async_graphql::Result<Uuid> {
     use sea_orm::EntityTrait;
     let step = process_step::Entity::find_by_id(step_id)
