@@ -8,7 +8,13 @@ test.describe('Landing - Smoke', () => {
     const apiRequests: string[] = [];
     page.on('request', (req) => {
       const url = req.url();
-      if (url.includes('/graphql') || url.includes('/api')) {
+      let pathname: string;
+      try {
+        pathname = new URL(url).pathname;
+      } catch {
+        pathname = url;
+      }
+      if (pathname.startsWith('/api') || pathname.startsWith('/graphql')) {
         apiRequests.push(url);
       }
     });
