@@ -257,6 +257,42 @@ impl LifecycleHooksInterface for GraphqlAuthGuard {
 
         GuardAction::Allow
     }
+
+    fn entity_filter(
+        &self,
+        _ctx: &async_graphql::dynamic::ResolverContext,
+        entity: &str,
+        action: OperationType,
+    ) -> Option<sea_orm::Condition> {
+        if action != OperationType::Read {
+            return None;
+        }
+        let norm = entity.replace('_', "").to_ascii_lowercase();
+        let table = match norm.as_str() {
+            "valuestreams" => "value_streams",
+            "businesscapabilities" => "business_capabilities",
+            "businessprocesses" => "business_processes",
+            "processsteps" => "process_steps",
+            "valuestreamstages" => "value_stream_stages",
+            "applicationcomponents" => "application_components",
+            "applicationprocesses" => "application_processes",
+            "applicationprocesssteps" => "application_process_steps",
+            "organizationalunits" => "organizational_units",
+            "businessroles" => "business_roles",
+            "functionalmodules" => "functional_modules",
+            "applicationinterfaces" => "application_interfaces",
+            "organizations" => "organizations",
+            "spaces" => "organizations",
+            _ => return None,
+        };
+        Some(
+            sea_orm::Condition::all()
+                .add(sea_orm::sea_query::Expr::cust(format!(
+                    "\"{}\".\"deleted_at\" IS NULL",
+                    table
+                ))),
+        )
+    }
 }
 
 // ============================================================================
@@ -801,6 +837,38 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     .delete(id)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                // Cascade: soft-delete child stages and clean orphans.
+                {
+                    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                    let stages = value_stream_stage::Entity::find()
+                        .filter(value_stream_stage::Column::ValueStreamId.eq(id))
+                        .all(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    let stage_ids: Vec<Uuid> = stages.into_iter().map(|s| s.id).collect();
+                    value_stream_stage::Entity::update_many()
+                        .col_expr(
+                            value_stream_stage::Column::DeletedAt,
+                            sea_orm::sea_query::Expr::value(chrono::Utc::now()),
+                        )
+                        .col_expr(
+                            value_stream_stage::Column::UpdatedAt,
+                            sea_orm::sea_query::Expr::value(chrono::Utc::now()),
+                        )
+                        .filter(value_stream_stage::Column::ValueStreamId.eq(id))
+                        .filter(value_stream_stage::Column::DeletedAt.is_null())
+                        .exec(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    if !stage_ids.is_empty() {
+                        stage_capability::Entity::delete_many()
+                            .filter(stage_capability::Column::StageId.is_in(stage_ids))
+                            .exec(db)
+                            .await
+                            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    }
+                }
 
                 Ok(Some(async_graphql::Value::Boolean(true)))
             })
@@ -1349,6 +1417,7 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
     builder.mutations.push(update);
 
     // ── capabilityDelete ─────────────────────────────────────────────
+    // Soft-delete: set deleted_at, keep row for audit/recovery.
     let delete = Field::new(
         "capabilityDelete",
         TypeRef::named_nn(TypeRef::BOOLEAN),
@@ -1366,10 +1435,30 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
                 ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
 
-                business_capability::Entity::delete_by_id(id)
-                    .exec(db)
+                let mut am: business_capability::ActiveModel = existing.into();
+                am.deleted_at = Set(Some(chrono::Utc::now()));
+                am.updated_at = Set(chrono::Utc::now());
+                am.update(db)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                {
+                    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                    capability_process::Entity::delete_many()
+                        .filter(capability_process::Column::CapabilityId.eq(id))
+                        .exec(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    stage_capability::Entity::delete_many()
+                        .filter(stage_capability::Column::CapabilityId.eq(id))
+                        .exec(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    capability_realization::Entity::delete_many()
+                        .filter(capability_realization::Column::CapabilityId.eq(id))
+                        .exec(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                }
                 Ok(Some(async_graphql::Value::Boolean(true)))
             })
         },
@@ -1567,6 +1656,7 @@ fn register_process_domain_mutations(builder: &mut Builder) {
     builder.mutations.push(update);
 
     // ── processDelete ────────────────────────────────────────────────
+    // Soft-delete: set deleted_at, keep row for audit/recovery.
     let delete = Field::new(
         "processDelete",
         TypeRef::named_nn(TypeRef::BOOLEAN),
@@ -1584,10 +1674,43 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
                 ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
 
-                business_process::Entity::delete_by_id(id)
-                    .exec(db)
+                let mut am: business_process::ActiveModel = existing.into();
+                am.deleted_at = Set(Some(chrono::Utc::now()));
+                am.updated_at = Set(chrono::Utc::now());
+                am.update(db)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                {
+                    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                    process_step::Entity::update_many()
+                        .col_expr(process_step::Column::DeletedAt, sea_orm::sea_query::Expr::value(chrono::Utc::now()))
+                        .col_expr(process_step::Column::UpdatedAt, sea_orm::sea_query::Expr::value(chrono::Utc::now()))
+                        .filter(process_step::Column::ProcessId.eq(id))
+                        .filter(process_step::Column::DeletedAt.is_null())
+                        .exec(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    capability_process::Entity::delete_many()
+                        .filter(capability_process::Column::ProcessId.eq(id))
+                        .exec(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    participation::Entity::delete_many()
+                        .filter(participation::Column::BusinessProcessId.eq(id))
+                        .exec(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    process_reference::Entity::delete_many()
+                        .filter(process_reference::Column::BusinessProcessId.eq(id))
+                        .exec(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    capability_realization::Entity::delete_many()
+                        .filter(capability_realization::Column::ProcessId.eq(id))
+                        .exec(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                }
                 Ok(Some(async_graphql::Value::Boolean(true)))
             })
         },
@@ -2097,6 +2220,7 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
     builder.mutations.push(update);
 
     // ── processStepDelete ────────────────────────────────────────────
+    // Soft-delete: sets deleted_at (row kept for audit/recovery).
     let delete = Field::new(
         "processStepDelete",
         TypeRef::named_nn(TypeRef::BOOLEAN),
@@ -2116,8 +2240,10 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                 let process_owner = owner_of_process(db, existing.process_id).await?;
                 ensure_entity_owner_or_admin(&ctx, process_owner).await?;
 
-                process_step::Entity::delete_by_id(id)
-                    .exec(db)
+                let mut am: process_step::ActiveModel = existing.into();
+                am.deleted_at = Set(Some(chrono::Utc::now()));
+                am.updated_at = Set(chrono::Utc::now());
+                am.update(db)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
                 Ok(Some(async_graphql::Value::Boolean(true)))
@@ -2370,6 +2496,7 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
     builder.mutations.push(update);
 
     // ── valueStreamStageDelete ───────────────────────────────────────
+    // Soft-delete: sets deleted_at, cleans stage_capability orphans.
     let delete = Field::new(
         "valueStreamStageDelete",
         TypeRef::named_nn(TypeRef::BOOLEAN),
@@ -2390,10 +2517,20 @@ fn register_sub_entity_domain_mutations(builder: &mut Builder) {
                 let vs_owner = owner_of_value_stream(db, existing.value_stream_id).await?;
                 ensure_entity_owner_or_admin(&ctx, vs_owner).await?;
 
-                value_stream_stage::Entity::delete_by_id(id)
-                    .exec(db)
+                let mut am: value_stream_stage::ActiveModel = existing.into();
+                am.deleted_at = Set(Some(chrono::Utc::now()));
+                am.updated_at = Set(chrono::Utc::now());
+                am.update(db)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                {
+                    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                    stage_capability::Entity::delete_many()
+                        .filter(stage_capability::Column::StageId.eq(id))
+                        .exec(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                }
                 Ok(Some(async_graphql::Value::Boolean(true)))
             })
         },
@@ -2772,6 +2909,7 @@ fn register_application_component_domain_mutations(builder: &mut Builder) {
     builder.mutations.push(update);
 
     // ── applicationComponentDelete ───────────────────────────────────
+    // Soft-delete: set deleted_at, cleans module_containment orphans.
     let delete = Field::new(
         "applicationComponentDelete",
         TypeRef::named_nn(TypeRef::BOOLEAN),
@@ -2788,10 +2926,20 @@ fn register_application_component_domain_mutations(builder: &mut Builder) {
                     .ok_or_else(|| async_graphql::Error::new("Application component not found."))?;
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
 
-                application_component::Entity::delete_by_id(id)
-                    .exec(db)
+                let mut am: application_component::ActiveModel = existing.into();
+                am.deleted_at = Set(Some(chrono::Utc::now()));
+                am.updated_at = Set(chrono::Utc::now());
+                am.update(db)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                {
+                    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                    module_containment::Entity::delete_many()
+                        .filter(module_containment::Column::ApplicationComponentId.eq(id))
+                        .exec(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                }
                 Ok(Some(async_graphql::Value::Boolean(true)))
             })
         },
@@ -2951,6 +3099,7 @@ fn register_application_process_domain_mutations(builder: &mut Builder) {
     builder.mutations.push(update);
 
     // ── applicationProcessDelete ─────────────────────────────────────
+    // Soft-delete: set deleted_at, cleans orphans.
     let delete = Field::new(
         "applicationProcessDelete",
         TypeRef::named_nn(TypeRef::BOOLEAN),
@@ -2967,10 +3116,33 @@ fn register_application_process_domain_mutations(builder: &mut Builder) {
                     .ok_or_else(|| async_graphql::Error::new("Application process not found."))?;
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
 
-                application_process::Entity::delete_by_id(id)
-                    .exec(db)
+                let mut am: application_process::ActiveModel = existing.into();
+                am.deleted_at = Set(Some(chrono::Utc::now()));
+                am.updated_at = Set(chrono::Utc::now());
+                am.update(db)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                {
+                    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                    application_process_step::Entity::update_many()
+                        .col_expr(application_process_step::Column::DeletedAt, sea_orm::sea_query::Expr::value(chrono::Utc::now()))
+                        .col_expr(application_process_step::Column::UpdatedAt, sea_orm::sea_query::Expr::value(chrono::Utc::now()))
+                        .filter(application_process_step::Column::ProcessId.eq(id))
+                        .filter(application_process_step::Column::DeletedAt.is_null())
+                        .exec(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    process_reference::Entity::delete_many()
+                        .filter(process_reference::Column::ApplicationProcessId.eq(id))
+                        .exec(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    orchestration::Entity::delete_many()
+                        .filter(orchestration::Column::ApplicationProcessId.eq(id))
+                        .exec(db)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                }
                 Ok(Some(async_graphql::Value::Boolean(true)))
             })
         },
@@ -3103,6 +3275,7 @@ fn register_application_process_step_domain_mutations(builder: &mut Builder) {
     builder.mutations.push(update);
 
     // ── applicationProcessStepDelete ─────────────────────────────────
+    // Soft-delete: set deleted_at (row kept for audit/recovery).
     let delete = Field::new(
         "applicationProcessStepDelete",
         TypeRef::named_nn(TypeRef::BOOLEAN),
@@ -3120,8 +3293,10 @@ fn register_application_process_step_domain_mutations(builder: &mut Builder) {
                 let space_id = space_of_application_process(db, existing.process_id).await?;
                 ensure_space_edit_access(&ctx, db, space_id).await?;
 
-                application_process_step::Entity::delete_by_id(id)
-                    .exec(db)
+                let mut am: application_process_step::ActiveModel = existing.into();
+                am.deleted_at = Set(Some(chrono::Utc::now()));
+                am.updated_at = Set(chrono::Utc::now());
+                am.update(db)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
                 Ok(Some(async_graphql::Value::Boolean(true)))
@@ -3206,7 +3381,14 @@ fn register_v21_entity_domain_mutations(builder: &mut Builder) {
             let existing = organizational_unit::Entity::find_by_id(id).one(db).await
                 .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Organizational unit not found."))?;
             ensure_space_edit_access(&ctx, db, existing.space_id).await?;
-            organizational_unit::Entity::delete_by_id(id).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            let mut am: organizational_unit::ActiveModel = existing.into();
+            am.deleted_at = Set(Some(chrono::Utc::now()));
+            am.updated_at = Set(chrono::Utc::now());
+            am.update(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            {
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                assignment::Entity::delete_many().filter(assignment::Column::OrganizationId.eq(id)).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            }
             Ok(Some(async_graphql::Value::Boolean(true)))
         })
     })
@@ -3270,7 +3452,15 @@ fn register_v21_entity_domain_mutations(builder: &mut Builder) {
             let existing = business_role::Entity::find_by_id(id).one(db).await
                 .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Business role not found."))?;
             ensure_space_edit_access(&ctx, db, existing.space_id).await?;
-            business_role::Entity::delete_by_id(id).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            let mut am: business_role::ActiveModel = existing.into();
+            am.deleted_at = Set(Some(chrono::Utc::now()));
+            am.updated_at = Set(chrono::Utc::now());
+            am.update(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            {
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                assignment::Entity::delete_many().filter(assignment::Column::BusinessRoleId.eq(id)).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                participation::Entity::delete_many().filter(participation::Column::BusinessRoleId.eq(id)).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            }
             Ok(Some(async_graphql::Value::Boolean(true)))
         })
     })
@@ -3346,7 +3536,16 @@ fn register_v21_entity_domain_mutations(builder: &mut Builder) {
             let existing = functional_module::Entity::find_by_id(id).one(db).await
                 .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Functional module not found."))?;
             ensure_space_edit_access(&ctx, db, existing.space_id).await?;
-            functional_module::Entity::delete_by_id(id).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            let mut am: functional_module::ActiveModel = existing.into();
+            am.deleted_at = Set(Some(chrono::Utc::now()));
+            am.updated_at = Set(chrono::Utc::now());
+            am.update(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            {
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                module_containment::Entity::delete_many().filter(module_containment::Column::FunctionalModuleId.eq(id)).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                interface_exposure::Entity::delete_many().filter(interface_exposure::Column::FunctionalModuleId.eq(id)).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                orchestration::Entity::delete_many().filter(orchestration::Column::FunctionalModuleId.eq(id)).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            }
             Ok(Some(async_graphql::Value::Boolean(true)))
         })
     })
@@ -3423,7 +3622,14 @@ fn register_v21_entity_domain_mutations(builder: &mut Builder) {
             let existing = application_interface::Entity::find_by_id(id).one(db).await
                 .map_err(|e| async_graphql::Error::new(e.to_string()))?.ok_or_else(|| async_graphql::Error::new("Application interface not found."))?;
             ensure_space_edit_access(&ctx, db, existing.space_id).await?;
-            application_interface::Entity::delete_by_id(id).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            let mut am: application_interface::ActiveModel = existing.into();
+            am.deleted_at = Set(Some(chrono::Utc::now()));
+            am.updated_at = Set(chrono::Utc::now());
+            am.update(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            {
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                interface_exposure::Entity::delete_many().filter(interface_exposure::Column::ApplicationInterfaceId.eq(id)).exec(db).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            }
             Ok(Some(async_graphql::Value::Boolean(true)))
         })
     })
