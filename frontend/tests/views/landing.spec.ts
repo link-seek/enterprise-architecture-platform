@@ -6,8 +6,10 @@ test.describe('Landing View', () => {
   test('Landing page renders personal record headings', { tag: '@smoke' }, async ({ page }) => {
     const apiRequests: string[] = [];
     page.on('request', (req) => {
-      const url = req.url();
-      if (url.includes('/graphql') || url.includes('/api')) apiRequests.push(url);
+      try {
+        const u = new URL(req.url());
+        if (u.pathname.startsWith('/api/') || u.pathname === '/api' || u.pathname.startsWith('/graphql')) apiRequests.push(req.url());
+      } catch {}
     });
     await page.goto('/');
     await expect(page.getByRole('heading', { name: '个人技术学习记录' })).toBeVisible();
