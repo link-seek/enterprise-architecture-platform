@@ -4,12 +4,16 @@ import { login, SPACE_BASE } from '../helpers/auth';
 
 test.describe('Landing - Smoke', () => {
   test('Landing page loads as static personal learning record', { tag: '@smoke' }, async ({ page }) => {
-    // 跟踪 /graphql 与 /api 请求 — 落地页应为零 API 纯静态
+    // 跟踪 /graphql 与 /api 请求 — 落地页应为零 API 纯静态（忽略 Vite 的 /src/api/*.ts 静态资源）
     const apiRequests: string[] = [];
     page.on('request', (req) => {
-      const url = req.url();
-      if (url.includes('/graphql') || url.includes('/api')) {
-        apiRequests.push(url);
+      try {
+        const { pathname } = new URL(req.url());
+        if (pathname.startsWith('/api') || pathname.startsWith('/graphql')) {
+          apiRequests.push(req.url());
+        }
+      } catch {
+        // ignore non-parsable URLs (data:, blob:)
       }
     });
 
