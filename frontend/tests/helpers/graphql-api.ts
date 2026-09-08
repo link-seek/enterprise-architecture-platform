@@ -1,7 +1,13 @@
 // Request-based GraphQL helpers for backend-enforcement tests (bypass the UI).
-// Resolves relative URLs against the Playwright baseURL; nginx/vite proxy
-// `/api/` and `/graphql` to the backend container (see nginx.conf / vite.config.ts).
+// When E2E_API_URL is set (deploy-smoke against OSS), requests target the
+// backend directly; otherwise they resolve against Playwright baseURL and
+// rely on nginx/vite proxy for `/api/` and `/graphql` (see nginx.conf / vite.config.ts).
 import { APIRequestContext } from '@playwright/test';
+
+function apiUrl(path: string): string {
+  const base = (process.env.E2E_API_URL ?? '').trim().replace(/\/+$/, '');
+  return base ? `${base}${path}` : path;
+}
 
 export const SECOND_EDITOR_EMAIL = process.env.E2E_SECOND_EDITOR_EMAIL || process.env.APP_SEED_EDITOR_EMAIL || 'test@example.com';
 export const SECOND_EDITOR_PASSWORD = process.env.E2E_SECOND_EDITOR_PASSWORD || process.env.APP_SEED_EDITOR_PASSWORD || 'testpassword123';
@@ -27,7 +33,7 @@ export async function apiLogin(
   email: string,
   password: string,
 ): Promise<ApiSession> {
-  const res = await request.post('/api/auth/login', {
+  const res = await request.post(apiUrl('/api/auth/login'), {
     data: { email, password },
     headers: { 'Content-Type': 'application/json' },
   });
@@ -48,7 +54,7 @@ export async function gql(
   token: string,
   query: string,
 ): Promise<GqlResponse> {
-  const res = await request.post('/graphql', {
+  const res = await request.post(apiUrl('/graphql'), {
     data: { query },
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
   });
@@ -73,6 +79,7 @@ export interface CleanupResult {
 /**
  * Query all non-deleted value streams in the test space, returning id/name/
  * logicalId/status. Used by cleanup and residual-verification helpers.
+ * Fail-closed: GraphQL errors throw instead of returning an empty array.
  */
 async function fetchValueStreams(
   request: APIRequestContext,
@@ -83,6 +90,9 @@ async function fetchValueStreams(
     token,
     `{ valueStreamsBySpace(spaceId: "${TEST_SPACE_ID}") { id name logicalId status } }`,
   );
+  if (res.errors?.length) {
+    throw new Error(`fetchValueStreams failed: ${res.errors.map((e) => e.message).join('; ')}`);
+  }
   return (res.data?.valueStreamsBySpace ?? []) as ValueStreamRow[];
 }
 
@@ -106,8 +116,8 @@ export async function cleanupValueStreamsByNamePrefix(
   try {
     const session = await apiLogin(request, email, password);
     token = session.token;
-  } catch {
-    return result; // cannot login → nothing to clean
+  } catch (e) {
+    throw new Error(`cleanup login failed for ${email}: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   const streams = await fetchValueStreams(request, token);
@@ -143,6 +153,7 @@ export async function cleanupValueStreamsByNamePrefix(
 /**
  * Query residual value streams matching the given prefixes (excluding the
  * seed). Used in afterAll to assert no test data survives cleanup.
+ * Fail-closed: login or query failure throws instead of returning [].
  */
 export async function findResidualValueStreams(
   request: APIRequestContext,
@@ -154,8 +165,8 @@ export async function findResidualValueStreams(
   try {
     const session = await apiLogin(request, email, password);
     token = session.token;
-  } catch {
-    return []; // cannot login → cannot determine residual
+  } catch (e) {
+    throw new Error(`residual check login failed for ${email}: ${e instanceof Error ? e.message : String(e)}`);
   }
   const streams = await fetchValueStreams(request, token);
   return streams.filter(
