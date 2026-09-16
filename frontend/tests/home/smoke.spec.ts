@@ -5,11 +5,20 @@ import { login, SPACE_BASE } from '../helpers/auth';
 test.describe('Landing - Smoke', () => {
   test('Landing page loads as static personal learning record', { tag: '@smoke' }, async ({ page }) => {
     // 跟踪 /graphql 与 /api 请求 — 落地页应为零 API 纯静态
+    // 注意：Vite dev 下源码按 /src/api/*.ts 加载，子串 '/api' 会误判，需按 pathname 精确匹配
     const apiRequests: string[] = [];
     page.on('request', (req) => {
       const url = req.url();
-      if (url.includes('/graphql') || url.includes('/api')) {
-        apiRequests.push(url);
+      try {
+        const { pathname } = new URL(url);
+        if (pathname === '/graphql' || pathname.startsWith('/graphql/') || pathname === '/api' || pathname.startsWith('/api/')) {
+          apiRequests.push(url);
+        }
+      } catch {
+        // 相对路径兜底：要求 /api 后跟 / 或结尾，避免匹配 /src/api/*.ts
+        if (url.includes('/graphql') || url.includes('/api/') || url.endsWith('/api')) {
+          apiRequests.push(url);
+        }
       }
     });
 
