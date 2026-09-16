@@ -7,7 +7,16 @@ test.describe('Landing View', () => {
     const apiRequests: string[] = [];
     page.on('request', (req) => {
       const url = req.url();
-      if (url.includes('/graphql') || url.includes('/api')) apiRequests.push(url);
+      // Match real API calls by URL path: in vite dev, JS module URLs like
+      // `/src/api/auth.ts` contain the substring `/api` but are static
+      // assets, not API calls. Check the pathname instead.
+      let path = url;
+      try {
+        path = new URL(url).pathname;
+      } catch {
+        // Non-absolute URL (e.g. data:) — not an API call.
+      }
+      if (path.includes('/graphql') || path.startsWith('/api/') || path === '/api') apiRequests.push(url);
     });
     await page.goto('/');
     await expect(page.getByRole('heading', { name: '个人技术学习记录' })).toBeVisible();

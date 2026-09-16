@@ -4,11 +4,19 @@ import { login, SPACE_BASE } from '../helpers/auth';
 
 test.describe('Landing - Smoke', () => {
   test('Landing page loads as static personal learning record', { tag: '@smoke' }, async ({ page }) => {
-    // 跟踪 /graphql 与 /api 请求 — 落地页应为零 API 纯静态
+    // 跟踪 /graphql 与 /api 请求 — 落地页应为零 API 纯静态。
+    // 注意：按 pathname 匹配。vite dev 下 JS 模块 URL 如 `/src/api/auth.ts`
+    // 含有 `/api` 子串但只是静态资源，不是 API 调用。
     const apiRequests: string[] = [];
     page.on('request', (req) => {
       const url = req.url();
-      if (url.includes('/graphql') || url.includes('/api')) {
+      let path = url;
+      try {
+        path = new URL(url).pathname;
+      } catch {
+        // Non-absolute URL (e.g. data:) — not an API call.
+      }
+      if (path.includes('/graphql') || path.startsWith('/api/') || path === '/api') {
         apiRequests.push(url);
       }
     });
