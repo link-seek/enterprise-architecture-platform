@@ -8,7 +8,16 @@ test.describe('Landing - Smoke', () => {
     const apiRequests: string[] = [];
     page.on('request', (req) => {
       const url = req.url();
-      if (url.includes('/graphql') || url.includes('/api')) {
+      // 仅统计真正的 API 端点：pathname 以 /api 或 /graphql 开头。
+      // vite dev 下源码按 /src/api/*.ts 提供，直接 substring 匹配会把
+      // 源码请求误判为 API 请求。
+      const { pathname } = new URL(url);
+      if (
+        pathname === '/api' ||
+        pathname.startsWith('/api/') ||
+        pathname === '/graphql' ||
+        pathname.startsWith('/graphql/')
+      ) {
         apiRequests.push(url);
       }
     });
