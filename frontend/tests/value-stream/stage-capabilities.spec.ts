@@ -3,7 +3,7 @@
 // 阶段/能力均为测试自建（owner = 测试账号），后端仅允许实体 owner 或 admin 修改关联。
 import { test, expect } from '../helpers/graphql-aware';
 import { login, SPACE_BASE, TEST_EMAIL, TEST_PASSWORD, TEST_SPACE_ID } from '../helpers/auth';
-import { cleanupValueStreamsByNamePrefix, findResidualValueStreams } from '../helpers/graphql-api';
+import { apiUrl, cleanupValueStreamsByNamePrefix, findResidualValueStreams } from '../helpers/graphql-api';
 import type { Page } from '@playwright/test';
 
 // Static prefixes ensure afterAll cleanup catches every run's data; the
@@ -14,7 +14,7 @@ const TEST_NAME_PREFIXES = [
 ];
 
 async function apiToken(page: Page): Promise<string> {
-  const res = await page.request.post('/api/auth/login', {
+  const res = await page.request.post(apiUrl('/api/auth/login'), {
     data: { email: TEST_EMAIL, password: TEST_PASSWORD },
   });
   const body = await res.json();
@@ -24,7 +24,7 @@ async function apiToken(page: Page): Promise<string> {
 }
 
 async function gh(page: Page, token: string, query: string, variables?: Record<string, unknown>) {
-  const res = await page.request.post('/graphql', {
+  const res = await page.request.post(apiUrl('/graphql'), {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     data: { query, variables },
   });

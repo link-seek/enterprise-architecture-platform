@@ -4,12 +4,13 @@
 // 再走 UI 发布，验证 affectedLinks 弹窗与 deprecated 标记。
 import { test, expect } from '../helpers/graphql-aware';
 import { login, SPACE_BASE, TEST_EMAIL, TEST_PASSWORD, TEST_SPACE_ID } from '../helpers/auth';
+import { apiUrl } from '../helpers/graphql-api';
 import type { Page } from '@playwright/test';
 
 const suffix = Date.now().toString();
 
 async function apiToken(page: Page): Promise<string> {
-  const res = await page.request.post('/api/auth/login', {
+  const res = await page.request.post(apiUrl('/api/auth/login'), {
     data: { email: TEST_EMAIL, password: TEST_PASSWORD },
   });
   const body = await res.json();
@@ -19,7 +20,7 @@ async function apiToken(page: Page): Promise<string> {
 }
 
 async function gh(page: Page, token: string, query: string, variables?: Record<string, unknown>) {
-  const res = await page.request.post('/graphql', {
+  const res = await page.request.post(apiUrl('/graphql'), {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     data: { query, variables },
   });

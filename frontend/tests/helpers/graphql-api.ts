@@ -2,11 +2,18 @@
 // When E2E_API_URL is set (deploy-smoke against OSS), requests target the
 // backend directly; otherwise they resolve against Playwright baseURL and
 // rely on nginx/vite proxy for `/api/` and `/graphql` (see nginx.conf / vite.config.ts).
+// Prod OSS has no /api proxy, so when E2E_BASE_URL points at www.* we derive
+// the api.* backend host instead of hitting OSS (which returns XML errors).
 import { APIRequestContext } from '@playwright/test';
 
-function apiUrl(path: string): string {
-  const base = (process.env.E2E_API_URL ?? '').trim().replace(/\/+$/, '');
-  return base ? `${base}${path}` : path;
+export function apiUrl(path: string): string {
+  const explicit = (process.env.E2E_API_URL ?? '').trim().replace(/\/+$/, '');
+  if (explicit) return `${explicit}${path}`;
+  const baseUrl = (process.env.E2E_BASE_URL ?? '').trim();
+  if (baseUrl.includes('www.xieyucheng.top')) return `https://api.xieyucheng.top${path}`;
+  const wwwMatch = baseUrl.match(/^(https?:\/\/)www\.(.+)$/);
+  if (wwwMatch) return `${wwwMatch[1]}api.${wwwMatch[2]}${path}`;
+  return path;
 }
 
 export const SECOND_EDITOR_EMAIL = process.env.E2E_SECOND_EDITOR_EMAIL || process.env.APP_SEED_EDITOR_EMAIL || 'test@example.com';
