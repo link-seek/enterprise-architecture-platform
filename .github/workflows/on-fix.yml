@@ -22,7 +22,7 @@ jobs:
     if: |
       github.event_name == 'issues' &&
       github.event.label.name == 'fix-me'
-    uses: link-seek/issue-resolver-l1/.github/workflows/fix.yml@v1.0.1-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/fix.yml@v1.0.2-pilot
     with:
       issue-number: ${{ github.event.issue.number }}
     secrets: inherit
@@ -34,7 +34,7 @@ jobs:
       github.event.issue.pull_request == null &&
       contains(github.event.comment.body, '@agent') &&
       contains('OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR', github.event.comment.author_association)
-    uses: link-seek/issue-resolver-l1/.github/workflows/fix.yml@v1.0.1-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/fix.yml@v1.0.2-pilot
     with:
       issue-number: ${{ github.event.issue.number }}
     secrets: inherit
@@ -74,7 +74,7 @@ jobs:
     needs: [get-pr-info]
     if: |
       needs.get-pr-info.result == 'success'
-    uses: link-seek/issue-resolver-l1/.github/workflows/fix.yml@v1.0.1-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/fix.yml@v1.0.2-pilot
     with:
       pr-number: ${{ github.event.issue.number }}
       head-branch: ${{ needs.get-pr-info.outputs.head-branch }}
