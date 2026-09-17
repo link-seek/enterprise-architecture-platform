@@ -43,6 +43,30 @@ export const GET_VALUE_STREAM_DETAIL = gql`
   }
 `
 
+export const GET_VALUE_STREAM_RUNS = gql`
+  query GetValueStreamRuns($valueStreamId: String!) {
+    valueStreamRunsByValueStream(valueStreamId: $valueStreamId) {
+      id
+      repoUrl
+      chainPath
+      status
+      pinnedVersions
+      createdAt
+      updatedAt
+    }
+  }
+`
+
+interface ValueStreamRun {
+  id: string
+  repoUrl: string
+  chainPath: string
+  status: string
+  pinnedVersions: Record<string, string> | null
+  createdAt: string
+  updatedAt: string
+}
+
 interface ValueStreamDetailQuery {
   valueStreamById: {
     id: string
@@ -62,6 +86,10 @@ interface ValueStreamDetailQuery {
   valueStreamStagesByValueStream: ValueStreamStage[]
 }
 
+interface ValueStreamRunsQuery {
+  valueStreamRunsByValueStream: ValueStreamRun[]
+}
+
 export default function ValueStreamDetail() {
   const { id, spaceId } = useParams<{ id: string; spaceId: string }>()
   const { isEntityOwner } = useSpaceMembership(spaceId)
@@ -69,6 +97,14 @@ export default function ValueStreamDetail() {
     variables: { spaceId, id },
     skip: !spaceId || !id,
   })
+  // Runs load independently: if the backend predates the runs migration,
+  // this query fails while detail/stages keep rendering (rollout-skew safe).
+  const { data: runsData } = useQuery<ValueStreamRunsQuery>(GET_VALUE_STREAM_RUNS, {
+    variables: { valueStreamId: id },
+    skip: !id,
+    errorPolicy: 'ignore',
+  })
+  const runs = runsData?.valueStreamRunsByValueStream ?? []
 
   const [stageDialogOpen, setStageDialogOpen] = useState(false)
   const [editingStage, setEditingStage] = useState<ValueStreamStage | null>(null)
@@ -242,6 +278,51 @@ export default function ValueStreamDetail() {
                             </div>
                           </TableCell>
                         )}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>运行实例</CardTitle>
+                {runs.filter((r) => r.status === 'live').length > 0 && (
+                  <Badge>live {runs.filter((r) => r.status === 'live').length}</Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {runs.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">暂无运行实例</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>仓库</TableHead>
+                      <TableHead>链路</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead>版本 Pin</TableHead>
+                      <TableHead>更新时间</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {runs.map((run) => (
+                      <TableRow key={run.id}>
+                        <TableCell className="font-mono text-xs max-w-[220px] truncate" title={run.repoUrl}>{run.repoUrl}</TableCell>
+                        <TableCell className="font-mono text-xs">{run.chainPath}</TableCell>
+                        <TableCell><Badge>{run.status}</Badge></TableCell>
+                        <TableCell className="text-xs">
+                          {run.pinnedVersions && Object.keys(run.pinnedVersions).length > 0
+                            ? Object.entries(run.pinnedVersions).map(([k, v]) => (
+                              <span key={k} className="mr-2 font-mono">{k}@{v}</span>
+                            ))
+                            : '-'}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{new Date(run.updatedAt).toLocaleString('zh-CN')}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
