@@ -14,7 +14,7 @@ use business_architecture::infrastructure::persistence::entities::{
     capability_realization,
     organizational_unit, business_role, functional_module, application_interface,
     assignment, participation, module_containment, interface_exposure,
-    process_reference, orchestration,
+    process_reference, orchestration, value_stream_run,
 };
 use business_architecture::application::value_stream_service::ValueStreamService;
 use business_architecture::application::space_service::SpaceService;
@@ -36,7 +36,7 @@ use shared_common::enums::{
     LifecycleStatus, MaturityLevel,
     ApplicationComponentType, ApplicationComponentStatus, ApplicationProcessTrigger,
     RaciRole, OrganizationalUnitType, FunctionalModuleStatus, ApplicationInterfaceProtocol,
-    CapabilityRealizationTargetType,
+    CapabilityRealizationTargetType, ValueStreamRunStatus,
 };
 
 pub type GraphqlSchema = async_graphql::dynamic::Schema;
@@ -95,6 +95,7 @@ const ADMIN_READ_ENTITIES: &[&str] = &[
     "interface_exposures",
     "process_references",
     "orchestrations",
+    "value_stream_runs",
 ];
 
 /// Fields hidden from all users (including Admin) in queries.
@@ -5423,6 +5424,80 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     .argument(InputValue::new("functionalModuleId", TypeRef::named_nn(TypeRef::STRING)));
     builder.queries.push(q);
 
+    // ── valueStreamRunsByValueStream (pilot Task 5, read-only) ─────────
+    // Lists execution instances of one value stream definition. Space ACL is
+    // resolved from the parent value stream; no mutations are exposed.
+    let q = Field::new(
+        "valueStreamRunsByValueStream",
+        TypeRef::named_nn_list_nn("ValueStreamRuns"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let vs_id = parse_uuid_arg(&ctx, "valueStreamId")?;
+                let space_id = space_of_value_stream(db, vs_id).await?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = value_stream_run::Entity::find()
+                    .filter(value_stream_run::Column::ValueStreamId.eq(vs_id))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("valueStreamId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
+
+    // ── valueStreamRunsBySpace (pilot Task 6 acceptance counter) ───────
+    // Aggregates runs over all value streams of a space so Task 6 can count
+    // `live` rows without per-stream N+1 queries.
+    let q = Field::new(
+        "valueStreamRunsBySpace",
+        TypeRef::named_nn_list_nn("ValueStreamRuns"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let vs_ids: Vec<Uuid> = value_stream::Entity::find()
+                    .filter(value_stream::Column::SpaceId.eq(space_id))
+                    .filter(value_stream::Column::DeletedAt.is_null())
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?
+                    .into_iter()
+                    .map(|v| v.id)
+                    .collect();
+                let rows = if vs_ids.is_empty() {
+                    Vec::new()
+                } else {
+                    value_stream_run::Entity::find()
+                        .filter(value_stream_run::Column::ValueStreamId.is_in(vs_ids))
+                        .all(db)
+                        .await
+                        .map_err(db_err_to_graphql)?
+                };
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(q);
+
 }
 
 // ============================================================================
@@ -5475,6 +5550,7 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     register_entity::<interface_exposure::Entity>(&mut builder);   // queries only
     register_entity::<process_reference::Entity>(&mut builder);    // queries only
     register_entity::<orchestration::Entity>(&mut builder);        // queries only
+    register_entity::<value_stream_run::Entity>(&mut builder);    // queries only (runs are read-only; no mutations)
 
     // ── Spaces (reuses `organizations` table) + membership ─────────────
     // Queries are admin-only via the auto-generated query (see ADMIN_READ_ENTITIES);
@@ -5559,6 +5635,8 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
         .register_entity_dataloader_one_to_many(process_reference::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_one(orchestration::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_many(orchestration::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(value_stream_run::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(value_stream_run::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_one(space::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_many(space::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_one(space_member::Entity, tokio::spawn)
@@ -5582,6 +5660,7 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     builder.register_enumeration::<FunctionalModuleStatus>();
     builder.register_enumeration::<ApplicationInterfaceProtocol>();
     builder.register_enumeration::<CapabilityRealizationTargetType>();
+    builder.register_enumeration::<ValueStreamRunStatus>();
 
     // SpaceVisibility is used as a field type on the `Organizations` entity
     // (the `visibility` column). If the enum is not registered, seaography
