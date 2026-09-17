@@ -48,7 +48,7 @@ jobs:
   deploy:
     needs: resolve-tag
     if: needs.resolve-tag.outputs.tag != ''
-    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@v1.0.0-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@v1.0.1-pilot
     with:
       image-tag: ${{ needs.resolve-tag.outputs.tag }}
       # __PILOT__: 以下占位由生成器按试点部署目标替换

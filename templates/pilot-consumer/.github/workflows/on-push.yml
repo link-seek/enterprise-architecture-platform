@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   e2e-test:
-    uses: link-seek/issue-resolver-l1/.github/workflows/e2e-test.yml@v1.0.0-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/e2e-test.yml@v1.0.1-pilot
     with:
       ref: ''
       docker-compose-file: 'docker-compose.ci.yml'
@@ -26,7 +26,7 @@ jobs:
   ci-cd:
     needs: e2e-test
     if: needs.e2e-test.result == 'success'
-    uses: link-seek/issue-resolver-l1/.github/workflows/ci-cd-acr.yml@v1.0.0-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/ci-cd-acr.yml@v1.0.1-pilot
     with:
       # __PILOT__: 建仓时由生成器替换为试点仓实际值
       ghcr-image: ghcr.io/link-seek/__PILOT_REPO__

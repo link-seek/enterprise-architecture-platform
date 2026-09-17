@@ -18,7 +18,7 @@ jobs:
     if: |
       github.event_name == 'pull_request' ||
       (github.event_name == 'workflow_dispatch' && inputs.pr-number != '')
-    uses: link-seek/issue-resolver-l1/.github/workflows/pr-ci.yml@v1.0.0-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/pr-ci.yml@v1.0.1-pilot
     with:
       # 试点骨架：后端零依赖 cargo test；前端纯静态，无构建测试
       enable-backend-tests: true
