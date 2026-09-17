@@ -7,7 +7,7 @@
 - `backend/`：零依赖 Rust `/health`（`{"status":"ok"}`），`cargo test` 自带 2 个单测
 - `frontend/`：纯静态 Hello World + nginx（`/health`、`/api/` 反代 backend）
 - `docker-compose.ci.yml`：CI/E2E 用编排（backend 8080 + frontend 80）
-- `.github/workflows/`：四个薄壳（on-fix/on-pr/on-push/on-deploy），全部 `uses: ...@v1.0.1-pilot`
+- `.github/workflows/`：四个薄壳（on-fix/on-pr/on-push/on-deploy），全部 `uses: ...@v1.0.2-pilot`
 - `.issue-resolver.yml`：触发 `fix-me` / `@oh`，测试命令 `cargo test`
 
 ## 生成器占位（`__PILOT_*`，渲染时替换）
