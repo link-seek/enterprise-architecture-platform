@@ -16,12 +16,23 @@ export function apiUrl(path: string): string {
   return path;
 }
 
-export const SECOND_EDITOR_EMAIL = process.env.E2E_SECOND_EDITOR_EMAIL || process.env.APP_SEED_EDITOR_EMAIL || 'test@example.com';
-export const SECOND_EDITOR_PASSWORD = process.env.E2E_SECOND_EDITOR_PASSWORD || process.env.APP_SEED_EDITOR_PASSWORD || 'testpassword123';
-export const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL || process.env.APP_SEED_ADMIN_EMAIL || 'admin@test.com';
-export const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD || process.env.APP_SEED_ADMIN_PASSWORD || 'admin123456';
-export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || process.env.SMOKE_TEST_EMAIL || process.env.APP_SEED_ADMIN_EMAIL || 'e2e3@test.com';
-export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || process.env.SMOKE_TEST_PASSWORD || process.env.APP_SEED_ADMIN_PASSWORD || 'e2e123456';
+// Localhost runs (CI integration/dev) must use explicit E2E_* or the compose
+// defaults; inherited SMOKE_TEST_* / APP_SEED_* production secrets only apply
+// to external deploy-smoke (E2E_BASE_URL set), otherwise logins target users
+// that don't exist on the local backend.
+const IS_EXTERNAL = !!process.env.E2E_BASE_URL;
+const seedEditorEmail = IS_EXTERNAL ? process.env.APP_SEED_EDITOR_EMAIL : undefined;
+const seedEditorPassword = IS_EXTERNAL ? process.env.APP_SEED_EDITOR_PASSWORD : undefined;
+const seedAdminEmail = IS_EXTERNAL ? process.env.APP_SEED_ADMIN_EMAIL : undefined;
+const seedAdminPassword = IS_EXTERNAL ? process.env.APP_SEED_ADMIN_PASSWORD : undefined;
+const smokeEmail = IS_EXTERNAL ? process.env.SMOKE_TEST_EMAIL : undefined;
+const smokePassword = IS_EXTERNAL ? process.env.SMOKE_TEST_PASSWORD : undefined;
+export const SECOND_EDITOR_EMAIL = process.env.E2E_SECOND_EDITOR_EMAIL || seedEditorEmail || 'test@example.com';
+export const SECOND_EDITOR_PASSWORD = process.env.E2E_SECOND_EDITOR_PASSWORD || seedEditorPassword || 'testpassword123';
+export const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL || seedAdminEmail || 'admin@test.com';
+export const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD || seedAdminPassword || 'admin123456';
+export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || process.env.APP_SEED_E2E_EMAIL || smokeEmail || seedAdminEmail || 'e2e3@test.com';
+export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || process.env.APP_SEED_E2E_PASSWORD || smokePassword || seedAdminPassword || 'e2e123456';
 export const TEST_SPACE_ID = process.env.E2E_TEST_SPACE_ID || '00000000-0000-0000-0000-000000000010';
 
 export interface GqlResponse {

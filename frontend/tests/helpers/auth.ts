@@ -2,30 +2,37 @@
 import { Page, expect } from '@playwright/test';
 
 // Test credentials — env-driven for multi-environment reuse
-// Defaults work for local dev; CI/prod pass E2E_TEST_EMAIL etc.
-// Fall back to APP_SEED_ADMIN_* (or SMOKE_TEST_*) so the primary login
-// credentials always match a seeded account.
-export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || process.env.SMOKE_TEST_EMAIL || process.env.APP_SEED_ADMIN_EMAIL || 'e2e3@test.com';
-export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || process.env.SMOKE_TEST_PASSWORD || process.env.APP_SEED_ADMIN_PASSWORD || 'e2e123456';
-export const TEST_NAME = process.env.E2E_TEST_NAME || 'E2E Test 3';
+// Defaults work for local dev and CI integration (localhost backend seeded
+// with e2e3/test@example.com). SMOKE_TEST_* / APP_SEED_ADMIN_* fallbacks are
+// only for external deploy-smoke (E2E_BASE_URL set, e.g. production where the
+// e2e3 account is never seeded): applying them against a localhost backend
+// would hijack the login with prod credentials that don't exist locally.
+// See docker-compose.ci.yml (backend seed) — both sides must resolve equally.
+const IS_EXTERNAL = !!process.env.E2E_BASE_URL;
+const smokeEmail = IS_EXTERNAL ? process.env.SMOKE_TEST_EMAIL : undefined;
+const smokePassword = IS_EXTERNAL ? process.env.SMOKE_TEST_PASSWORD : undefined;
+const seedAdminEmail = IS_EXTERNAL ? process.env.APP_SEED_ADMIN_EMAIL : undefined;
+const seedAdminPassword = IS_EXTERNAL ? process.env.APP_SEED_ADMIN_PASSWORD : undefined;
+export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || process.env.APP_SEED_E2E_EMAIL || smokeEmail || seedAdminEmail || 'e2e3@test.com';
+export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || process.env.APP_SEED_E2E_PASSWORD || smokePassword || seedAdminPassword || 'e2e123456';
+export const TEST_NAME = process.env.E2E_TEST_NAME || process.env.APP_SEED_E2E_NAME || 'E2E Test 3';
 
 // Fixed role accounts — seeded by the backend (APP_SEED_EDITOR_* / APP_SEED_STRANGER_*).
 // Editor: registered Architect + test space Editor member.
 // Stranger: registered Architect, NOT a member of the test space.
-// Fall back to APP_SEED_* env vars so the test credentials always match the
-// seeded accounts even when E2E_* secrets are not separately configured.
-export const EDITOR_EMAIL = process.env.E2E_EDITOR_EMAIL || process.env.APP_SEED_EDITOR_EMAIL || 'test@example.com';
-export const EDITOR_PASSWORD = process.env.E2E_EDITOR_PASSWORD || process.env.APP_SEED_EDITOR_PASSWORD || 'testpassword123';
-export const STRANGER_EMAIL = process.env.E2E_STRANGER_EMAIL || process.env.APP_SEED_STRANGER_EMAIL || 'stranger@test.com';
-export const STRANGER_PASSWORD = process.env.E2E_STRANGER_PASSWORD || process.env.APP_SEED_STRANGER_PASSWORD || 'stranger123456';
-export const STRANGER_NAME = process.env.E2E_STRANGER_NAME || process.env.APP_SEED_STRANGER_NAME || 'Stranger';
+// Explicit E2E_* overrides always apply; APP_SEED_* secrets only for external
+// deploy-smoke (localhost runs use the compose defaults).
+export const EDITOR_EMAIL = process.env.E2E_EDITOR_EMAIL || (IS_EXTERNAL ? process.env.APP_SEED_EDITOR_EMAIL : undefined) || 'test@example.com';
+export const EDITOR_PASSWORD = process.env.E2E_EDITOR_PASSWORD || (IS_EXTERNAL ? process.env.APP_SEED_EDITOR_PASSWORD : undefined) || 'testpassword123';
+export const STRANGER_EMAIL = process.env.E2E_STRANGER_EMAIL || (IS_EXTERNAL ? process.env.APP_SEED_STRANGER_EMAIL : undefined) || 'stranger@test.com';
+export const STRANGER_PASSWORD = process.env.E2E_STRANGER_PASSWORD || (IS_EXTERNAL ? process.env.APP_SEED_STRANGER_PASSWORD : undefined) || 'stranger123456';
+export const STRANGER_NAME = process.env.E2E_STRANGER_NAME || (IS_EXTERNAL ? process.env.APP_SEED_STRANGER_NAME : undefined) || 'Stranger';
 
-// Admin credentials — env-driven so smoke tests resolve the real seed admin
-// in production (SMOKE_TEST_* / APP_SEED_ADMIN_* secrets) instead of the
-// local/CI default admin@test.com / admin123456. Used by tests that need
-// admin-only privileges (e.g. bypassing the 3-space quota).
-export const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL || process.env.SMOKE_TEST_EMAIL || process.env.APP_SEED_ADMIN_EMAIL || 'admin@test.com';
-export const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD || process.env.SMOKE_TEST_PASSWORD || process.env.APP_SEED_ADMIN_PASSWORD || 'admin123456';
+// Admin credentials — E2E_ADMIN_* always honored (explicit test config);
+// SMOKE_TEST_* / APP_SEED_ADMIN_* secrets only for external deploy-smoke.
+// Used by tests that need admin-only privileges (e.g. bypassing quota).
+export const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL || smokeEmail || seedAdminEmail || 'admin@test.com';
+export const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD || smokePassword || seedAdminPassword || 'admin123456';
 
 // Test space id — env-driven, mirrors backend migration TEST_SPACE_ID.
 export const TEST_SPACE_ID = process.env.E2E_TEST_SPACE_ID || '00000000-0000-0000-0000-000000000010';

@@ -267,18 +267,32 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
 
     // Seed E2E test owner user and add as space member so that permission
     // tests can exercise the owner path. test@example.com (editor) is seeded
-    // by seed_fixed_role_accounts to avoid duplicate seeding. These are only
-    // seeded in local/dev environments to avoid leaking test accounts into
-    // production.
-    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
-    if app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev") {
-        let test_users = [
-            ("e2e3@test.com", "E2E Test 3", "e2e123456", "owner"),
-        ];
-        let repo = SeaOrmUserRepo::new(db.clone());
-        for (email, name, password, member_role) in test_users {
-            let (user_id, _) = resolve_or_create_user(&repo, email, name, password).await?;
-            upsert_space_member(db, &test_space_id, user_id, member_role).await?;
+    // by seed_fixed_role_accounts to avoid duplicate seeding.
+    // Env-driven (E2E_TEST_* / APP_SEED_E2E_*): when explicitly configured,
+    // seed in any environment (mirrors seed_fixed_role_accounts) so CI
+    // (`docker-compose.ci.yml`) gets a matching owner even if APP_ENV is
+    // not local/dev. Otherwise fall back to the hardcoded default only in
+    // local/dev to avoid leaking test accounts into production.
+    let explicit_e2e = std::env::var("E2E_TEST_EMAIL")
+        .or_else(|_| std::env::var("APP_SEED_E2E_EMAIL"))
+        .or_else(|_| std::env::var("SMOKE_TEST_EMAIL"))
+        .ok();
+    if let Some(email) = explicit_e2e {
+        let password = std::env::var("E2E_TEST_PASSWORD")
+            .or_else(|_| std::env::var("APP_SEED_E2E_PASSWORD"))
+            .or_else(|_| std::env::var("SMOKE_TEST_PASSWORD"))
+            .unwrap_or_else(|_| "e2e123456".to_string());
+        let name = std::env::var("E2E_TEST_NAME")
+            .or_else(|_| std::env::var("APP_SEED_E2E_NAME"))
+            .unwrap_or_else(|_| "E2E Test 3".to_string());
+        let (user_id, _) = resolve_or_create_user(&repo, &email, &name, &password).await?;
+        upsert_space_member(db, &test_space_id, user_id, "owner").await?;
+    } else {
+        let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
+        if app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev") {
+            let (user_id, _) =
+                resolve_or_create_user(&repo, "e2e3@test.com", "E2E Test 3", "e2e123456").await?;
+            upsert_space_member(db, &test_space_id, user_id, "owner").await?;
         }
     }
     Ok(())
