@@ -16,7 +16,7 @@ test.describe('Error Handling - Network Errors', () => {
 
     for (const pageInfo of pages) {
       await page.goto(pageInfo.path);
-      await expect(page.getByRole('heading', { name: pageInfo.name, exact: true })).toBeVisible({ timeout: 10000 });
+      await expect(page.getByRole('heading', { name: pageInfo.name, exact: true })).toBeVisible({ timeout: 30000 });
 
       const noDataMessage = page.getByText(/暂无数据|No data|Empty/);
       if (await noDataMessage.isVisible()) {
@@ -26,12 +26,20 @@ test.describe('Error Handling - Network Errors', () => {
       // canEdit is gated by useSpaceMembership, which requires fetchMe() +
       // membership query to complete after the page reload. Use an explicit
       // timeout to avoid flaky failures in production with network latency.
-      await expect(page.getByRole('button', { name: /新建|New/ })).toBeVisible({ timeout: 10000 });
+      // 30s: cold CI backend + loaded runners can exceed 10s; wait only.
+      await expect(page.getByRole('button', { name: /新建|New/ })).toBeVisible({ timeout: 30000 });
     }
   });
 
   test('Empty States Handling', { tag: '@smoke' }, async ({ page }) => {
     await page.goto(`${SPACE_BASE}/value-streams`);
+
+    // Wait for the list to settle before branching: without this the test can
+    // pass vacuously while still loading (neither locator visible yet). 30s
+    // for cold CI backend; wait only, no semantic change.
+    await expect(
+      page.getByRole('table').or(page.getByText(/暂无数据|No data|Empty|加载失败/)),
+    ).toBeVisible({ timeout: 30000 });
 
     const emptyState = page.getByText(/暂无数据|No data|Empty/);
     const table = page.getByRole('table');

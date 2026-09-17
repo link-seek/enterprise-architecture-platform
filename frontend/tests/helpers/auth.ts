@@ -78,7 +78,9 @@ export async function loginAs(page: Page, email: string, password: string) {
   // Login success: sidebar visible (environment-agnostic).
   // exact:true — the overview landing page also has entry-card links whose
   // accessible names contain the entity labels (e.g. "价值流 3 …").
-  await expect(page.getByRole('link', { name: '价值流', exact: true })).toBeVisible({ timeout: 10000 });
+  // 30s: cold CI backend (first boot + Argon2 hashing + React hydration) can
+  // exceed 10s on loaded runners; longer wait only, no semantic change.
+  await expect(page.getByRole('link', { name: '价值流', exact: true })).toBeVisible({ timeout: 30000 });
 }
 
 /**
