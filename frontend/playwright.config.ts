@@ -16,6 +16,7 @@ export default defineConfig({
   workers: 1,
   reporter: "line",
   timeout: 90_000,
+  globalSetup: "./global-setup.ts",
 
   use: {
     baseURL,
