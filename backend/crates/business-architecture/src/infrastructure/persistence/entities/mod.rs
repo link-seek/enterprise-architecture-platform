@@ -23,3 +23,4 @@ pub mod module_containment;
 pub mod interface_exposure;
 pub mod process_reference;
 pub mod orchestration;
+pub mod value_stream_run;
