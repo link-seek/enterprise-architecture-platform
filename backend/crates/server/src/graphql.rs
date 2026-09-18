@@ -5582,6 +5582,9 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     // ── Custom domain mutations for Space + membership ────────────────
     register_space_domain_mutations(&mut builder);
 
+    // ── Pilot consumer provisioner (Task 4; space ACL enforced inside) ─
+    crate::pilot::register_pilot_mutations(&mut builder);
+
     // ── Custom space-scoped queries (membership-enforced) ─────────────
     register_space_scoped_queries(&mut builder);
 
