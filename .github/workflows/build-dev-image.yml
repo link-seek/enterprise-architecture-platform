@@ -3,6 +3,15 @@ name: Build Dev Image
 on:
   workflow_dispatch:
 
+  # Dev 底座镜像 5 周无人重建导致 #691 排查弯路：每周自动重建 + 文件变更跟随，
+  # 人工只留手动按钮兜底。
+  schedule:
+    - cron: '0 2 * * 0'
+
+  push:
+    paths:
+      - 'backend/Dockerfile.dev'
+
 jobs:
   build:
     runs-on: ubuntu-latest
