@@ -426,3 +426,28 @@ pub enum CapabilityRealizationTargetType {
     #[sea_orm(string_value = "application_process")]
     ApplicationProcess,
 }
+
+/// Operational state of a value stream run (execution instance).
+///
+/// Deliberately separate from [`LifecycleStatus`]: the value stream definition
+/// follows `active / deprecated / archived`, while a run follows
+/// `defined → provisioning → live → archived`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
+#[serde(rename_all = "snake_case")]
+pub enum ValueStreamRunStatus {
+    #[sea_orm(string_value = "defined")]
+    Defined,
+    #[sea_orm(string_value = "provisioning")]
+    Provisioning,
+    #[sea_orm(string_value = "live")]
+    Live,
+    #[sea_orm(string_value = "archived")]
+    Archived,
+}
+
+impl Default for ValueStreamRunStatus {
+    fn default() -> Self {
+        ValueStreamRunStatus::Defined
+    }
+}
