@@ -13,14 +13,34 @@ export const TEST_EMAIL = hasE2EPair ? e2eEmail : ADMIN_EMAIL;
 export const TEST_PASSWORD = hasE2EPair ? e2ePassword : ADMIN_PASSWORD;
 export const TEST_NAME = process.env.E2E_TEST_NAME || 'E2E Test 3';
 
-// Fixed role accounts — seeded by the backend (APP_SEED_EDITOR_* / APP_SEED_STRANGER_*).
+// Fixed role accounts — seeded by the backend (APP_SEED_EDITOR_* / APP_SEED_STRANGER_*,
+// with E2E_EDITOR_* / E2E_STRANGER_* fallback — deploy smoke only provides E2E_*).
 // Editor: registered Architect + test space Editor member.
 // Stranger: registered Architect, NOT a member of the test space.
-export const EDITOR_EMAIL = process.env.APP_SEED_EDITOR_EMAIL || 'test@example.com';
-export const EDITOR_PASSWORD = process.env.APP_SEED_EDITOR_PASSWORD || 'testpassword123';
-export const STRANGER_EMAIL = process.env.APP_SEED_STRANGER_EMAIL || 'stranger@test.com';
-export const STRANGER_PASSWORD = process.env.APP_SEED_STRANGER_PASSWORD || 'stranger123456';
-export const STRANGER_NAME = process.env.APP_SEED_STRANGER_NAME || 'Stranger';
+function nonempty(v: string | undefined): string | undefined {
+  const t = (v || '').trim();
+  return t !== '' ? t : undefined;
+}
+export const EDITOR_EMAIL =
+  nonempty(process.env.APP_SEED_EDITOR_EMAIL) ||
+  nonempty(process.env.E2E_EDITOR_EMAIL) ||
+  'test@example.com';
+export const EDITOR_PASSWORD =
+  nonempty(process.env.APP_SEED_EDITOR_PASSWORD) ||
+  nonempty(process.env.E2E_EDITOR_PASSWORD) ||
+  'testpassword123';
+export const STRANGER_EMAIL =
+  nonempty(process.env.APP_SEED_STRANGER_EMAIL) ||
+  nonempty(process.env.E2E_STRANGER_EMAIL) ||
+  'stranger@test.com';
+export const STRANGER_PASSWORD =
+  nonempty(process.env.APP_SEED_STRANGER_PASSWORD) ||
+  nonempty(process.env.E2E_STRANGER_PASSWORD) ||
+  'stranger123456';
+export const STRANGER_NAME =
+  nonempty(process.env.APP_SEED_STRANGER_NAME) ||
+  nonempty(process.env.E2E_STRANGER_NAME) ||
+  'Stranger';
 
 // Test space id — env-driven, mirrors backend migration TEST_SPACE_ID.
 export const TEST_SPACE_ID = process.env.E2E_TEST_SPACE_ID || '00000000-0000-0000-0000-000000000010';
