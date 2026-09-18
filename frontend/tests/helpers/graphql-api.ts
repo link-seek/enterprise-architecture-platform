@@ -16,12 +16,9 @@ export function apiUrl(path: string): string {
   return path;
 }
 
-// Single-source credentials, mirrors auth.ts.
-export const ADMIN_EMAIL = process.env.APP_SEED_ADMIN_EMAIL || 'admin@test.com';
-export const ADMIN_PASSWORD = process.env.APP_SEED_ADMIN_PASSWORD || 'admin123456';
-export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || 'e2e3@test.com';
-export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || 'e2e123456';
-export const TEST_SPACE_ID = process.env.E2E_TEST_SPACE_ID || '00000000-0000-0000-0000-000000000010';
+// Single-source credentials: import from auth.ts (sole owner of E2E credential defaults) and re-export.
+import { ADMIN_EMAIL, ADMIN_PASSWORD, TEST_EMAIL, TEST_PASSWORD, TEST_SPACE_ID } from './auth';
+export { ADMIN_EMAIL, ADMIN_PASSWORD, TEST_EMAIL, TEST_PASSWORD, TEST_SPACE_ID };
 
 export interface GqlResponse {
   data?: Record<string, any>
