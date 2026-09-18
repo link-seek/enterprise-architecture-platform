@@ -5,6 +5,7 @@
 // Prod OSS has no /api proxy, so when E2E_BASE_URL points at www.* we derive
 // the api.* backend host instead of hitting OSS (which returns XML errors).
 import { APIRequestContext } from '@playwright/test';
+import { ADMIN_EMAIL, ADMIN_PASSWORD, TEST_EMAIL, TEST_PASSWORD, TEST_SPACE_ID } from './auth';
 
 export function apiUrl(path: string): string {
   const explicit = (process.env.E2E_API_URL ?? '').trim().replace(/\/+$/, '');
@@ -16,13 +17,8 @@ export function apiUrl(path: string): string {
   return path;
 }
 
-export const SECOND_EDITOR_EMAIL = process.env.E2E_SECOND_EDITOR_EMAIL || process.env.APP_SEED_EDITOR_EMAIL || 'test@example.com';
-export const SECOND_EDITOR_PASSWORD = process.env.E2E_SECOND_EDITOR_PASSWORD || process.env.APP_SEED_EDITOR_PASSWORD || 'testpassword123';
-export const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL || process.env.APP_SEED_ADMIN_EMAIL || 'admin@test.com';
-export const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD || process.env.APP_SEED_ADMIN_PASSWORD || 'admin123456';
-export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || process.env.SMOKE_TEST_EMAIL || process.env.APP_SEED_ADMIN_EMAIL || 'e2e3@test.com';
-export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || process.env.SMOKE_TEST_PASSWORD || process.env.APP_SEED_ADMIN_PASSWORD || 'e2e123456';
-export const TEST_SPACE_ID = process.env.E2E_TEST_SPACE_ID || '00000000-0000-0000-0000-000000000010';
+// Single-source credentials from auth.ts (sole owner of E2E credential defaults).
+export { ADMIN_EMAIL, ADMIN_PASSWORD, TEST_EMAIL, TEST_PASSWORD, TEST_SPACE_ID };
 
 export interface GqlResponse {
   data?: Record<string, any>

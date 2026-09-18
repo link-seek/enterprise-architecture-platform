@@ -46,7 +46,7 @@ impl AppState {
         // - Otherwise: local/dev use default admin@test.com/admin123456;
         //   production logs a warning prompting the operator to set the env var.
         let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
-        let explicit_email = std::env::var("APP_SEED_ADMIN_EMAIL").ok();
+        let explicit_email = nonempty_env("APP_SEED_ADMIN_EMAIL");
         match explicit_email {
             Some(_) => {
                 seed_admin(&db).await?;
@@ -94,6 +94,15 @@ impl AppState {
 fn test_space_uuid() -> Uuid {
     Uuid::parse_str(migration::m20250101_000029_add_space_id_to_business_entities::TEST_SPACE_ID)
         .expect("TEST_SPACE_ID must be a valid UUID")
+}
+
+/// Read an env var, treating a missing var AND an empty/whitespace-only value
+/// as unset. CI systems often export undefined secrets as empty strings, and
+/// the E2E frontend helpers (`||` chains) skip empty strings — without this
+/// filter the backend would seed a user literally named `""` while the
+/// frontend falls through to the next fallback, desyncing every login.
+fn nonempty_env(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|v| !v.trim().is_empty())
 }
 
 /// Resolve a user by email, creating a new `Architect` account if not found.
@@ -244,7 +253,7 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
     // user for environments without a configured seed. UserRole::Admin is
     // stored as 'admin' (snake_case string_value in enums.rs), so the SQL
     // filter must use lowercase to match.
-    let configured_admin = std::env::var("APP_SEED_ADMIN_EMAIL").ok();
+    let configured_admin = nonempty_env("APP_SEED_ADMIN_EMAIL");
     let repo = SeaOrmUserRepo::new(db.clone());
     let mut admin_id = match configured_admin {
         Some(email) => repo.find_by_email(&email).await?.map(|u| u.id),
@@ -265,39 +274,50 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
         upsert_space_member(db, &test_space_id, admin_id, "owner").await?;
     }
 
-    // Seed E2E test owner user and add as space member so that permission
-    // tests can exercise the owner path. test@example.com (editor) is seeded
-    // by seed_fixed_role_accounts to avoid duplicate seeding. These are only
-    // seeded in local/dev environments to avoid leaking test accounts into
-    // production.
+    // Seed E2E test owner (single-source: E2E_TEST_* only, never in production:
+    // a stray E2E_TEST_EMAIL must not create a test owner on prod data, and a
+    // missing password never falls back to a known weak default).
     let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
-    if app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev") {
-        let test_users = [
-            ("e2e3@test.com", "E2E Test 3", "e2e123456", "owner"),
-        ];
-        let repo = SeaOrmUserRepo::new(db.clone());
-        for (email, name, password, member_role) in test_users {
-            let (user_id, _) = resolve_or_create_user(&repo, email, name, password).await?;
-            upsert_space_member(db, &test_space_id, user_id, member_role).await?;
+    let is_dev = app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev");
+    let explicit_e2e = nonempty_env("E2E_TEST_EMAIL");
+    if !is_dev && explicit_e2e.is_some() {
+        tracing::warn!("E2E_TEST_EMAIL is set in a non-dev environment; ignoring E2E owner seed.");
+    }
+    let explicit_e2e = explicit_e2e.filter(|_| is_dev);
+    if let Some(email) = explicit_e2e {
+        let Some(password) = nonempty_env("E2E_TEST_PASSWORD") else {
+            tracing::warn!("E2E_TEST_EMAIL is set but E2E_TEST_PASSWORD is missing; skipping E2E owner seed.");
+            return Ok(());
+        };
+        if password.chars().count() < 8 {
+            anyhow::bail!("E2E_TEST_PASSWORD must be at least 8 characters");
         }
+        let name = nonempty_env("E2E_TEST_NAME")
+            .unwrap_or_else(|| "E2E Test 3".to_string());
+        let (user_id, _) = resolve_or_create_user(&repo, &email, &name, &password).await?;
+        upsert_space_member(db, &test_space_id, user_id, "owner").await?;
+    } else if is_dev {
+        let (user_id, _) =
+            resolve_or_create_user(&repo, "e2e3@test.com", "E2E Test 3", "e2e123456").await?;
+        upsert_space_member(db, &test_space_id, user_id, "owner").await?;
     }
     Ok(())
 }
 
 async fn seed_admin(db: &DatabaseConnection) -> anyhow::Result<()> {
-    let email = std::env::var("APP_SEED_ADMIN_EMAIL")
-        .unwrap_or_else(|_| "admin@test.com".to_string());
+    let email = nonempty_env("APP_SEED_ADMIN_EMAIL")
+        .unwrap_or_else(|| "admin@test.com".to_string());
     let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
     let is_production = !(app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev"));
-    let password = match std::env::var("APP_SEED_ADMIN_PASSWORD") {
-        Ok(p) => p,
-        Err(_) if is_production => {
+    let password = match nonempty_env("APP_SEED_ADMIN_PASSWORD") {
+        Some(p) => p,
+        None if is_production => {
             anyhow::bail!(
                 "APP_SEED_ADMIN_PASSWORD is required in production-like environments \
                  (APP_ENV='{app_env}'); refusing to seed admin with a default weak password"
             );
         }
-        Err(_) => {
+        None => {
             tracing::warn!(
                 "APP_SEED_ADMIN_PASSWORD not set, using default test password. \
                  Set this env var in production-like environments."
@@ -348,15 +368,11 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
     let test_space_id = test_space_uuid();
     let repo = SeaOrmUserRepo::new(db.clone());
 
-    // --- Editor ---
-    // Prefer APP_SEED_EDITOR_*; fall back to E2E_EDITOR_* so the backend seeds
-    // with the same credentials the tests use even when APP_SEED_* is unset.
-    let editor_email = std::env::var("APP_SEED_EDITOR_EMAIL")
-        .or_else(|_| std::env::var("E2E_EDITOR_EMAIL"));
-    let editor_password = std::env::var("APP_SEED_EDITOR_PASSWORD")
-        .or_else(|_| std::env::var("E2E_EDITOR_PASSWORD"));
+    // --- Editor (single-source: APP_SEED_EDITOR_* only) ---
+    let editor_email = nonempty_env("APP_SEED_EDITOR_EMAIL");
+    let editor_password = nonempty_env("APP_SEED_EDITOR_PASSWORD");
     match (editor_email, editor_password) {
-        (Ok(email), Ok(password)) => {
+        (Some(email), Some(password)) => {
             if password.chars().count() < 8 {
                 anyhow::bail!("APP_SEED_EDITOR_PASSWORD must be at least 8 characters");
             }
@@ -371,13 +387,13 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
             // failed, a restart will re-grant membership correctly.
             upsert_space_member(db, &test_space_id, user_id, "editor").await?;
         }
-        (Ok(_), Err(_)) | (Err(_), Ok(_)) => {
+        (Some(_), None) | (None, Some(_)) => {
             tracing::warn!(
                 "APP_SEED_EDITOR_EMAIL and APP_SEED_EDITOR_PASSWORD must both be set; \
                  skipping editor seed"
             );
         }
-        (Err(_), Err(_)) if is_local => {
+        (None, None) if is_local => {
             // Local/dev default: test@example.com / testpassword123.
             let (user_id, _) = resolve_or_create_user(
                 &repo,
@@ -388,20 +404,16 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
             .await?;
             upsert_space_member(db, &test_space_id, user_id, "editor").await?;
         }
-        (Err(_), Err(_)) => {
+        (None, None) => {
             tracing::debug!("No editor seed configured; skipping (production, env unset)");
         }
     }
 
-    // --- Stranger ---
-    // Prefer APP_SEED_STRANGER_*; fall back to E2E_STRANGER_* for the same
-    // reason as the editor fallback above.
-    let stranger_email = std::env::var("APP_SEED_STRANGER_EMAIL")
-        .or_else(|_| std::env::var("E2E_STRANGER_EMAIL"));
-    let stranger_password = std::env::var("APP_SEED_STRANGER_PASSWORD")
-        .or_else(|_| std::env::var("E2E_STRANGER_PASSWORD"));
+    // --- Stranger (single-source: APP_SEED_STRANGER_* only) ---
+    let stranger_email = nonempty_env("APP_SEED_STRANGER_EMAIL");
+    let stranger_password = nonempty_env("APP_SEED_STRANGER_PASSWORD");
     match (stranger_email, stranger_password) {
-        (Ok(email), Ok(password)) => {
+        (Some(email), Some(password)) => {
             if password.chars().count() < 8 {
                 anyhow::bail!("APP_SEED_STRANGER_PASSWORD must be at least 8 characters");
             }
@@ -410,13 +422,13 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
             // Create only — deliberately NOT added to any space.
             let _ = resolve_or_create_user(&repo, &email, &name, &password).await?;
         }
-        (Ok(_), Err(_)) | (Err(_), Ok(_)) => {
+        (Some(_), None) | (None, Some(_)) => {
             tracing::warn!(
                 "APP_SEED_STRANGER_EMAIL and APP_SEED_STRANGER_PASSWORD must both be set; \
                  skipping stranger seed"
             );
         }
-        (Err(_), Err(_)) if is_local => {
+        (None, None) if is_local => {
             // Local/dev default: stranger@test.com / stranger123456 (no space membership).
             let _ = resolve_or_create_user(
                 &repo,
@@ -426,7 +438,7 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
             )
             .await?;
         }
-        (Err(_), Err(_)) => {
+        (None, None) => {
             tracing::debug!("No stranger seed configured; skipping (production, env unset)");
         }
     }

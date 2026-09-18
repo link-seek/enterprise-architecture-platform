@@ -1,31 +1,31 @@
 // Shared test helpers for E2E tests
 import { Page, expect } from '@playwright/test';
 
-// Test credentials — env-driven for multi-environment reuse
-// Defaults work for local dev; CI/prod pass E2E_TEST_EMAIL etc.
-// Fall back to APP_SEED_ADMIN_* (or SMOKE_TEST_*) so the primary login
-// credentials always match a seeded account.
-export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || process.env.SMOKE_TEST_EMAIL || process.env.APP_SEED_ADMIN_EMAIL || 'e2e3@test.com';
-export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || process.env.SMOKE_TEST_PASSWORD || process.env.APP_SEED_ADMIN_PASSWORD || 'e2e123456';
+// Single-source credentials (E2E isolation): TEST_* reads only E2E_TEST_*,
+// role/admin accounts read only APP_SEED_*. TEST_* falls back to the admin
+// account (test-space owner everywhere, incl. deploy smoke where only
+// APP_SEED_* secrets exist); CI/dev explicit env keeps prior behavior.
+// Admin credentials for quota-bypass tests.
+export const ADMIN_EMAIL = process.env.APP_SEED_ADMIN_EMAIL || 'admin@test.com';
+export const ADMIN_PASSWORD = process.env.APP_SEED_ADMIN_PASSWORD || 'admin123456';
+export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || ADMIN_EMAIL;
+export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || ADMIN_PASSWORD;
 export const TEST_NAME = process.env.E2E_TEST_NAME || 'E2E Test 3';
+
+// Backend seeds E2E_TEST_EMAIL/PASSWORD as a pair (missing password skips the
+// seed); fail fast here instead of logging in with a mismatched half-account.
+if (!!process.env.E2E_TEST_EMAIL !== !!process.env.E2E_TEST_PASSWORD) {
+  throw new Error('E2E_TEST_EMAIL and E2E_TEST_PASSWORD must be set together.');
+}
 
 // Fixed role accounts — seeded by the backend (APP_SEED_EDITOR_* / APP_SEED_STRANGER_*).
 // Editor: registered Architect + test space Editor member.
 // Stranger: registered Architect, NOT a member of the test space.
-// Fall back to APP_SEED_* env vars so the test credentials always match the
-// seeded accounts even when E2E_* secrets are not separately configured.
-export const EDITOR_EMAIL = process.env.E2E_EDITOR_EMAIL || process.env.APP_SEED_EDITOR_EMAIL || 'test@example.com';
-export const EDITOR_PASSWORD = process.env.E2E_EDITOR_PASSWORD || process.env.APP_SEED_EDITOR_PASSWORD || 'testpassword123';
-export const STRANGER_EMAIL = process.env.E2E_STRANGER_EMAIL || process.env.APP_SEED_STRANGER_EMAIL || 'stranger@test.com';
-export const STRANGER_PASSWORD = process.env.E2E_STRANGER_PASSWORD || process.env.APP_SEED_STRANGER_PASSWORD || 'stranger123456';
-export const STRANGER_NAME = process.env.E2E_STRANGER_NAME || process.env.APP_SEED_STRANGER_NAME || 'Stranger';
-
-// Admin credentials — env-driven so smoke tests resolve the real seed admin
-// in production (SMOKE_TEST_* / APP_SEED_ADMIN_* secrets) instead of the
-// local/CI default admin@test.com / admin123456. Used by tests that need
-// admin-only privileges (e.g. bypassing the 3-space quota).
-export const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL || process.env.SMOKE_TEST_EMAIL || process.env.APP_SEED_ADMIN_EMAIL || 'admin@test.com';
-export const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD || process.env.SMOKE_TEST_PASSWORD || process.env.APP_SEED_ADMIN_PASSWORD || 'admin123456';
+export const EDITOR_EMAIL = process.env.APP_SEED_EDITOR_EMAIL || 'test@example.com';
+export const EDITOR_PASSWORD = process.env.APP_SEED_EDITOR_PASSWORD || 'testpassword123';
+export const STRANGER_EMAIL = process.env.APP_SEED_STRANGER_EMAIL || 'stranger@test.com';
+export const STRANGER_PASSWORD = process.env.APP_SEED_STRANGER_PASSWORD || 'stranger123456';
+export const STRANGER_NAME = process.env.APP_SEED_STRANGER_NAME || 'Stranger';
 
 // Test space id — env-driven, mirrors backend migration TEST_SPACE_ID.
 export const TEST_SPACE_ID = process.env.E2E_TEST_SPACE_ID || '00000000-0000-0000-0000-000000000010';
@@ -72,7 +72,9 @@ export async function loginAs(page: Page, email: string, password: string) {
   // Login success: sidebar visible (environment-agnostic).
   // exact:true — the overview landing page also has entry-card links whose
   // accessible names contain the entity labels (e.g. "价值流 3 …").
-  await expect(page.getByRole('link', { name: '价值流', exact: true })).toBeVisible({ timeout: 10000 });
+  // 30s: cold CI backend (first boot + Argon2 hashing + React hydration) can
+  // exceed 10s on loaded runners; longer wait only, no semantic change.
+  await expect(page.getByRole('link', { name: '价值流', exact: true })).toBeVisible({ timeout: 30000 });
 }
 
 /**

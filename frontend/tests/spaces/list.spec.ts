@@ -26,7 +26,10 @@ test.describe('Spaces - Browse Spaces Main Flow', () => {
     await expect(page.getByText(/加载失败/)).not.toBeVisible();
 
     // Wait for the seeded test space card to appear - list loaded successfully.
-    const testSpaceCard = page.getByRole('link', { name: /测试空间/ });
+    // Anchor by href (TEST_SPACE_ID): a name regex like /测试空间/ also matches
+    // other cards whose description contains that substring (e.g. leftover
+    // "E2E 自动化测试空间" from an unarchived crud run) and trips strict mode.
+    const testSpaceCard = page.locator(`a[href="/spaces/${TEST_SPACE_ID}"]`);
     await expect(testSpaceCard).toBeVisible({ timeout: 10000 });
 
     // Assert no 405 was returned while loading the list.
