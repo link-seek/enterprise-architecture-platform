@@ -2,11 +2,11 @@ FROM rust:1.94-slim AS builder
 RUN apt-get update && apt-get install -y curl pkg-config && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY . .
-RUN cargo build -p server
+RUN cargo build --release -p server
 
-FROM gcr.io/distroless/cc-debian13
+FROM gcr.io/distroless/cc-debian12
 WORKDIR /app
-COPY --from=builder /app/target/debug/server ./server-bin
+COPY --from=builder /app/target/release/server ./server-bin
 COPY --from=builder /app/config ./config
 COPY --from=builder /app/migration ./migration
 EXPOSE 8080
