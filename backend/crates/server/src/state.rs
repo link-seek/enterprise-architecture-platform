@@ -274,22 +274,32 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
         upsert_space_member(db, &test_space_id, admin_id, "owner").await?;
     }
 
-    // Seed E2E test owner (single-source: E2E_TEST_* only).
+    // Seed E2E test owner (single-source: E2E_TEST_* only, never in production:
+    // a stray E2E_TEST_EMAIL must not create a test owner on prod data, and a
+    // missing password never falls back to a known weak default).
+    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
+    let is_dev = app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev");
     let explicit_e2e = nonempty_env("E2E_TEST_EMAIL");
+    if !is_dev && explicit_e2e.is_some() {
+        tracing::warn!("E2E_TEST_EMAIL is set in a non-dev environment; ignoring E2E owner seed.");
+    }
+    let explicit_e2e = explicit_e2e.filter(|_| is_dev);
     if let Some(email) = explicit_e2e {
-        let password = nonempty_env("E2E_TEST_PASSWORD")
-            .unwrap_or_else(|| "e2e123456".to_string());
+        let Some(password) = nonempty_env("E2E_TEST_PASSWORD") else {
+            tracing::warn!("E2E_TEST_EMAIL is set but E2E_TEST_PASSWORD is missing; skipping E2E owner seed.");
+            return Ok(());
+        };
+        if password.chars().count() < 8 {
+            anyhow::bail!("E2E_TEST_PASSWORD must be at least 8 characters");
+        }
         let name = nonempty_env("E2E_TEST_NAME")
             .unwrap_or_else(|| "E2E Test 3".to_string());
         let (user_id, _) = resolve_or_create_user(&repo, &email, &name, &password).await?;
         upsert_space_member(db, &test_space_id, user_id, "owner").await?;
-    } else {
-        let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
-        if app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev") {
-            let (user_id, _) =
-                resolve_or_create_user(&repo, "e2e3@test.com", "E2E Test 3", "e2e123456").await?;
-            upsert_space_member(db, &test_space_id, user_id, "owner").await?;
-        }
+    } else if is_dev {
+        let (user_id, _) =
+            resolve_or_create_user(&repo, "e2e3@test.com", "E2E Test 3", "e2e123456").await?;
+        upsert_space_member(db, &test_space_id, user_id, "owner").await?;
     }
     Ok(())
 }

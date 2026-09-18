@@ -5,6 +5,7 @@
 // Prod OSS has no /api proxy, so when E2E_BASE_URL points at www.* we derive
 // the api.* backend host instead of hitting OSS (which returns XML errors).
 import { APIRequestContext } from '@playwright/test';
+import { ADMIN_EMAIL, ADMIN_PASSWORD, TEST_EMAIL, TEST_PASSWORD, TEST_SPACE_ID } from './auth';
 
 export function apiUrl(path: string): string {
   const explicit = (process.env.E2E_API_URL ?? '').trim().replace(/\/+$/, '');
@@ -16,8 +17,7 @@ export function apiUrl(path: string): string {
   return path;
 }
 
-// Single-source credentials: import from auth.ts (sole owner of E2E credential defaults) and re-export.
-import { ADMIN_EMAIL, ADMIN_PASSWORD, TEST_EMAIL, TEST_PASSWORD, TEST_SPACE_ID } from './auth';
+// Single-source credentials from auth.ts (sole owner of E2E credential defaults).
 export { ADMIN_EMAIL, ADMIN_PASSWORD, TEST_EMAIL, TEST_PASSWORD, TEST_SPACE_ID };
 
 export interface GqlResponse {

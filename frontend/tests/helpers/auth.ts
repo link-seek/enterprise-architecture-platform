@@ -2,10 +2,21 @@
 import { Page, expect } from '@playwright/test';
 
 // Single-source credentials (E2E isolation): TEST_* reads only E2E_TEST_*,
-// role/admin accounts read only APP_SEED_*; defaults match docker-compose.ci.yml.
-export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || 'e2e3@test.com';
-export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || 'e2e123456';
+// role/admin accounts read only APP_SEED_*. TEST_* falls back to the admin
+// account (test-space owner everywhere, incl. deploy smoke where only
+// APP_SEED_* secrets exist); CI/dev explicit env keeps prior behavior.
+// Admin credentials for quota-bypass tests.
+export const ADMIN_EMAIL = process.env.APP_SEED_ADMIN_EMAIL || 'admin@test.com';
+export const ADMIN_PASSWORD = process.env.APP_SEED_ADMIN_PASSWORD || 'admin123456';
+export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || ADMIN_EMAIL;
+export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || ADMIN_PASSWORD;
 export const TEST_NAME = process.env.E2E_TEST_NAME || 'E2E Test 3';
+
+// Backend seeds E2E_TEST_EMAIL/PASSWORD as a pair (missing password skips the
+// seed); fail fast here instead of logging in with a mismatched half-account.
+if (!!process.env.E2E_TEST_EMAIL !== !!process.env.E2E_TEST_PASSWORD) {
+  throw new Error('E2E_TEST_EMAIL and E2E_TEST_PASSWORD must be set together.');
+}
 
 // Fixed role accounts — seeded by the backend (APP_SEED_EDITOR_* / APP_SEED_STRANGER_*).
 // Editor: registered Architect + test space Editor member.
@@ -15,10 +26,6 @@ export const EDITOR_PASSWORD = process.env.APP_SEED_EDITOR_PASSWORD || 'testpass
 export const STRANGER_EMAIL = process.env.APP_SEED_STRANGER_EMAIL || 'stranger@test.com';
 export const STRANGER_PASSWORD = process.env.APP_SEED_STRANGER_PASSWORD || 'stranger123456';
 export const STRANGER_NAME = process.env.APP_SEED_STRANGER_NAME || 'Stranger';
-
-// Admin credentials for quota-bypass tests.
-export const ADMIN_EMAIL = process.env.APP_SEED_ADMIN_EMAIL || 'admin@test.com';
-export const ADMIN_PASSWORD = process.env.APP_SEED_ADMIN_PASSWORD || 'admin123456';
 
 // Test space id — env-driven, mirrors backend migration TEST_SPACE_ID.
 export const TEST_SPACE_ID = process.env.E2E_TEST_SPACE_ID || '00000000-0000-0000-0000-000000000010';

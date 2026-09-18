@@ -13,7 +13,13 @@ fn respond_to(request_line: &str) -> (&'static str, &'static str) {
 
 fn handle(mut stream: std::net::TcpStream) {
     let mut buf = [0u8; 1024];
-    let n = stream.read(&mut buf).unwrap_or(0);
+    let n = match stream.read(&mut buf) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("pilot-backend: failed to read request: {e}");
+            return;
+        }
+    };
     let request_line = String::from_utf8_lossy(&buf[..n])
         .lines()
         .next()
@@ -26,14 +32,19 @@ fn handle(mut stream: std::net::TcpStream) {
         body.len(),
         body
     );
-    let _ = stream.write_all(resp.as_bytes());
+    if let Err(e) = stream.write_all(resp.as_bytes()) {
+        eprintln!("pilot-backend: failed to write response: {e}");
+    }
 }
 
 fn main() {
     let listener = TcpListener::bind("0.0.0.0:8080").expect("bind 8080");
     println!("pilot-backend listening on :8080");
-    for stream in listener.incoming().flatten() {
-        handle(stream);
+    for result in listener.incoming() {
+        match result {
+            Ok(stream) => handle(stream),
+            Err(e) => eprintln!("pilot-backend: failed to accept connection: {e}"),
+        }
     }
 }
 

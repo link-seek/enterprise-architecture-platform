@@ -30,6 +30,3 @@ frontend/playwright-report/
 # Local SQLite database (runtime data, not source)
 backend/data/
 opencode.json
-opencode.json
-opencode.json
-opencode.json
