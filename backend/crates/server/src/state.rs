@@ -274,24 +274,12 @@ async fn seed_test_space(db: &DatabaseConnection) -> anyhow::Result<()> {
         upsert_space_member(db, &test_space_id, admin_id, "owner").await?;
     }
 
-    // Seed E2E test owner user and add as space member so that permission
-    // tests can exercise the owner path. test@example.com (editor) is seeded
-    // by seed_fixed_role_accounts to avoid duplicate seeding.
-    // Env-driven (E2E_TEST_* / APP_SEED_E2E_*): when explicitly configured,
-    // seed in any environment (mirrors seed_fixed_role_accounts) so CI
-    // (`docker-compose.ci.yml`) gets a matching owner even if APP_ENV is
-    // not local/dev. Otherwise fall back to the hardcoded default only in
-    // local/dev to avoid leaking test accounts into production.
-    let explicit_e2e = nonempty_env("E2E_TEST_EMAIL")
-        .or_else(|| nonempty_env("APP_SEED_E2E_EMAIL"))
-        .or_else(|| nonempty_env("SMOKE_TEST_EMAIL"));
+    // Seed E2E test owner (single-source: E2E_TEST_* only).
+    let explicit_e2e = nonempty_env("E2E_TEST_EMAIL");
     if let Some(email) = explicit_e2e {
         let password = nonempty_env("E2E_TEST_PASSWORD")
-            .or_else(|| nonempty_env("APP_SEED_E2E_PASSWORD"))
-            .or_else(|| nonempty_env("SMOKE_TEST_PASSWORD"))
             .unwrap_or_else(|| "e2e123456".to_string());
         let name = nonempty_env("E2E_TEST_NAME")
-            .or_else(|| nonempty_env("APP_SEED_E2E_NAME"))
             .unwrap_or_else(|| "E2E Test 3".to_string());
         let (user_id, _) = resolve_or_create_user(&repo, &email, &name, &password).await?;
         upsert_space_member(db, &test_space_id, user_id, "owner").await?;
@@ -370,13 +358,9 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
     let test_space_id = test_space_uuid();
     let repo = SeaOrmUserRepo::new(db.clone());
 
-    // --- Editor ---
-    // Prefer APP_SEED_EDITOR_*; fall back to E2E_EDITOR_* so the backend seeds
-    // with the same credentials the tests use even when APP_SEED_* is unset.
-    let editor_email = nonempty_env("APP_SEED_EDITOR_EMAIL")
-        .or_else(|| nonempty_env("E2E_EDITOR_EMAIL"));
-    let editor_password = nonempty_env("APP_SEED_EDITOR_PASSWORD")
-        .or_else(|| nonempty_env("E2E_EDITOR_PASSWORD"));
+    // --- Editor (single-source: APP_SEED_EDITOR_* only) ---
+    let editor_email = nonempty_env("APP_SEED_EDITOR_EMAIL");
+    let editor_password = nonempty_env("APP_SEED_EDITOR_PASSWORD");
     match (editor_email, editor_password) {
         (Some(email), Some(password)) => {
             if password.chars().count() < 8 {
@@ -415,13 +399,9 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
         }
     }
 
-    // --- Stranger ---
-    // Prefer APP_SEED_STRANGER_*; fall back to E2E_STRANGER_* for the same
-    // reason as the editor fallback above.
-    let stranger_email = nonempty_env("APP_SEED_STRANGER_EMAIL")
-        .or_else(|| nonempty_env("E2E_STRANGER_EMAIL"));
-    let stranger_password = nonempty_env("APP_SEED_STRANGER_PASSWORD")
-        .or_else(|| nonempty_env("E2E_STRANGER_PASSWORD"));
+    // --- Stranger (single-source: APP_SEED_STRANGER_* only) ---
+    let stranger_email = nonempty_env("APP_SEED_STRANGER_EMAIL");
+    let stranger_password = nonempty_env("APP_SEED_STRANGER_PASSWORD");
     match (stranger_email, stranger_password) {
         (Some(email), Some(password)) => {
             if password.chars().count() < 8 {

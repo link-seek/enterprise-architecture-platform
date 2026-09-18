@@ -1,37 +1,24 @@
 // Shared test helpers for E2E tests
 import { Page, expect } from '@playwright/test';
 
-// Test credentials — env-driven for multi-environment reuse.
-// These chains MUST mirror backend seeding exactly (`AppState::new` in
-// backend/crates/server/src/state.rs: `seed_test_space` reads
-// E2E_TEST_* → APP_SEED_E2E_* → SMOKE_TEST_*; `seed_fixed_role_accounts`
-// reads APP_SEED_EDITOR/STRANGER_* → E2E_EDITOR/STRANGER_*; `seed_admin`
-// reads APP_SEED_ADMIN_*; `docker-compose.ci.yml` forwards host secrets via
-// `${VAR:-default}`). The backend applies NO local/external distinction, so
-// the tests must not gate any fallback behind E2E_BASE_URL either: any
-// one-sided gating desyncs the two sides whenever CI inherits production
-// secrets, and every login-dependent test fails at once. Chain order matches
-// the backend field-for-field (including APP_SEED_* before E2E_* for role
-// accounts); APP_SEED_ADMIN_* is a last resort for TEST_* so a seeded admin
-// can still log in where no E2E/SMOKE account was seeded.
-export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || process.env.APP_SEED_E2E_EMAIL || process.env.SMOKE_TEST_EMAIL || process.env.APP_SEED_ADMIN_EMAIL || 'e2e3@test.com';
-export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || process.env.APP_SEED_E2E_PASSWORD || process.env.SMOKE_TEST_PASSWORD || process.env.APP_SEED_ADMIN_PASSWORD || 'e2e123456';
-export const TEST_NAME = process.env.E2E_TEST_NAME || process.env.APP_SEED_E2E_NAME || 'E2E Test 3';
+// Single-source credentials (E2E isolation): TEST_* reads only E2E_TEST_*,
+// role/admin accounts read only APP_SEED_*; defaults match docker-compose.ci.yml.
+export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || 'e2e3@test.com';
+export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || 'e2e123456';
+export const TEST_NAME = process.env.E2E_TEST_NAME || 'E2E Test 3';
 
 // Fixed role accounts — seeded by the backend (APP_SEED_EDITOR_* / APP_SEED_STRANGER_*).
 // Editor: registered Architect + test space Editor member.
 // Stranger: registered Architect, NOT a member of the test space.
-export const EDITOR_EMAIL = process.env.APP_SEED_EDITOR_EMAIL || process.env.E2E_EDITOR_EMAIL || 'test@example.com';
-export const EDITOR_PASSWORD = process.env.APP_SEED_EDITOR_PASSWORD || process.env.E2E_EDITOR_PASSWORD || 'testpassword123';
-export const STRANGER_EMAIL = process.env.APP_SEED_STRANGER_EMAIL || process.env.E2E_STRANGER_EMAIL || 'stranger@test.com';
-export const STRANGER_PASSWORD = process.env.APP_SEED_STRANGER_PASSWORD || process.env.E2E_STRANGER_PASSWORD || 'stranger123456';
-export const STRANGER_NAME = process.env.APP_SEED_STRANGER_NAME || process.env.E2E_STRANGER_NAME || 'Stranger';
+export const EDITOR_EMAIL = process.env.APP_SEED_EDITOR_EMAIL || 'test@example.com';
+export const EDITOR_PASSWORD = process.env.APP_SEED_EDITOR_PASSWORD || 'testpassword123';
+export const STRANGER_EMAIL = process.env.APP_SEED_STRANGER_EMAIL || 'stranger@test.com';
+export const STRANGER_PASSWORD = process.env.APP_SEED_STRANGER_PASSWORD || 'stranger123456';
+export const STRANGER_NAME = process.env.APP_SEED_STRANGER_NAME || 'Stranger';
 
-// Admin credentials — order mirrors `seed_admin` (APP_SEED_ADMIN_* first);
-// E2E_ADMIN_* stays as an explicit-test-config override.
-// Used by tests that need admin-only privileges (e.g. bypassing quota).
-export const ADMIN_EMAIL = process.env.APP_SEED_ADMIN_EMAIL || process.env.E2E_ADMIN_EMAIL || 'admin@test.com';
-export const ADMIN_PASSWORD = process.env.APP_SEED_ADMIN_PASSWORD || process.env.E2E_ADMIN_PASSWORD || 'admin123456';
+// Admin credentials for quota-bypass tests.
+export const ADMIN_EMAIL = process.env.APP_SEED_ADMIN_EMAIL || 'admin@test.com';
+export const ADMIN_PASSWORD = process.env.APP_SEED_ADMIN_PASSWORD || 'admin123456';
 
 // Test space id — env-driven, mirrors backend migration TEST_SPACE_ID.
 export const TEST_SPACE_ID = process.env.E2E_TEST_SPACE_ID || '00000000-0000-0000-0000-000000000010';

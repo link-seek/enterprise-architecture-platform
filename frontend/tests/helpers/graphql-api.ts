@@ -16,17 +16,11 @@ export function apiUrl(path: string): string {
   return path;
 }
 
-// Credential resolution MUST mirror backend seeding exactly — see
-// tests/helpers/auth.ts header for the full rationale (no E2E_BASE_URL
-// gating; chain order matches the backend field-for-field). This file keeps
-// the same chains so UI logins and direct API logins always target the same
-// accounts, including when CI inherits production secrets.
-export const SECOND_EDITOR_EMAIL = process.env.E2E_SECOND_EDITOR_EMAIL || process.env.APP_SEED_EDITOR_EMAIL || 'test@example.com';
-export const SECOND_EDITOR_PASSWORD = process.env.E2E_SECOND_EDITOR_PASSWORD || process.env.APP_SEED_EDITOR_PASSWORD || 'testpassword123';
-export const ADMIN_EMAIL = process.env.APP_SEED_ADMIN_EMAIL || process.env.E2E_ADMIN_EMAIL || 'admin@test.com';
-export const ADMIN_PASSWORD = process.env.APP_SEED_ADMIN_PASSWORD || process.env.E2E_ADMIN_PASSWORD || 'admin123456';
-export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || process.env.APP_SEED_E2E_EMAIL || process.env.SMOKE_TEST_EMAIL || process.env.APP_SEED_ADMIN_EMAIL || 'e2e3@test.com';
-export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || process.env.APP_SEED_E2E_PASSWORD || process.env.SMOKE_TEST_PASSWORD || process.env.APP_SEED_ADMIN_PASSWORD || 'e2e123456';
+// Single-source credentials, mirrors auth.ts.
+export const ADMIN_EMAIL = process.env.APP_SEED_ADMIN_EMAIL || 'admin@test.com';
+export const ADMIN_PASSWORD = process.env.APP_SEED_ADMIN_PASSWORD || 'admin123456';
+export const TEST_EMAIL = process.env.E2E_TEST_EMAIL || 'e2e3@test.com';
+export const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || 'e2e123456';
 export const TEST_SPACE_ID = process.env.E2E_TEST_SPACE_ID || '00000000-0000-0000-0000-000000000010';
 
 export interface GqlResponse {
