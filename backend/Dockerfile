@@ -4,7 +4,7 @@ WORKDIR /app
 COPY . .
 RUN cargo build --release -p server
 
-FROM gcr.io/distroless/cc-debian12
+FROM gcr.io/distroless/cc-debian13
 WORKDIR /app
 COPY --from=builder /app/target/release/server ./server-bin
 COPY --from=builder /app/config ./config

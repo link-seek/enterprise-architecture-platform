@@ -358,9 +358,12 @@ async fn seed_admin(db: &DatabaseConnection) -> anyhow::Result<()> {
 ///   member (can edit content but not manage members/archive the space).
 /// - **stranger**: registered `Architect`, **not** a member of any space.
 ///
-/// Mirrors `seed_admin`: env-driven (`APP_SEED_EDITOR_*` / `APP_SEED_STRANGER_*`),
-/// idempotent (`find_by_email`), production requires a password ≥ 8 chars, and
-/// unset env in production simply skips (zero breakage).
+/// Mirrors `seed_admin`: env-driven (`APP_SEED_EDITOR_*` / `APP_SEED_STRANGER_*`,
+/// with `E2E_EDITOR_*` / `E2E_STRANGER_*` fallback — deploy smoke only provides
+/// `E2E_*`), idempotent (`find_by_email`), production requires a password
+/// ≥ 8 chars, and unset env in production simply skips (zero breakage).
+/// When both sources are set with different emails, both accounts are seeded
+/// so logins succeed regardless of which secret family the test uses.
 async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()> {
     let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
     let is_local = app_env.eq_ignore_ascii_case("local") || app_env.eq_ignore_ascii_case("dev");
@@ -368,79 +371,120 @@ async fn seed_fixed_role_accounts(db: &DatabaseConnection) -> anyhow::Result<()>
     let test_space_id = test_space_uuid();
     let repo = SeaOrmUserRepo::new(db.clone());
 
-    // --- Editor (single-source: APP_SEED_EDITOR_* only) ---
-    let editor_email = nonempty_env("APP_SEED_EDITOR_EMAIL");
-    let editor_password = nonempty_env("APP_SEED_EDITOR_PASSWORD");
-    match (editor_email, editor_password) {
+    // --- Editor (dual-source: APP_SEED_* + E2E_* fallback) ---
+    let mut editor_pairs: Vec<(String, String, String)> = Vec::new();
+    match (
+        nonempty_env("APP_SEED_EDITOR_EMAIL"),
+        nonempty_env("APP_SEED_EDITOR_PASSWORD"),
+    ) {
         (Some(email), Some(password)) => {
-            if password.chars().count() < 8 {
-                anyhow::bail!("APP_SEED_EDITOR_PASSWORD must be at least 8 characters");
-            }
-            let name =
-                std::env::var("APP_SEED_EDITOR_NAME").unwrap_or_else(|_| "Editor".to_string());
-            let (user_id, _was_created) =
-                resolve_or_create_user(&repo, &email, &name, &password).await?;
-            // Always grant test-space membership. The upsert is idempotent and
-            // protects against accidental role downgrade (an existing owner is
-            // never overwritten by editor). This also recovers from partial
-            // failure: if a previous run created the user but membership grant
-            // failed, a restart will re-grant membership correctly.
-            upsert_space_member(db, &test_space_id, user_id, "editor").await?;
+            let name = nonempty_env("APP_SEED_EDITOR_NAME").unwrap_or_else(|| "Editor".to_string());
+            editor_pairs.push((email, password, name));
         }
         (Some(_), None) | (None, Some(_)) => {
             tracing::warn!(
                 "APP_SEED_EDITOR_EMAIL and APP_SEED_EDITOR_PASSWORD must both be set; \
-                 skipping editor seed"
+                 skipping APP_SEED editor seed"
             );
         }
-        (None, None) if is_local => {
-            // Local/dev default: test@example.com / testpassword123.
-            let (user_id, _) = resolve_or_create_user(
-                &repo,
-                "test@example.com",
-                "测试用户",
-                "testpassword123",
-            )
-            .await?;
-            upsert_space_member(db, &test_space_id, user_id, "editor").await?;
+        (None, None) => {}
+    }
+    match (
+        nonempty_env("E2E_EDITOR_EMAIL"),
+        nonempty_env("E2E_EDITOR_PASSWORD"),
+    ) {
+        (Some(email), Some(password)) => {
+            if !editor_pairs.iter().any(|(e, _, _)| e == &email) {
+                let name = nonempty_env("E2E_EDITOR_NAME").unwrap_or_else(|| "Editor".to_string());
+                editor_pairs.push((email, password, name));
+            }
         }
-        (None, None) => {
-            tracing::debug!("No editor seed configured; skipping (production, env unset)");
+        (Some(_), None) | (None, Some(_)) => {
+            tracing::warn!(
+                "E2E_EDITOR_EMAIL and E2E_EDITOR_PASSWORD must both be set; \
+                 skipping E2E editor seed"
+            );
         }
+        (None, None) => {}
+    }
+    if editor_pairs.is_empty() && is_local {
+        editor_pairs.push((
+            "test@example.com".to_string(),
+            "testpassword123".to_string(),
+            "测试用户".to_string(),
+        ));
+    }
+    if editor_pairs.is_empty() {
+        tracing::debug!("No editor seed configured; skipping (production, env unset)");
+    }
+    for (email, password, name) in editor_pairs {
+        if password.chars().count() < 8 {
+            anyhow::bail!("Seed editor password must be at least 8 characters");
+        }
+        let (user_id, _was_created) =
+            resolve_or_create_user(&repo, &email, &name, &password).await?;
+        // Always grant test-space membership. The upsert is idempotent and
+        // protects against accidental role downgrade (an existing owner is
+        // never overwritten by editor). This also recovers from partial
+        // failure: if a previous run created the user but membership grant
+        // failed, a restart will re-grant membership correctly.
+        upsert_space_member(db, &test_space_id, user_id, "editor").await?;
     }
 
-    // --- Stranger (single-source: APP_SEED_STRANGER_* only) ---
-    let stranger_email = nonempty_env("APP_SEED_STRANGER_EMAIL");
-    let stranger_password = nonempty_env("APP_SEED_STRANGER_PASSWORD");
-    match (stranger_email, stranger_password) {
+    // --- Stranger (dual-source: APP_SEED_* + E2E_* fallback) ---
+    let mut stranger_pairs: Vec<(String, String, String)> = Vec::new();
+    match (
+        nonempty_env("APP_SEED_STRANGER_EMAIL"),
+        nonempty_env("APP_SEED_STRANGER_PASSWORD"),
+    ) {
         (Some(email), Some(password)) => {
-            if password.chars().count() < 8 {
-                anyhow::bail!("APP_SEED_STRANGER_PASSWORD must be at least 8 characters");
-            }
             let name =
-                std::env::var("APP_SEED_STRANGER_NAME").unwrap_or_else(|_| "Stranger".to_string());
-            // Create only — deliberately NOT added to any space.
-            let _ = resolve_or_create_user(&repo, &email, &name, &password).await?;
+                nonempty_env("APP_SEED_STRANGER_NAME").unwrap_or_else(|| "Stranger".to_string());
+            stranger_pairs.push((email, password, name));
         }
         (Some(_), None) | (None, Some(_)) => {
             tracing::warn!(
                 "APP_SEED_STRANGER_EMAIL and APP_SEED_STRANGER_PASSWORD must both be set; \
-                 skipping stranger seed"
+                 skipping APP_SEED stranger seed"
             );
         }
-        (None, None) if is_local => {
-            // Local/dev default: stranger@test.com / stranger123456 (no space membership).
-            let _ = resolve_or_create_user(
-                &repo,
-                "stranger@test.com",
-                "Stranger",
-                "stranger123456",
-            )
-            .await?;
+        (None, None) => {}
+    }
+    match (
+        nonempty_env("E2E_STRANGER_EMAIL"),
+        nonempty_env("E2E_STRANGER_PASSWORD"),
+    ) {
+        (Some(email), Some(password)) => {
+            if !stranger_pairs.iter().any(|(e, _, _)| e == &email) {
+                let name =
+                    nonempty_env("E2E_STRANGER_NAME").unwrap_or_else(|| "Stranger".to_string());
+                stranger_pairs.push((email, password, name));
+            }
         }
-        (None, None) => {
-            tracing::debug!("No stranger seed configured; skipping (production, env unset)");
+        (Some(_), None) | (None, Some(_)) => {
+            tracing::warn!(
+                "E2E_STRANGER_EMAIL and E2E_STRANGER_PASSWORD must both be set; \
+                 skipping E2E stranger seed"
+            );
         }
+        (None, None) => {}
+    }
+    if stranger_pairs.is_empty() && is_local {
+        stranger_pairs.push((
+            "stranger@test.com".to_string(),
+            "stranger123456".to_string(),
+            "Stranger".to_string(),
+        ));
+    }
+    if stranger_pairs.is_empty() {
+        tracing::debug!("No stranger seed configured; skipping (production, env unset)");
+    }
+    for (email, password, name) in stranger_pairs {
+        if password.chars().count() < 8 {
+            anyhow::bail!("Seed stranger password must be at least 8 characters");
+        }
+        // Create only — deliberately NOT added to any space.
+        let _ = resolve_or_create_user(&repo, &email, &name, &password).await?;
     }
 
     Ok(())
