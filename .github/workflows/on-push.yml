@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   e2e-test:
-    uses: link-seek/issue-resolver-l1/.github/workflows/e2e-test.yml@v1.0.13-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/e2e-test.yml@v1.0.15-pilot
     with:
       ref: ''
     secrets: inherit
@@ -23,7 +23,7 @@ jobs:
   ci-cd:
     needs: e2e-test
     if: needs.e2e-test.result == 'success'
-    uses: link-seek/issue-resolver-l1/.github/workflows/ci-cd-acr.yml@v1.0.13-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/ci-cd-acr.yml@v1.0.15-pilot
     with:
       ghcr-image: ghcr.io/link-seek/eap-backend
       oss-bucket: eap-frontend-xyc
