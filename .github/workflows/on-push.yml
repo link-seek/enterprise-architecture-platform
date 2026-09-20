@@ -27,7 +27,7 @@ jobs:
     with:
       ghcr-image: ghcr.io/link-seek/eap-backend
       oss-bucket: eap-frontend-xyc
-      frontend-build-env: '["VITE_API_URL=https://api.xieyucheng.top/api"]'
+      frontend-build-env: '["VITE_API_URL=https://eap-api.linkseek.net.cn/api"]'
     secrets: inherit
 
   create-e2e-issue:

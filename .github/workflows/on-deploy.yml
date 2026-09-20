@@ -82,8 +82,8 @@ jobs:
       acr-registry: crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com
       acr-namespace: eap-app
       acr-repo: backend
-      frontend-url: https://www.xieyucheng.top
-      api-url: https://api.xieyucheng.top
+      frontend-url: https://eap.linkseek.net.cn
+      api-url: https://eap-api.linkseek.net.cn
       issue-repo: link-seek/enterprise-architecture-platform
       deploy-script: scripts/deploy/deploy.sh
       backup-script: scripts/deploy/backup.sh
