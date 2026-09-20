@@ -89,7 +89,8 @@ jobs:
       backup-script: scripts/deploy/backup.sh
       rollback-script: scripts/deploy/rollback.sh
       consumer-repo: link-seek/enterprise-architecture-platform
-      oss-bucket: eap-frontend-xyc
+      # 前端已迁 Cloudflare Pages：置空跳过 OSS CDN 门与 OSS 回滚
+      oss-bucket: ''
       oss-region: oss-cn-shenzhen.aliyuncs.com
     secrets:
       ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
