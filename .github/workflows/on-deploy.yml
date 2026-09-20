@@ -91,7 +91,7 @@ jobs:
       consumer-repo: link-seek/enterprise-architecture-platform
       # 前端已迁 Cloudflare Pages：置空跳过 OSS CDN 门与 OSS 回滚
       oss-bucket: ''
-      oss-region: oss-cn-shenzhen.aliyuncs.com
+      oss-region: ''
     secrets:
       ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
       ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
