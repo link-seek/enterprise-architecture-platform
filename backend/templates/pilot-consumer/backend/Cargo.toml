@@ -1,0 +1,7 @@
+[package]
+name = "pilot-backend"
+version = "0.1.0"
+edition = "2021"
+
+# 零依赖：试点模板保持最小，/health 只用 std 实现
+[dependencies]

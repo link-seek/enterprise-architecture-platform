@@ -1,0 +1,17 @@
+# Issue Resolver 配置 — 试点消费仓契约（由生成器渲染时替换 __PILOT__ 占位）
+# 流程仓 (issue-resolver-l1) 读取此文件，不再硬编码消费仓路径
+
+trigger:
+  label: "fix-me"
+  mention: "@oh"
+
+risk_detection:
+  file_patterns:
+    - "migration"
+    - "\\.sql$"
+    - "/schema"
+    - "/database"
+    - "\\.github/workflows/"
+
+test:
+  command: "cargo test --manifest-path backend/Cargo.toml"
