@@ -57,6 +57,19 @@ mkdir -p "$(dirname "$ENV_FILE")"
     if [[ -n "${PILOT_GITHUB_APP_KEY:-}" ]]; then
       printf 'PILOT_GITHUB_APP_KEY=%s\n' "$PILOT_GITHUB_APP_KEY"
     fi
+    # Task3 试点模板占位输入：空值不写（后端用各自默认值）。
+    if [[ -n "${PILOT_REPO_NAME:-}" ]]; then
+      printf 'PILOT_REPO_NAME=%s\n' "$PILOT_REPO_NAME"
+    fi
+    if [[ -n "${PILOT_RUNNER:-}" ]]; then
+      printf 'PILOT_RUNNER=%s\n' "$PILOT_RUNNER"
+    fi
+    if [[ -n "${PILOT_FRONTEND_URL:-}" ]]; then
+      printf 'PILOT_FRONTEND_URL=%s\n' "$PILOT_FRONTEND_URL"
+    fi
+    if [[ -n "${PILOT_API_URL:-}" ]]; then
+      printf 'PILOT_API_URL=%s\n' "$PILOT_API_URL"
+    fi
     echo "RUST_LOG=info,sqlx::pool=warn"
   } > "$ENV_FILE"
 )
