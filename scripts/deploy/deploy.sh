@@ -12,6 +12,9 @@ CONTAINER_NAME="eap-backend"
 IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPO}:${IMAGE_TAG}"
 SERVICE_FILE="/etc/systemd/system/eap-backend.service"
 ENV_FILE="/opt/eap/eap-backend.env"
+# Task3 试点 App 私钥落盘位置 + podman 启动包装脚本
+PILOT_KEY_FILE="/opt/eap/pilot-app-key.pem"
+RUNNER_FILE="/opt/eap/run-backend.sh"
 
 echo "=== Deploying ${IMAGE} ==="
 
@@ -54,9 +57,10 @@ mkdir -p "$(dirname "$ENV_FILE")"
     if [[ -n "${PILOT_GITHUB_ORG:-}" ]]; then
       printf 'PILOT_GITHUB_ORG=%s\n' "$PILOT_GITHUB_ORG"
     fi
-    if [[ -n "${PILOT_GITHUB_APP_KEY:-}" ]]; then
-      printf 'PILOT_GITHUB_APP_KEY=%s\n' "$PILOT_GITHUB_APP_KEY"
-    fi
+    # PILOT_GITHUB_APP_KEY 是多行 PEM，**不能**写进 EnvironmentFile：
+    # systemd 只取首行（`-----BEGIN RSA PRIVATE KEY-----`），后端拿到残值报
+    # InvalidKeyFormat。改为落盘 0600 文件，由启动包装脚本注入容器环境
+    # （容器 env 值可以包含换行）。
     # Task3 试点模板占位输入：空值不写（后端用各自默认值）。
     if [[ -n "${PILOT_REPO_NAME:-}" ]]; then
       printf 'PILOT_REPO_NAME=%s\n' "$PILOT_REPO_NAME"
@@ -70,10 +74,40 @@ mkdir -p "$(dirname "$ENV_FILE")"
     if [[ -n "${PILOT_API_URL:-}" ]]; then
       printf 'PILOT_API_URL=%s\n' "$PILOT_API_URL"
     fi
+    # JWT 秘钥走 0600 env 文件，不再依赖 L1 的 sed 注入（ExecStart 已改为包装脚本，
+    # sed 会破坏命令行）；service 文件里保留 APP_JWT__SECRET 字样让 L1 步骤短路。
+    if [[ -n "${APP_JWT__SECRET:-}" ]]; then
+      printf 'APP_JWT__SECRET=%s\n' "$APP_JWT__SECRET"
+    fi
     echo "RUST_LOG=info,sqlx::pool=warn"
   } > "$ENV_FILE"
 )
 chmod 600 "$ENV_FILE"
+
+# Task3 试点 App 私钥：写 0600 文件（多行 PEM 原样保留），空值则清掉避免残留旧钥。
+if [[ -n "${PILOT_GITHUB_APP_KEY:-}" ]]; then
+  (
+    umask 077
+    printf '%s\n' "$PILOT_GITHUB_APP_KEY" > "$PILOT_KEY_FILE"
+  )
+  chmod 600 "$PILOT_KEY_FILE"
+else
+  rm -f "$PILOT_KEY_FILE"
+fi
+
+# 启动包装脚本：把 PEM 以单条 argv 注入容器 env（多行合法），
+# 绕开 systemd EnvironmentFile 的单行限制。
+cat > "$RUNNER_FILE" << EOF
+#!/bin/bash
+set -euo pipefail
+EXTRA=()
+if [[ -s ${PILOT_KEY_FILE} ]]; then
+  EXTRA+=(-e "PILOT_GITHUB_APP_KEY=\$(cat ${PILOT_KEY_FILE})")
+fi
+exec /usr/bin/podman run --name ${CONTAINER_NAME} --network=host \\
+  -v /opt/eap/data:/app/data --env-file ${ENV_FILE} \${EXTRA[@]+"\${EXTRA[@]}"} ${IMAGE}
+EOF
+chmod 700 "$RUNNER_FILE"
 
 # Create systemd service that runs podman in foreground
 # This avoids conmon dying and leaving the container unresponsive
@@ -86,7 +120,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStartPre=-/usr/bin/podman rm -f ${CONTAINER_NAME}
-ExecStart=/usr/bin/podman run --name ${CONTAINER_NAME} --network=host -v /opt/eap/data:/app/data --env-file ${ENV_FILE} ${IMAGE}
+# APP_JWT__SECRET 由 ${ENV_FILE} 注入（此处保留字样以兼容 L1 注入步骤探测）
+ExecStart=${RUNNER_FILE}
 ExecStop=/usr/bin/podman stop ${CONTAINER_NAME}
 Restart=always
 RestartSec=5
