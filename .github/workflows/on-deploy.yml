@@ -112,5 +112,8 @@ jobs:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
       GHCR_PAT: ${{ secrets.GHCR_PAT }}
+      PILOT_GITHUB_APP_ID: ${{ secrets.PILOT_GITHUB_APP_ID }}
+      PILOT_GITHUB_APP_KEY: ${{ secrets.PILOT_GITHUB_APP_KEY }}
+      PILOT_GITHUB_ORG: ${{ secrets.PILOT_GITHUB_ORG }}
       ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
       ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
