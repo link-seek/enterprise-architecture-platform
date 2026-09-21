@@ -327,6 +327,29 @@ async fn exchange_installation_token(
         .ok_or_else(|| PilotError::GithubAuth("token exchange: missing token".to_string()))
 }
 
+/// Normalise `PILOT_GITHUB_APP_KEY` into a PEM string. Plain PEM values pass
+/// through untouched; anything else is treated as a single-line base64 encoding
+/// of the PEM. The base64 form exists because systemd's `EnvironmentFile` only
+/// reads the first line of a value, which would truncate a multi-line PEM to its
+/// BEGIN header (`InvalidKeyFormat`); base64 is also whitespace-free, so it
+/// survives the env file unquoted.
+pub fn normalize_app_key(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    // `-----` cannot appear in base64, so this unambiguously detects raw PEM.
+    if raw.contains("-----BEGIN") {
+        return Some(raw.to_owned());
+    }
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(raw.as_bytes())
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .filter(|pem| pem.contains("-----BEGIN"))
+}
+
 /// Read GitHub App credentials from env (`PILOT_GITHUB_APP_ID` defaults to
 /// `DEFAULT_GITHUB_APP_ID`; `PILOT_GITHUB_APP_KEY` PEM is required).
 fn github_app_credentials() -> Result<(String, String), PilotError> {
@@ -335,10 +358,10 @@ fn github_app_credentials() -> Result<(String, String), PilotError> {
     if app_id.trim().is_empty() {
         return Err(PilotError::MissingCredentials);
     }
-    let pem = std::env::var("PILOT_GITHUB_APP_KEY").map_err(|_| PilotError::MissingCredentials)?;
-    if pem.trim().is_empty() {
-        return Err(PilotError::MissingCredentials);
-    }
+    let pem = std::env::var("PILOT_GITHUB_APP_KEY")
+        .ok()
+        .and_then(|raw| normalize_app_key(&raw))
+        .ok_or(PilotError::MissingCredentials)?;
     Ok((app_id.trim().to_owned(), pem))
 }
 
@@ -841,6 +864,27 @@ mod tests {
         assert!(data.claims.exp - now <= 600);
         assert!(data.claims.exp - now > 0);
         assert!(github_app_jwt("4960407", "not-a-pem", now).is_err());
+    }
+
+    #[test]
+    fn pilot_app_key_accepts_pem_and_base64() {
+        use base64::Engine as _;
+        let pem = TEST_APP_KEY_PEM.trim();
+        // Raw multi-line PEM passes through untouched.
+        assert_eq!(normalize_app_key(TEST_APP_KEY_PEM).as_deref(), Some(pem));
+        // Single-line base64 (what deploy.sh writes into EnvironmentFile).
+        let b64 = base64::engine::general_purpose::STANDARD.encode(pem);
+        assert!(!b64.contains('\n'));
+        assert_eq!(normalize_app_key(&b64).as_deref(), Some(pem));
+        // The decoded key must still sign a valid App JWT.
+        let decoded = normalize_app_key(&b64).unwrap();
+        let now = chrono::Utc::now().timestamp();
+        assert!(github_app_jwt(DEFAULT_GITHUB_APP_ID, &decoded, now).is_ok());
+        // Rejects empty, invalid base64 and base64 payloads that are not PEM.
+        assert!(normalize_app_key("   ").is_none());
+        assert!(normalize_app_key("not base64 !!").is_none());
+        let not_pem = base64::engine::general_purpose::STANDARD.encode("hello world");
+        assert!(normalize_app_key(&not_pem).is_none());
     }
 
     #[test]

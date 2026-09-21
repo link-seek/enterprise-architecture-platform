@@ -54,8 +54,12 @@ mkdir -p "$(dirname "$ENV_FILE")"
     if [[ -n "${PILOT_GITHUB_ORG:-}" ]]; then
       printf 'PILOT_GITHUB_ORG=%s\n' "$PILOT_GITHUB_ORG"
     fi
+    # App 私钥是多行 PEM，而 systemd EnvironmentFile 只取值的首行，直接写会
+    # 被截断成 BEGIN 头导致后端 `InvalidKeyFormat`。改为单行 base64（无空格，
+    # EnvironmentFile 安全），后端 pilot.rs 检测非 PEM 值时自动解码。
     if [[ -n "${PILOT_GITHUB_APP_KEY:-}" ]]; then
-      printf 'PILOT_GITHUB_APP_KEY=%s\n' "$PILOT_GITHUB_APP_KEY"
+      printf 'PILOT_GITHUB_APP_KEY=%s\n' \
+        "$(printf '%s' "$PILOT_GITHUB_APP_KEY" | base64 -w0)"
     fi
     # Task3 试点模板占位输入：空值不写（后端用各自默认值）。
     if [[ -n "${PILOT_REPO_NAME:-}" ]]; then
