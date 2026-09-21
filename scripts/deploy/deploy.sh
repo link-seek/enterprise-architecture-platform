@@ -34,6 +34,11 @@ mkdir -p "$(dirname "$ENV_FILE")"
   {
     echo "APP_ENV=production"
     echo "APP_DATABASE__URL=sqlite:///app/data/platform.db?mode=rwc"
+    # 限流与 CI/dev 对齐（docker-compose.*.yml: 100/s, burst 1000）：
+    # 代码默认值 4/s + burst 25 在 Playwright 冒烟的并发请求下必回 429，
+    # 导致 deploy 成功但 smoke-test 失败。允许流水线显式覆盖。
+    printf 'APP_SERVER__RATE_LIMIT__PER_SECOND=%s\n' "${APP_SERVER__RATE_LIMIT__PER_SECOND:-100}"
+    printf 'APP_SERVER__RATE_LIMIT__BURST_SIZE=%s\n' "${APP_SERVER__RATE_LIMIT__BURST_SIZE:-1000}"
     printf 'APP_SEED_ADMIN_EMAIL=%s\n' "$APP_SEED_ADMIN_EMAIL"
     printf 'APP_SEED_ADMIN_PASSWORD=%s\n' "$APP_SEED_ADMIN_PASSWORD"
     SEED_EDITOR_EMAIL="${APP_SEED_EDITOR_EMAIL:-${E2E_EDITOR_EMAIL:-}}"
