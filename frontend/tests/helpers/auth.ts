@@ -1,11 +1,22 @@
 // Shared test helpers for E2E tests
 import { Page, expect } from '@playwright/test';
 
+function nonempty(v: string | undefined): string | undefined {
+  const t = (v || '').trim();
+  return t !== '' ? t : undefined;
+}
+
 // TEST_* falls back to admin (owner everywhere, incl. deploy smoke where only
-// APP_SEED_* exist). E2E pair is used only when both are non-empty, mirroring
-// the backend seed which skips the E2E owner unless both are set.
-export const ADMIN_EMAIL = process.env.APP_SEED_ADMIN_EMAIL || 'admin@test.com';
-export const ADMIN_PASSWORD = process.env.APP_SEED_ADMIN_PASSWORD || 'admin123456';
+// SMOKE_TEST_* / APP_SEED_* exist). E2E pair is used only when both are non-empty,
+// mirroring the backend seed which skips the E2E owner unless both are set.
+export const ADMIN_EMAIL =
+  nonempty(process.env.SMOKE_TEST_EMAIL) ||
+  nonempty(process.env.APP_SEED_ADMIN_EMAIL) ||
+  'admin@test.com';
+export const ADMIN_PASSWORD =
+  nonempty(process.env.SMOKE_TEST_PASSWORD) ||
+  nonempty(process.env.APP_SEED_ADMIN_PASSWORD) ||
+  'admin123456';
 const e2eEmail = (process.env.E2E_TEST_EMAIL || '').trim();
 const e2ePassword = (process.env.E2E_TEST_PASSWORD || '').trim();
 const hasE2EPair = e2eEmail !== '' && e2ePassword !== '';
@@ -17,10 +28,6 @@ export const TEST_NAME = process.env.E2E_TEST_NAME || 'E2E Test 3';
 // with E2E_EDITOR_* / E2E_STRANGER_* fallback — deploy smoke only provides E2E_*).
 // Editor: registered Architect + test space Editor member.
 // Stranger: registered Architect, NOT a member of the test space.
-function nonempty(v: string | undefined): string | undefined {
-  const t = (v || '').trim();
-  return t !== '' ? t : undefined;
-}
 export const EDITOR_EMAIL =
   nonempty(process.env.APP_SEED_EDITOR_EMAIL) ||
   nonempty(process.env.E2E_EDITOR_EMAIL) ||
