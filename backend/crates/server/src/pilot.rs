@@ -2,13 +2,14 @@
 //!
 //! `provisionPilotConsumer(spaceId, templateVersion)` runs a minimal closed
 //! loop: create repo via GitHub API -> render `templates/pilot-consumer/`
-//! (substituting the five `__PILOT_*` placeholders) -> push a scaffold branch
+//! (substituting the four `__PILOT_*` placeholders) -> push a scaffold branch
 //! -> open the initial PR. If any step after repo creation fails, the repo is
 //! deleted again (fail-closed rollback).
 //!
-//! Live provisioning needs Task 3 credentials (`PILOT_GITHUB_TOKEN` or
-//! `GITHUB_TOKEN` plus `PILOT_GITHUB_ORG`); without them the mutation fails
-//! fast before creating anything.
+//! Live provisioning needs Task 3 credentials: either a static token
+//! (`PILOT_GITHUB_TOKEN` or `GITHUB_TOKEN`) or a GitHub App
+//! (`PILOT_GITHUB_APP_ID` + `PILOT_GITHUB_APP_KEY`), plus `PILOT_GITHUB_ORG`;
+//! without them the mutation fails fast before creating anything.
 
 use std::path::{Path, PathBuf};
 
@@ -22,10 +23,14 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub const PLACEHOLDER_REPO: &str = "__PILOT_REPO__";
-pub const PLACEHOLDER_OSS_BUCKET: &str = "__PILOT_OSS_BUCKET__";
 pub const PLACEHOLDER_RUNNER: &str = "__PILOT_RUNNER__";
 pub const PLACEHOLDER_FRONTEND_URL: &str = "__PILOT_FRONTEND_URL__";
 pub const PLACEHOLDER_API_URL: &str = "__PILOT_API_URL__";
+
+/// GitHub App used for pilot provisioning when no static token is set.
+pub const DEFAULT_GITHUB_APP_ID: &str = "4960407";
+/// JWT lifetime for GitHub App authentication (must stay <= 10 minutes).
+const GITHUB_APP_JWT_TTL_SECS: i64 = 540;
 
 /// Branch carrying the rendered scaffold; the initial PR targets `main`.
 pub const SCAFFOLD_BRANCH: &str = "pilot-scaffold";
@@ -33,7 +38,6 @@ pub const SCAFFOLD_BRANCH: &str = "pilot-scaffold";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PilotInputs {
     pub repo_name: String,
-    pub oss_bucket: String,
     pub runner: String,
     pub frontend_url: String,
     pub api_url: String,
@@ -56,9 +60,11 @@ pub enum PilotError {
     #[error("pilot template dir not found (set PILOT_TEMPLATE_DIR)")]
     TemplateDirNotFound,
     #[error(
-        "GitHub credentials missing: set PILOT_GITHUB_TOKEN (or GITHUB_TOKEN) and PILOT_GITHUB_ORG"
+        "GitHub credentials missing: set PILOT_GITHUB_TOKEN (or GITHUB_TOKEN) or PILOT_GITHUB_APP_KEY plus PILOT_GITHUB_ORG"
     )]
     MissingCredentials,
+    #[error("github app auth failed: {0}")]
+    GithubAuth(String),
     #[error("create repo failed: {0}")]
     CreateRepo(String),
     #[error("render failed: {0}")]
@@ -69,23 +75,21 @@ pub enum PilotError {
     OpenPr(String),
 }
 
-/// Substitute the five `__PILOT_*` placeholders in one template file.
+/// Substitute the four `__PILOT_*` placeholders in one template file.
 pub fn render_content(template: &str, inputs: &PilotInputs) -> String {
     template
         .replace(PLACEHOLDER_REPO, &inputs.repo_name)
-        .replace(PLACEHOLDER_OSS_BUCKET, &inputs.oss_bucket)
         .replace(PLACEHOLDER_RUNNER, &inputs.runner)
         .replace(PLACEHOLDER_FRONTEND_URL, &inputs.frontend_url)
         .replace(PLACEHOLDER_API_URL, &inputs.api_url)
 }
 
-/// True when any of the five `__PILOT_*` placeholders survived rendering.
+/// True when any of the four `__PILOT_*` placeholders survived rendering.
 /// Only exact placeholders count: bare `__PILOT__` mentions in comments
 /// (e.g. `.issue-resolver.yml`) are documentation, not render targets.
 pub fn has_unrendered_placeholders(content: &str) -> bool {
     [
         PLACEHOLDER_REPO,
-        PLACEHOLDER_OSS_BUCKET,
         PLACEHOLDER_RUNNER,
         PLACEHOLDER_FRONTEND_URL,
         PLACEHOLDER_API_URL,
@@ -129,8 +133,6 @@ pub fn resolve_inputs(space_id: Uuid, template_version: &str) -> Result<PilotInp
     validate_repo_name(&repo_name)?;
     Ok(PilotInputs {
         repo_name,
-        oss_bucket: std::env::var("PILOT_OSS_BUCKET")
-            .unwrap_or_else(|_| format!("pilot-frontend-{short}")),
         runner: std::env::var("PILOT_RUNNER").unwrap_or_else(|_| "eap-backend".to_string()),
         frontend_url: std::env::var("PILOT_FRONTEND_URL").unwrap_or_default(),
         api_url: std::env::var("PILOT_API_URL").unwrap_or_default(),
@@ -201,28 +203,187 @@ struct GithubClient {
     token: String,
 }
 
-impl GithubClient {
-    fn from_env() -> Result<Self, PilotError> {
-        let token = std::env::var("PILOT_GITHUB_TOKEN")
-            .or_else(|_| std::env::var("GITHUB_TOKEN"))
-            .map_err(|_| PilotError::MissingCredentials)?;
-        if token.trim().is_empty() {
-            return Err(PilotError::MissingCredentials);
+#[derive(Debug, Serialize, Deserialize)]
+struct GithubAppClaims {
+    iss: String,
+    iat: i64,
+    exp: i64,
+}
+
+/// Sign a GitHub App JWT (RS256). Lifetime is capped at 10 minutes per
+/// GitHub's requirement (`GITHUB_APP_JWT_TTL_SECS` = 9min + 60s clock skew).
+pub fn github_app_jwt(
+    app_id: &str,
+    app_key_pem: &str,
+    now_secs: i64,
+) -> Result<String, PilotError> {
+    let key = jsonwebtoken::EncodingKey::from_rsa_pem(app_key_pem.as_bytes())
+        .map_err(|e| PilotError::GithubAuth(e.to_string()))?;
+    let claims = GithubAppClaims {
+        iss: app_id.to_owned(),
+        iat: now_secs - 60,
+        exp: now_secs + GITHUB_APP_JWT_TTL_SECS,
+    };
+    jsonwebtoken::encode(
+        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256),
+        &claims,
+        &key,
+    )
+    .map_err(|e| PilotError::GithubAuth(e.to_string()))
+}
+
+/// Static PAT from env when set and non-empty; takes priority over App auth.
+fn static_token_from_env() -> Option<String> {
+    for key in ["PILOT_GITHUB_TOKEN", "GITHUB_TOKEN"] {
+        if let Ok(v) = std::env::var(key) {
+            if !v.trim().is_empty() {
+                return Some(v);
+            }
         }
+    }
+    None
+}
+
+fn github_api_base() -> String {
+    std::env::var("GITHUB_API_URL")
+        .unwrap_or_else(|_| "https://api.github.com".to_string())
+        .trim_end_matches('/')
+        .to_owned()
+}
+
+async fn fetch_installation_id(
+    http: &reqwest::Client,
+    api_base: &str,
+    org: &str,
+    jwt: &str,
+) -> Result<u64, PilotError> {
+    let res = http
+        .get(format!("{api_base}/orgs/{org}/installation"))
+        .bearer_auth(jwt)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()
+        .await
+        .map_err(|e| PilotError::GithubAuth(e.to_string()))?;
+    if !res.status().is_success() {
+        let status = res.status();
+        let body: String = res
+            .text()
+            .await
+            .unwrap_or_default()
+            .chars()
+            .take(500)
+            .collect();
+        return Err(PilotError::GithubAuth(format!(
+            "installation lookup: {status}: {body}"
+        )));
+    }
+    let body: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| PilotError::GithubAuth(e.to_string()))?;
+    body.get("id")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| PilotError::GithubAuth("installation lookup: missing id".to_string()))
+}
+
+async fn exchange_installation_token(
+    http: &reqwest::Client,
+    api_base: &str,
+    installation_id: u64,
+    jwt: &str,
+) -> Result<String, PilotError> {
+    let res = http
+        .post(format!(
+            "{api_base}/app/installations/{installation_id}/access_tokens"
+        ))
+        .bearer_auth(jwt)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()
+        .await
+        .map_err(|e| PilotError::GithubAuth(e.to_string()))?;
+    if !res.status().is_success() {
+        let status = res.status();
+        let body: String = res
+            .text()
+            .await
+            .unwrap_or_default()
+            .chars()
+            .take(500)
+            .collect();
+        return Err(PilotError::GithubAuth(format!(
+            "token exchange: {status}: {body}"
+        )));
+    }
+    let body: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| PilotError::GithubAuth(e.to_string()))?;
+    body.get("token")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.to_owned())
+        .ok_or_else(|| PilotError::GithubAuth("token exchange: missing token".to_string()))
+}
+
+/// Read GitHub App credentials from env (`PILOT_GITHUB_APP_ID` defaults to
+/// `DEFAULT_GITHUB_APP_ID`; `PILOT_GITHUB_APP_KEY` PEM is required).
+fn github_app_credentials() -> Result<(String, String), PilotError> {
+    let app_id =
+        std::env::var("PILOT_GITHUB_APP_ID").unwrap_or_else(|_| DEFAULT_GITHUB_APP_ID.to_string());
+    if app_id.trim().is_empty() {
+        return Err(PilotError::MissingCredentials);
+    }
+    let pem = std::env::var("PILOT_GITHUB_APP_KEY").map_err(|_| PilotError::MissingCredentials)?;
+    if pem.trim().is_empty() {
+        return Err(PilotError::MissingCredentials);
+    }
+    Ok((app_id.trim().to_owned(), pem))
+}
+
+/// Mint an installation token for `PILOT_GITHUB_ORG` via the GitHub App.
+async fn github_app_token(
+    http: &reqwest::Client,
+    api_base: &str,
+    org: &str,
+) -> Result<String, PilotError> {
+    let (app_id, pem) = github_app_credentials()?;
+    let now = chrono::Utc::now().timestamp();
+    let jwt = github_app_jwt(&app_id, &pem, now)?;
+    let installation_id = fetch_installation_id(http, api_base, org, &jwt).await?;
+    exchange_installation_token(http, api_base, installation_id, &jwt).await
+}
+
+/// Resolve the bearer token: static PAT first (backward compatible),
+/// otherwise mint one from the GitHub App installation.
+async fn resolve_github_token(
+    http: &reqwest::Client,
+    api_base: &str,
+    org: &str,
+) -> Result<String, PilotError> {
+    if let Some(token) = static_token_from_env() {
+        return Ok(token);
+    }
+    github_app_token(http, api_base, org).await
+}
+
+impl GithubClient {
+    async fn from_env() -> Result<Self, PilotError> {
         let org = std::env::var("PILOT_GITHUB_ORG").map_err(|_| PilotError::MissingCredentials)?;
         if org.trim().is_empty() {
             return Err(PilotError::MissingCredentials);
         }
-        let api_base = std::env::var("GITHUB_API_URL")
-            .unwrap_or_else(|_| "https://api.github.com".to_string());
+        let api_base = github_api_base();
         let http = reqwest::Client::builder()
             .user_agent("eap-pilot-provisioner")
             .build()
             .map_err(|e| PilotError::CreateRepo(e.to_string()))?;
+        let token = resolve_github_token(&http, &api_base, org.trim()).await?;
         Ok(Self {
             http,
-            api_base: api_base.trim_end_matches('/').to_owned(),
-            org,
+            api_base,
+            org: org.trim().to_owned(),
             token,
         })
     }
@@ -381,7 +542,7 @@ pub async fn provision_pilot_consumer(
 ) -> Result<ProvisionOutcome, PilotError> {
     let inputs = resolve_inputs(space_id, template_version)?;
     let template_version = template_version.trim().to_owned();
-    let github = GithubClient::from_env()?;
+    let github = GithubClient::from_env().await?;
 
     let repo_url = github.create_repo(&inputs.repo_name).await?;
 
@@ -489,7 +650,6 @@ mod tests {
     fn fixture_inputs() -> PilotInputs {
         PilotInputs {
             repo_name: "pilot-demo".to_string(),
-            oss_bucket: "pilot-frontend-xyc".to_string(),
             runner: "eap-backend".to_string(),
             frontend_url: "https://pilot.xieyucheng.top".to_string(),
             api_url: "https://pilot-api.xieyucheng.top".to_string(),
@@ -500,12 +660,10 @@ mod tests {
     fn pilot_render_snapshot() {
         let inputs = fixture_inputs();
         let template = "ghcr-image: ghcr.io/link-seek/__PILOT_REPO__\n\
-             oss-bucket: __PILOT_OSS_BUCKET__\n\
              runner-label: __PILOT_RUNNER__\n\
              frontend-url: __PILOT_FRONTEND_URL__\n\
              api-url: __PILOT_API_URL__\n";
         let expected = "ghcr-image: ghcr.io/link-seek/pilot-demo\n\
-             oss-bucket: pilot-frontend-xyc\n\
              runner-label: eap-backend\n\
              frontend-url: https://pilot.xieyucheng.top\n\
              api-url: https://pilot-api.xieyucheng.top\n";
@@ -519,7 +677,6 @@ mod tests {
         let inputs = fixture_inputs();
         let template = [
             PLACEHOLDER_REPO,
-            PLACEHOLDER_OSS_BUCKET,
             PLACEHOLDER_RUNNER,
             PLACEHOLDER_FRONTEND_URL,
             PLACEHOLDER_API_URL,
@@ -528,7 +685,7 @@ mod tests {
         let rendered = render_content(&template, &inputs);
         assert_eq!(
             rendered,
-            "pilot-demo|pilot-frontend-xyc|eap-backend|https://pilot.xieyucheng.top|https://pilot-api.xieyucheng.top"
+            "pilot-demo|eap-backend|https://pilot.xieyucheng.top|https://pilot-api.xieyucheng.top"
         );
         assert!(!has_unrendered_placeholders(&rendered));
     }
@@ -591,7 +748,12 @@ mod tests {
             .expect("on-push.yml present");
         let text = String::from_utf8(on_push.1.clone()).unwrap();
         assert!(text.contains("ghcr.io/link-seek/pilot-demo"));
-        assert!(text.contains("pilot-frontend-xyc"));
+        assert!(
+            !rendered
+                .iter()
+                .any(|(_, b)| { String::from_utf8_lossy(b).contains("__PILOT_OSS_BUCKET__") }),
+            "OSS placeholder must be gone after render"
+        );
     }
 
     #[test]
@@ -599,5 +761,193 @@ mod tests {
         let inputs = fixture_inputs();
         let binary = vec![0xff, 0xfe, 0x00, 0x01];
         assert_eq!(render_bytes(&binary, &inputs), binary);
+    }
+
+    const TEST_APP_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----\n\
+        MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDtNV1hRBX5J/HF\n\
+        3YTy3PxJyzOHAug4HRplME67yoeIh3waNW78us2ZzGd7NAhhrhqpPGFslYj/qvEm\n\
+        AH9XVseALp/Jo41OtHtRm5bbLQbZizzA1WU+3VctA9v2APbyTVR/RsQgDAMLxVmp\n\
+        AMXvOlI9RVzIBjjcMjiGLn/S8TtRbSxI8n/KIS+M8WsVw9n/1oZK1AL12pYDe4Ln\n\
+        HitU+4rqGf7rwD1ORXuPM+kq1BBHIWWeZ5qjBiONoVUplqR5FJgPEevyZxdCUpx1\n\
+        dPDVNXQVNniXhWFzuCt9n+aHlfwiVgNt/soe3bo/ZhRDazNwy6eINX8/mNi/atyU\n\
+        ISITpWi9AgMBAAECggEAC7ccwUrITgmpwHS4FfmRkUByr0qWtvzC+rfnz5EJYBYW\n\
+        7EFy1ZMRR/UHMFfJyS883Fph0mfRQBVMeyy/nUvpJvzGggIsnrQ9ufJWAUWoRrLA\n\
+        gaKYcUIjxdKguLXj/GQS1gVj9tQ5C0oIK1dhLzdBbArCshNSmBd34LKnt/6XiCYk\n\
+        mAwj6rlxkNlzzLhM5mDf8lmeOcnkrJnMUYFj2Lsl6yXqG8RQLYjY5TK8vZN7zJc3\n\
+        rpUWCDa+W27srPWYTYmy3gV4tkmUIXIFll8wYYU5y6k0gfi/5yOFm9PlWHSSWBD7\n\
+        cl8gYPbfPrqe/0W240LT5oy9ragOOWq3z+GdiFVBiQKBgQD30K+s39tPajg47bOl\n\
+        nVfT4xk5hRHtZQ548OzqCD838RFcH7J63jbP16ZbudCGVItHJ0jH57UqIRKdyFSQ\n\
+        wxi8VMFjziWu2Kz8bpquxbMjUB7yW+65O+B1AYTWBSvQ0vV3AiHydwcCVgxLlBNq\n\
+        MRnZ7MX/sA/GGfv6PTJqDZXqBQKBgQD1Cv9DPGuyrJ5K/1fK+x7As/gJkk8tQY4B\n\
+        u18KhOkyYiPXyz/PJNvhMvwblX81ZIlS+m5SLxrAWG0X/+UGUGkDKEjXaRoBxQFt\n\
+        nT5J/iPV1LFTFgT12v60igaGyHT7Ju98ZaXu15IM3iZqb5QKlJopZxruZWF/M6UB\n\
+        GS/57k9pWQKBgCwXCOps+Yvrjg0y3V992v5rzTUao9HkxOpnkv8gcH73eOs3CH4r\n\
+        wvy/lW2EZcFAkXcbWiuW4fiY4cMIvWL0ExaOzcmAB9xP2Jcg5oxpyDFkM91S1epG\n\
+        6OxoVMXvLZh9sAZ4bqnA25Ji1NUthzbBfaP0KFYRcP0B6n7fHHUZ7a4xAoGABv3v\n\
+        Vq3MrOZ8BcvPZ31O3VTFSRChrbrnIGmGRriQJt3iA/BKu9BjbcOUqfzUCmP5/yIi\n\
+        L7okW0SqqDqnAE0fEfX+ThczpMVISyZndpkH0Lwm6yX/sjwzdFdT5Fin7dqojrYf\n\
+        y/betftIwVS5tquS0oecnxzJcWW52ZQsaEdCgNECgYEAm7MC2sfjSCJtEj2809AT\n\
+        6CYSlafOKLirm9ap0iwpzBbXtTu0svG0dXwGvlQe3cP2i6yIXI7oxNeWTz9H8sdf\n\
+        JkC716D+odIast8+D1fg/IklPzI4n81T8nSl1lZYzMOMfDolBJc0Y97Jq2wKj9SW\n\
+        EG47HEHWgcBSHGH2d+EI2J0=\n\
+        -----END PRIVATE KEY-----\n";
+
+    const TEST_APP_PUB_PEM: &str = "-----BEGIN PUBLIC KEY-----\n\
+        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7TVdYUQV+Sfxxd2E8tz8\n\
+        ScszhwLoOB0aZTBOu8qHiId8GjVu/LrNmcxnezQIYa4aqTxhbJWI/6rxJgB/V1bH\n\
+        gC6fyaONTrR7UZuW2y0G2Ys8wNVlPt1XLQPb9gD28k1Uf0bEIAwDC8VZqQDF7zpS\n\
+        PUVcyAY43DI4hi5/0vE7UW0sSPJ/yiEvjPFrFcPZ/9aGStQC9dqWA3uC5x4rVPuK\n\
+        6hn+68A9TkV7jzPpKtQQRyFlnmeaowYjjaFVKZakeRSYDxHr8mcXQlKcdXTw1TV0\n\
+        FTZ4l4Vhc7grfZ/mh5X8IlYDbf7KHt26P2YUQ2szcMuniDV/P5jYv2rclCEiE6Vo\n\
+        vQIDAQAB\n\
+        -----END PUBLIC KEY-----\n";
+
+    static ENV_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn with_env(vars: &[(&str, Option<&str>)], f: impl FnOnce()) {
+        let _guard = ENV_GUARD.lock().unwrap();
+        let mut saved = Vec::new();
+        for (k, v) in vars {
+            saved.push(((*k).to_string(), std::env::var(k).ok()));
+            match v {
+                Some(val) => std::env::set_var(k, val),
+                None => std::env::remove_var(k),
+            }
+        }
+        f();
+        for (k, v) in saved {
+            match v {
+                Some(val) => std::env::set_var(&k, val),
+                None => std::env::remove_var(&k),
+            }
+        }
+    }
+
+    #[test]
+    fn pilot_github_app_jwt_rs256() {
+        let now = chrono::Utc::now().timestamp();
+        let jwt = github_app_jwt(DEFAULT_GITHUB_APP_ID, TEST_APP_KEY_PEM, now).unwrap();
+        assert_eq!(jwt.split('.').count(), 3);
+        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
+        validation.set_issuer(&[DEFAULT_GITHUB_APP_ID]);
+        validation.validate_exp = false;
+        let key = jsonwebtoken::DecodingKey::from_rsa_pem(TEST_APP_PUB_PEM.as_bytes()).unwrap();
+        let data = jsonwebtoken::decode::<GithubAppClaims>(&jwt, &key, &validation).unwrap();
+        assert_eq!(data.claims.iss, DEFAULT_GITHUB_APP_ID);
+        assert_eq!(
+            data.claims.exp - data.claims.iat,
+            GITHUB_APP_JWT_TTL_SECS + 60
+        );
+        assert!(data.claims.exp - now <= 600);
+        assert!(data.claims.exp - now > 0);
+        assert!(github_app_jwt("4960407", "not-a-pem", now).is_err());
+    }
+
+    #[test]
+    fn pilot_static_token_takes_priority() {
+        with_env(
+            &[
+                ("PILOT_GITHUB_TOKEN", Some("static-pat")),
+                ("GITHUB_TOKEN", Some("fallback-pat")),
+                ("PILOT_GITHUB_APP_KEY", None),
+            ],
+            || {
+                assert_eq!(static_token_from_env().as_deref(), Some("static-pat"));
+            },
+        );
+        with_env(
+            &[
+                ("PILOT_GITHUB_TOKEN", None),
+                ("GITHUB_TOKEN", Some("fallback-pat")),
+            ],
+            || {
+                assert_eq!(static_token_from_env().as_deref(), Some("fallback-pat"));
+            },
+        );
+        with_env(
+            &[("PILOT_GITHUB_TOKEN", Some("  ")), ("GITHUB_TOKEN", None)],
+            || {
+                assert!(static_token_from_env().is_none());
+            },
+        );
+    }
+
+    #[test]
+    fn pilot_app_auth_missing_key_fails_fast() {
+        with_env(
+            &[
+                ("PILOT_GITHUB_TOKEN", None),
+                ("GITHUB_TOKEN", None),
+                ("PILOT_GITHUB_APP_KEY", None),
+            ],
+            || {
+                assert!(matches!(
+                    github_app_credentials(),
+                    Err(PilotError::MissingCredentials)
+                ));
+            },
+        );
+        with_env(
+            &[
+                ("PILOT_GITHUB_APP_ID", None),
+                (
+                    "PILOT_GITHUB_APP_KEY",
+                    Some("-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n"),
+                ),
+            ],
+            || {
+                let (app_id, _) = github_app_credentials().unwrap();
+                assert_eq!(app_id, DEFAULT_GITHUB_APP_ID);
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn pilot_installation_token_exchange_mock() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut buf = vec![0u8; 8192];
+                let n = stream.read(&mut buf).await.unwrap();
+                let req = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let body =
+                    if req.starts_with("GET ") && req.contains("/orgs/link-seek/installation") {
+                        "{\"id\": 162075552}".to_string()
+                    } else if req.starts_with("POST ")
+                        && req.contains("/app/installations/162075552/access_tokens")
+                    {
+                        assert!(req.contains("Bearer "));
+                        "{\"token\": \"ghs_mock_installation_token\"}".to_string()
+                    } else {
+                        panic!(
+                            "unexpected mock request: {}",
+                            req.lines().next().unwrap_or("")
+                        );
+                    };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(resp.as_bytes()).await.unwrap();
+            }
+        });
+
+        let http = reqwest::Client::builder().build().unwrap();
+        let api_base = format!("http://{addr}");
+        let jwt = github_app_jwt(DEFAULT_GITHUB_APP_ID, TEST_APP_KEY_PEM, 1_786_000_000).unwrap();
+        let id = fetch_installation_id(&http, &api_base, "link-seek", &jwt)
+            .await
+            .unwrap();
+        assert_eq!(id, 162075552);
+        let token = exchange_installation_token(&http, &api_base, id, &jwt)
+            .await
+            .unwrap();
+        assert_eq!(token, "ghs_mock_installation_token");
+        server.await.unwrap();
     }
 }

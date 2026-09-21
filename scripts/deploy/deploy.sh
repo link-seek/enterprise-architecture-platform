@@ -48,6 +48,15 @@ mkdir -p "$(dirname "$ENV_FILE")"
       printf 'APP_SEED_STRANGER_EMAIL=%s\n' "$SEED_STRANGER_EMAIL"
       printf 'APP_SEED_STRANGER_PASSWORD=%s\n' "$SEED_STRANGER_PASSWORD"
     fi
+    if [[ -n "${PILOT_GITHUB_APP_ID:-}" ]]; then
+      printf 'PILOT_GITHUB_APP_ID=%s\n' "$PILOT_GITHUB_APP_ID"
+    fi
+    if [[ -n "${PILOT_GITHUB_ORG:-}" ]]; then
+      printf 'PILOT_GITHUB_ORG=%s\n' "$PILOT_GITHUB_ORG"
+    fi
+    if [[ -n "${PILOT_GITHUB_APP_KEY:-}" ]]; then
+      printf 'PILOT_GITHUB_APP_KEY=%s\n' "$PILOT_GITHUB_APP_KEY"
+    fi
     echo "RUST_LOG=info,sqlx::pool=warn"
   } > "$ENV_FILE"
 )

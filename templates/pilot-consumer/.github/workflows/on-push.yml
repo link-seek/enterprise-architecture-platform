@@ -30,5 +30,4 @@ jobs:
     with:
       # __PILOT__: 建仓时由生成器替换为试点仓实际值
       ghcr-image: ghcr.io/link-seek/__PILOT_REPO__
-      oss-bucket: __PILOT_OSS_BUCKET__
     secrets: inherit
