@@ -54,7 +54,6 @@ jobs:
       # __PILOT__: 以下占位由生成器按试点部署目标替换
       runner-label: __PILOT_RUNNER__
       ghcr-image: ghcr.io/link-seek/__PILOT_REPO__
-      oss-bucket: __PILOT_OSS_BUCKET__
       frontend-url: __PILOT_FRONTEND_URL__
       api-url: __PILOT_API_URL__
       deploy-script: scripts/deploy/deploy.sh

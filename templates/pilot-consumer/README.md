@@ -15,7 +15,6 @@
 | 占位 | 含义 |
 |---|---|
 | `__PILOT_REPO__` | 试点仓名（如 `pilot-demo`），用于 ghcr-image 与 deploy 并发组 |
-| `__PILOT_OSS_BUCKET__` | 前端 OSS bucket（如 `pilot-frontend-xyc`） |
 | `__PILOT_RUNNER__` | 部署 runner（如试点复用 EAP 后端机则填对应 label） |
 | `__PILOT_FRONTEND_URL__` / `__PILOT_API_URL__` | 试点前后端公网地址 |
 
