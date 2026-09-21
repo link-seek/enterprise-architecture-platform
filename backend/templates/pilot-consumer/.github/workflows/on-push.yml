@@ -1,0 +1,33 @@
+name: Build and Push Images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  actions: write
+  issues: write
+  pull-requests: write
+  checks: write
+
+jobs:
+  e2e-test:
+    uses: link-seek/issue-resolver-l1/.github/workflows/e2e-test.yml@v1.0.9-pilot
+    with:
+      ref: ''
+      docker-compose-file: 'docker-compose.ci.yml'
+      backend-health-url: 'http://localhost:8080/health'
+      frontend-health-url: 'http://localhost/health'
+    secrets: inherit
+
+  ci-cd:
+    needs: e2e-test
+    if: needs.e2e-test.result == 'success'
+    uses: link-seek/issue-resolver-l1/.github/workflows/ci-cd-acr.yml@v1.0.9-pilot
+    with:
+      # __PILOT__: 建仓时由生成器替换为试点仓实际值
+      ghcr-image: ghcr.io/link-seek/__PILOT_REPO__
+    secrets: inherit
