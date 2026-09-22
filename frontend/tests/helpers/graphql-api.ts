@@ -1,9 +1,9 @@
 // Request-based GraphQL helpers for backend-enforcement tests (bypass the UI).
-// When E2E_API_URL is set (deploy-smoke against OSS), requests target the
+// When E2E_API_URL is set (deploy-smoke against prod), requests target the
 // backend directly; otherwise they resolve against Playwright baseURL and
 // rely on nginx/vite proxy for `/api/` and `/graphql` (see nginx.conf / vite.config.ts).
-// Prod OSS has no /api proxy, so when E2E_BASE_URL points at www.* we derive
-// the api.* backend host instead of hitting OSS (which returns XML errors).
+// Prod frontend is static (no /api proxy), so when E2E_BASE_URL points at a
+// static frontend host we derive the backend host instead of hitting it.
 import { APIRequestContext } from '@playwright/test';
 import { ADMIN_EMAIL, ADMIN_PASSWORD, TEST_EMAIL, TEST_PASSWORD, TEST_SPACE_ID } from './auth';
 
@@ -11,7 +11,9 @@ export function apiUrl(path: string): string {
   const explicit = (process.env.E2E_API_URL ?? '').trim().replace(/\/+$/, '');
   if (explicit) return `${explicit}${path}`;
   const baseUrl = (process.env.E2E_BASE_URL ?? '').trim();
-  if (baseUrl.includes('www.xieyucheng.top')) return `https://api.xieyucheng.top${path}`;
+  if (baseUrl.includes('eap.linkseek.net.cn')) return `https://eap-api.linkseek.net.cn${path}`;
+  const eapMatch = baseUrl.match(/^(https?:\/\/)eap\.(.+)$/);
+  if (eapMatch) return `${eapMatch[1]}eap-api.${eapMatch[2]}${path}`;
   const wwwMatch = baseUrl.match(/^(https?:\/\/)www\.(.+)$/);
   if (wwwMatch) return `${wwwMatch[1]}api.${wwwMatch[2]}${path}`;
   return path;
