@@ -32,7 +32,7 @@ jobs:
     if: |
       github.event_name == 'issues' &&
       github.event.label.name == 'deploy-broken'
-    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@v1.0.18-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@v1.0.19-pilot
     with:
       deploy-broken-issue: ${{ github.event.issue.number }}
       issue-repo: link-seek/enterprise-architecture-platform
@@ -74,7 +74,7 @@ jobs:
   deploy:
     needs: resolve-tag
     if: needs.resolve-tag.outputs.tag != ''
-    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@v1.0.18-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@v1.0.19-pilot
     with:
       image-tag: ${{ needs.resolve-tag.outputs.tag }}
       runner-label: eap-prod
@@ -89,9 +89,9 @@ jobs:
       backup-script: scripts/deploy/backup.sh
       rollback-script: scripts/deploy/rollback.sh
       consumer-repo: link-seek/enterprise-architecture-platform
-      # 前端已迁 Cloudflare Pages：置空跳过 OSS CDN 门与 OSS 回滚
-      oss-bucket: ''
-      oss-region: ''
+      # 前端 Cloudflare Pages（L1 v1.0.19+ 锚定拓扑；OSS inputs 已删除）
+      cf-account-id: 47ce24ced58f17c9fb15351adcbe67d4
+      cf-project: eap-frontend
       # Task3 试点：provisionPilotConsumer 模板占位输入
       pilot-repo-name: pilot-consumer
       pilot-runner: eap-prod
@@ -117,6 +117,7 @@ jobs:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
       GHCR_PAT: ${{ secrets.GHCR_PAT }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       PILOT_GITHUB_APP_ID: ${{ secrets.PILOT_GITHUB_APP_ID }}
       PILOT_GITHUB_APP_KEY: ${{ secrets.PILOT_GITHUB_APP_KEY }}
       PILOT_GITHUB_ORG: ${{ secrets.PILOT_GITHUB_ORG }}

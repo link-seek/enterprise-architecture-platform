@@ -14,5 +14,5 @@ permissions:
 
 jobs:
   discuss:
-    uses: link-seek/issue-resolver-l1/.github/workflows/discuss.yml@v1.0.15-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/discuss.yml@v1.0.19-pilot
     secrets: inherit
