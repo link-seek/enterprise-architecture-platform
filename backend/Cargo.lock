@@ -3725,6 +3725,7 @@ dependencies = [
  "jsonwebtoken",
  "migration",
  "moka",
+ "percent-encoding",
  "rand 0.8.6",
  "reqwest",
  "sea-orm",
