@@ -567,9 +567,30 @@ impl GithubClient {
         ctx: &str,
         payload: &serde_json::Value,
     ) -> Result<serde_json::Value, PilotError> {
+        self.api_send_json(reqwest::Method::POST, path, ctx, payload)
+            .await
+    }
+
+    async fn api_patch_json(
+        &self,
+        path: &str,
+        ctx: &str,
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, PilotError> {
+        self.api_send_json(reqwest::Method::PATCH, path, ctx, payload)
+            .await
+    }
+
+    async fn api_send_json(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        ctx: &str,
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, PilotError> {
         let res = self
             .http
-            .post(format!("{}{path}", self.api_base))
+            .request(method, format!("{}{path}", self.api_base))
             .bearer_auth(&self.token)
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
@@ -618,6 +639,26 @@ impl GithubClient {
             .map(|s| s.to_owned())
             .ok_or_else(|| {
                 PilotError::Push("resolve base tip failed: missing object.sha".to_string())
+            })
+    }
+
+    /// Resolve the tree SHA of a commit: the tree API's `base_tree` must be
+    /// a tree object, while `base_tip_sha` returns the commit the ref points
+    /// to — passing the commit straight through risks a 422.
+    async fn commit_tree_sha(&self, repo: &str, commit_sha: &str) -> Result<String, PilotError> {
+        let body = self
+            .api_get_json(
+                &format!("/repos/{}/{}/git/commits/{}", self.org, repo, commit_sha),
+                "resolve commit tree",
+            )
+            .await?;
+        body.get("tree")
+            .and_then(|t| t.get("sha"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_owned())
+            .ok_or_else(|| {
+                PilotError::Push("resolve commit tree failed: missing tree.sha".to_string())
             })
     }
 
@@ -693,17 +734,65 @@ impl GithubClient {
         Self::response_sha(&body, "create commit", "sha")
     }
 
+    /// Point `pilot-scaffold` at the new commit. A retry after a partial
+    /// success (ref created, later step failed, rollback delete missed) hits
+    /// `422 Reference already exists` on POST — fall back to a non-force
+    /// PATCH so a genuinely diverged branch still errors instead of being
+    /// silently overwritten.
     async fn create_branch_ref(&self, repo: &str, commit_sha: &str) -> Result<(), PilotError> {
-        let body = self
-            .api_post_json(
-                &format!("/repos/{}/{}/git/refs", self.org, repo),
+        let res = self
+            .http
+            .post(format!(
+                "{}/repos/{}/{}/git/refs",
+                self.api_base, self.org, repo
+            ))
+            .bearer_auth(&self.token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .json(&serde_json::json!({
+                "ref": format!("refs/heads/{SCAFFOLD_BRANCH}"),
+                "sha": commit_sha,
+            }))
+            .send()
+            .await
+            .map_err(|e| PilotError::Push(format!("create branch ref failed: {e}")))?;
+        if res.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
+            let body = res.text().await.unwrap_or_default();
+            if body.contains("already exists") {
+                let patched = self
+                    .api_patch_json(
+                        &format!(
+                            "/repos/{}/{}/git/refs/heads/{SCAFFOLD_BRANCH}",
+                            self.org, repo
+                        ),
+                        "update branch ref",
+                        &serde_json::json!({ "sha": commit_sha, "force": false }),
+                    )
+                    .await?;
+                return patched
+                    .get("ref")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|_| ())
+                    .ok_or_else(|| {
+                        PilotError::Push("update branch ref failed: missing ref".to_string())
+                    });
+            }
+            return Err(self.api_push_err(
                 "create branch ref",
-                &serde_json::json!({
-                    "ref": format!("refs/heads/{SCAFFOLD_BRANCH}"),
-                    "sha": commit_sha,
-                }),
-            )
-            .await?;
+                reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+                &body,
+            ));
+        }
+        if !res.status().is_success() {
+            let status = res.status();
+            let body = res.text().await.unwrap_or_default();
+            return Err(self.api_push_err("create branch ref", status, &body));
+        }
+        let body: serde_json::Value = res
+            .json()
+            .await
+            .map_err(|e| PilotError::Push(format!("create branch ref failed: {e}")))?;
         body.get("ref")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
@@ -718,7 +807,10 @@ impl GithubClient {
         base_branch: &str,
     ) -> Result<(), PilotError> {
         let tip = self.base_tip_sha(repo, base_branch).await?;
-        let tree = self.create_scaffold_tree(repo, &tip, rendered).await?;
+        let base_tree = self.commit_tree_sha(repo, &tip).await?;
+        let tree = self
+            .create_scaffold_tree(repo, &base_tree, rendered)
+            .await?;
         let commit = self.create_scaffold_commit(repo, &tree, &tip).await?;
         self.create_branch_ref(repo, &commit).await
     }
@@ -1229,30 +1321,61 @@ mod tests {
         assert!(validate_base_branch("a..b").is_err());
     }
 
-    /// Regression test for the Data-API push: the scaffold commit must be
-    /// parented on the base tip (shares history, no 422 on open_pr), text
-    /// files ride inline in the tree, non-UTF8 files go through a blob, and
-    /// the branch ref points at the new commit. Local mock server, no
-    /// network, no git binary. Uses a non-`main` base (`trunk`) to prove
-    /// nothing hardcodes `main`.
+    /// Read one full HTTP request: headers first, then exactly
+    /// Content-Length body bytes (a single `read` may return fragments).
+    async fn read_request(stream: &mut tokio::net::TcpStream) -> String {
+        use tokio::io::AsyncReadExt;
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 4096];
+        loop {
+            let n = stream.read(&mut tmp).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&tmp[..n]);
+            if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&buf[..end]).into_owned();
+                let len = headers
+                    .lines()
+                    .find_map(|l| {
+                        l.strip_prefix("Content-Length:")
+                            .or_else(|| l.strip_prefix("content-length:"))
+                    })
+                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if buf.len() >= end + 4 + len {
+                    break;
+                }
+            }
+            if buf.len() > 1_048_576 {
+                break;
+            }
+        }
+        String::from_utf8_lossy(&buf).into_owned()
+    }
+
+    /// Regression test for the Data-API push: the scaffold tree overlays the
+    /// base commit's tree, the commit is parented on the base tip (shares
+    /// history, no 422 on open_pr), text files ride inline in the tree,
+    /// non-UTF8 files go through a blob, and the branch ref points at the
+    /// new commit. Local mock server, no network, no git binary. Uses a
+    /// non-`main` base (`trunk`) to prove nothing hardcodes `main`.
     #[tokio::test]
     async fn pilot_data_api_push_order_and_payloads() {
         use base64::Engine as _;
         use std::sync::{Arc, Mutex};
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::io::AsyncWriteExt;
 
         let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let seen_srv = seen.clone();
         let server = tokio::spawn(async move {
-            // Exactly the 5 calls push_rendered_via_api makes for one
-            // binary file: ref, blob, tree, commit, ref-create.
-            for _ in 0..5 {
+            // Exactly the 6 calls push_rendered_via_api makes for one
+            // binary file: ref, commit-tree, blob, tree, commit, ref-create.
+            for _ in 0..6 {
                 let (mut stream, _) = listener.accept().await.unwrap();
-                let mut buf = vec![0u8; 65536];
-                let n = stream.read(&mut buf).await.unwrap();
-                let req = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let req = read_request(&mut stream).await;
                 let head = req.lines().next().unwrap_or("").to_owned();
                 let body = req.split("\r\n\r\n").nth(1).unwrap_or("").to_owned();
                 seen_srv.lock().unwrap().push(format!("{head} || {body}"));
@@ -1262,6 +1385,12 @@ mod tests {
                         "base ref path: {head}"
                     );
                     "{\"object\":{\"sha\":\"TIP\"}}".to_string()
+                } else if head.starts_with("GET ") && head.contains("/git/commits/") {
+                    assert!(
+                        head.contains("/repos/o/r/git/commits/TIP"),
+                        "tree of tip: {head}"
+                    );
+                    "{\"tree\":{\"sha\":\"BASETREE\"}}".to_string()
                 } else if head.starts_with("POST ") && head.contains("/git/blobs") {
                     "{\"sha\":\"BLOB1\"}".to_string()
                 } else if head.starts_with("POST ") && head.contains("/git/trees") {
@@ -1306,8 +1435,8 @@ mod tests {
         let seen = seen.lock().unwrap();
         assert_eq!(
             seen.len(),
-            5,
-            "expected ref+blob+tree+commit+ref, got {seen:?}"
+            6,
+            "expected ref+tree-of-tip+blob+tree+commit+ref, got {seen:?}"
         );
 
         let blob_body = seen
@@ -1328,7 +1457,10 @@ mod tests {
             .expect("tree call");
         let tree: serde_json::Value =
             serde_json::from_str(tree_body.split(" || ").nth(1).unwrap()).unwrap();
-        assert_eq!(tree["base_tree"], "TIP", "tree must overlay the base tip");
+        assert_eq!(
+            tree["base_tree"], "BASETREE",
+            "tree must overlay the base commit's tree"
+        );
         let entries = tree["tree"].as_array().unwrap();
         assert_eq!(entries.len(), 2);
         let text = entries.iter().find(|e| e["path"] == "a.txt").unwrap();
@@ -1355,6 +1487,85 @@ mod tests {
             serde_json::from_str(ref_body.split(" || ").nth(1).unwrap()).unwrap();
         assert_eq!(refr["ref"], "refs/heads/pilot-scaffold");
         assert_eq!(refr["sha"], "COMMIT1");
+    }
+
+    /// Retry after a partial success: when the branch ref already exists,
+    /// POST returns 422 and the push must fall back to a non-force PATCH
+    /// instead of failing. Text-only files, so no blob call.
+    #[tokio::test]
+    async fn pilot_data_api_push_falls_back_to_patch_on_existing_ref() {
+        use std::sync::{Arc, Mutex};
+        use tokio::io::AsyncWriteExt;
+
+        let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let seen_srv = seen.clone();
+        let server = tokio::spawn(async move {
+            for _ in 0..6 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let req = read_request(&mut stream).await;
+                let head = req.lines().next().unwrap_or("").to_owned();
+                let body = req.split("\r\n\r\n").nth(1).unwrap_or("").to_owned();
+                seen_srv.lock().unwrap().push(format!("{head} || {body}"));
+                let (status, payload) =
+                    if head.starts_with("GET ") && head.contains("/git/ref/heads/") {
+                        (200, "{\"object\":{\"sha\":\"TIP\"}}".to_string())
+                    } else if head.starts_with("GET ") && head.contains("/git/commits/") {
+                        (200, "{\"tree\":{\"sha\":\"BASETREE\"}}".to_string())
+                    } else if head.starts_with("POST ") && head.contains("/git/trees") {
+                        (200, "{\"sha\":\"TREE1\"}".to_string())
+                    } else if head.starts_with("POST ") && head.contains("/git/commits") {
+                        (200, "{\"sha\":\"COMMIT1\"}".to_string())
+                    } else if head.starts_with("POST ") && head.contains("/git/refs") {
+                        (
+                            422,
+                            "{\"message\":\"Reference already exists\"}".to_string(),
+                        )
+                    } else if head.starts_with("PATCH ") && head.contains("/git/refs/heads/") {
+                        assert!(
+                            head.contains("/repos/o/r/git/refs/heads/pilot-scaffold"),
+                            "patch path: {head}"
+                        );
+                        (200, "{\"ref\":\"refs/heads/pilot-scaffold\"}".to_string())
+                    } else {
+                        panic!("unexpected mock request: {head}");
+                    };
+                let resp = format!(
+                    "HTTP/1.1 {status} {}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    if status == 200 { "OK" } else { "Unprocessable Entity" },
+                    payload.len(),
+                    payload
+                );
+                stream.write_all(resp.as_bytes()).await.unwrap();
+            }
+        });
+
+        let http = reqwest::Client::builder().build().unwrap();
+        let github = GithubClient {
+            http,
+            api_base: format!("http://{addr}"),
+            org: "o".to_string(),
+            token: "DUMMY".to_string(),
+        };
+        github
+            .push_rendered_via_api("r", &[("a.txt".to_string(), b"hello".to_vec())], "trunk")
+            .await
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(10), server)
+            .await
+            .expect("mock server hung")
+            .unwrap();
+
+        let seen = seen.lock().unwrap();
+        let patch_body = seen
+            .iter()
+            .find(|s| s.contains("PATCH ") && s.contains("/git/refs/heads/"))
+            .expect("patch call");
+        let patch: serde_json::Value =
+            serde_json::from_str(patch_body.split(" || ").nth(1).unwrap()).unwrap();
+        assert_eq!(patch["sha"], "COMMIT1");
+        assert_eq!(patch["force"], false);
     }
 
     /// Regression test for the pilot-consumer-gen PR#1 CI double-red:
