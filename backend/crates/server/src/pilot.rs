@@ -3,7 +3,8 @@
 //! `provisionPilotConsumer(spaceId, templateVersion)` runs a minimal closed
 //! loop: create repo via GitHub API -> render `templates/pilot-consumer/`
 //! (substituting the four `__PILOT_*` placeholders) -> push a scaffold branch
-//! -> open the initial PR. If any step after repo creation fails, the repo is
+//! via the Git Data API (no git CLI, no `github.com` git port) -> open the
+//! initial PR. If any step after repo creation fails, the repo is
 //! deleted again (fail-closed rollback).
 //!
 //! Live provisioning needs Task 3 credentials: either a static token
@@ -520,8 +521,208 @@ impl GithubClient {
     }
 }
 
-/// Push rendered files as `SCAFFOLD_BRANCH` via the git CLI. The token travels
-/// only in the remote URL of a temp repo; failures redact it before surfacing.
+/// Push rendered files as `SCAFFOLD_BRANCH` through the GitHub Git Data API
+/// (`api.github.com` only — never touches `github.com`'s git port, which is
+/// intermittently blocked from our network). The commit is parented on the
+/// base tip so the branch shares history with it (the old CLI push cut the
+/// branch from the fetched tip for the same reason: no `422 no history in
+/// common` on open_pr).
+///
+/// Text files ride inline in the tree payload; non-UTF8 files go through a
+/// blob first (the tree API only accepts UTF-8 `content`). All scaffold files
+/// land as mode 100644 — the template has no executables.
+impl GithubClient {
+    fn api_push_err(&self, ctx: &str, status: reqwest::StatusCode, body: &str) -> PilotError {
+        let body: String = body.chars().take(500).collect();
+        PilotError::Push(scrub_push_output(
+            &format!("{ctx} failed: {status}: {body}"),
+            &self.token,
+            "<redacted>",
+        ))
+    }
+
+    async fn api_get_json(&self, path: &str, ctx: &str) -> Result<serde_json::Value, PilotError> {
+        let res = self
+            .http
+            .get(format!("{}{path}", self.api_base))
+            .bearer_auth(&self.token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send()
+            .await
+            .map_err(|e| PilotError::Push(format!("{ctx} failed: {e}")))?;
+        if !res.status().is_success() {
+            let status = res.status();
+            let body = res.text().await.unwrap_or_default();
+            return Err(self.api_push_err(ctx, status, &body));
+        }
+        res.json()
+            .await
+            .map_err(|e| PilotError::Push(format!("{ctx} failed: {e}")))
+    }
+
+    async fn api_post_json(
+        &self,
+        path: &str,
+        ctx: &str,
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, PilotError> {
+        let res = self
+            .http
+            .post(format!("{}{path}", self.api_base))
+            .bearer_auth(&self.token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .json(payload)
+            .send()
+            .await
+            .map_err(|e| PilotError::Push(format!("{ctx} failed: {e}")))?;
+        if !res.status().is_success() {
+            let status = res.status();
+            let body = res.text().await.unwrap_or_default();
+            return Err(self.api_push_err(ctx, status, &body));
+        }
+        res.json()
+            .await
+            .map_err(|e| PilotError::Push(format!("{ctx} failed: {e}")))
+    }
+
+    fn response_sha(
+        body: &serde_json::Value,
+        ctx: &str,
+        field: &str,
+    ) -> Result<String, PilotError> {
+        body.get(field)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_owned())
+            .ok_or_else(|| PilotError::Push(format!("{ctx} failed: missing {field}")))
+    }
+
+    /// Resolve the `heads/<base>` tip SHA. `create_repo` uses `auto_init`, so
+    /// the base always exists with an initial commit.
+    async fn base_tip_sha(&self, repo: &str, base_branch: &str) -> Result<String, PilotError> {
+        // Base arrives from the create-repo response; validate before
+        // interpolating into the URL path.
+        validate_base_branch(base_branch)?;
+        let body = self
+            .api_get_json(
+                &format!("/repos/{}/{}/git/ref/heads/{}", self.org, repo, base_branch),
+                "resolve base tip",
+            )
+            .await?;
+        body.get("object")
+            .and_then(|o| o.get("sha"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_owned())
+            .ok_or_else(|| {
+                PilotError::Push("resolve base tip failed: missing object.sha".to_string())
+            })
+    }
+
+    async fn create_blob(&self, repo: &str, bytes: &[u8]) -> Result<String, PilotError> {
+        use base64::Engine as _;
+        let body = self
+            .api_post_json(
+                &format!("/repos/{}/{}/git/blobs", self.org, repo),
+                "create blob",
+                &serde_json::json!({
+                    "content": base64::engine::general_purpose::STANDARD.encode(bytes),
+                    "encoding": "base64",
+                }),
+            )
+            .await?;
+        Self::response_sha(&body, "create blob", "sha")
+    }
+
+    async fn create_scaffold_tree(
+        &self,
+        repo: &str,
+        base_sha: &str,
+        rendered: &[(String, Vec<u8>)],
+    ) -> Result<String, PilotError> {
+        let mut tree = Vec::with_capacity(rendered.len());
+        for (rel, bytes) in rendered {
+            let entry = match std::str::from_utf8(bytes) {
+                Ok(text) => serde_json::json!({
+                    "path": rel,
+                    "mode": "100644",
+                    "type": "blob",
+                    "content": text,
+                }),
+                Err(_) => {
+                    let sha = self.create_blob(repo, bytes).await?;
+                    serde_json::json!({
+                        "path": rel,
+                        "mode": "100644",
+                        "type": "blob",
+                        "sha": sha,
+                    })
+                }
+            };
+            tree.push(entry);
+        }
+        let body = self
+            .api_post_json(
+                &format!("/repos/{}/{}/git/trees", self.org, repo),
+                "create tree",
+                &serde_json::json!({ "base_tree": base_sha, "tree": tree }),
+            )
+            .await?;
+        Self::response_sha(&body, "create tree", "sha")
+    }
+
+    async fn create_scaffold_commit(
+        &self,
+        repo: &str,
+        tree_sha: &str,
+        parent_sha: &str,
+    ) -> Result<String, PilotError> {
+        let body = self
+            .api_post_json(
+                &format!("/repos/{}/{}/git/commits", self.org, repo),
+                "create commit",
+                &serde_json::json!({
+                    "message": "chore: pilot scaffold",
+                    "tree": tree_sha,
+                    "parents": [parent_sha],
+                }),
+            )
+            .await?;
+        Self::response_sha(&body, "create commit", "sha")
+    }
+
+    async fn create_branch_ref(&self, repo: &str, commit_sha: &str) -> Result<(), PilotError> {
+        let body = self
+            .api_post_json(
+                &format!("/repos/{}/{}/git/refs", self.org, repo),
+                "create branch ref",
+                &serde_json::json!({
+                    "ref": format!("refs/heads/{SCAFFOLD_BRANCH}"),
+                    "sha": commit_sha,
+                }),
+            )
+            .await?;
+        body.get("ref")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|_| ())
+            .ok_or_else(|| PilotError::Push("create branch ref failed: missing ref".to_string()))
+    }
+
+    async fn push_rendered_via_api(
+        &self,
+        repo: &str,
+        rendered: &[(String, Vec<u8>)],
+        base_branch: &str,
+    ) -> Result<(), PilotError> {
+        let tip = self.base_tip_sha(repo, base_branch).await?;
+        let tree = self.create_scaffold_tree(repo, &tip, rendered).await?;
+        let commit = self.create_scaffold_commit(repo, &tree, &tip).await?;
+        self.create_branch_ref(repo, &commit).await
+    }
+}
 /// Scrub push secrets from surfaced text. Only the credential material is
 /// replaced — host/org/repo stay visible for diagnostics. Covers three
 /// forms: the `x-access-token:<token>@` URL fragment, the bare token
@@ -562,165 +763,6 @@ fn validate_base_branch(name: &str) -> Result<(), PilotError> {
     }
 }
 
-/// Run one git command inside `workdir`, scrubbing secrets from any
-/// surfaced command/error/output text (see [`scrub_push_output`]).
-async fn git_in(
-    workdir: &std::path::Path,
-    token: &str,
-    redact: &str,
-    args: &[&str],
-) -> Result<String, PilotError> {
-    // The `remote add` args embed the token URL, so the echoed command
-    // itself must be scrubbed, not just git's output.
-    let scrub = |s: &str| scrub_push_output(s, token, redact);
-    let cmd = scrub(&args.join(" "));
-    let out = tokio::process::Command::new("git")
-        .args(args)
-        .current_dir(workdir)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .output()
-        .await
-        .map_err(|e| PilotError::Push(format!("git {cmd} failed: {e}")))?;
-    if !out.status.success() {
-        let stderr = scrub(&String::from_utf8_lossy(&out.stderr));
-        let stdout = scrub(&String::from_utf8_lossy(&out.stdout));
-        return Err(PilotError::Push(format!(
-            "git {cmd} failed: {stderr} {stdout}"
-        )));
-    }
-    Ok(scrub(&String::from_utf8_lossy(&out.stdout)))
-}
-
-/// Set up the scaffold branch cut from the remote base branch tip
-/// (create_repo uses `auto_init`, so the base always exists with an initial
-/// commit). Rendered files must be written AFTER this step: checking out the
-/// base tree would refuse to overwrite same-named scaffold files (e.g. the
-/// template's own README.md vs auto_init's README.md).
-async fn prepare_scaffold_branch(
-    workdir: &std::path::Path,
-    remote: &str,
-    token: &str,
-    redact: &str,
-    base_branch: &str,
-) -> Result<(), PilotError> {
-    validate_base_branch(base_branch)?;
-    git_in(workdir, token, redact, &["init", "-b", SCAFFOLD_BRANCH]).await?;
-    git_in(
-        workdir,
-        token,
-        redact,
-        &["config", "user.email", "pilot-generator@eap.local"],
-    )
-    .await?;
-    git_in(
-        workdir,
-        token,
-        redact,
-        &["config", "user.name", "eap-pilot-generator"],
-    )
-    .await?;
-    git_in(
-        workdir,
-        token,
-        redact,
-        &["remote", "add", "origin", remote],
-    )
-    .await?;
-    git_in(
-        workdir,
-        token,
-        redact,
-        &["fetch", "origin", "--", base_branch],
-    )
-    .await?;
-    // Cut the scaffold branch from the just-fetched tip via FETCH_HEAD: a
-    // bare `fetch origin <base>` only guarantees FETCH_HEAD, not an
-    // `origin/<base>` tracking ref on every git version/config, so
-    // `checkout origin/<base>` could fail with unknown revision.
-    // (FETCH_HEAD is a fixed rev, not user input — no `--` needed here.)
-    git_in(
-        workdir,
-        token,
-        redact,
-        &["checkout", "-B", SCAFFOLD_BRANCH, "FETCH_HEAD"],
-    )
-    .await?;
-    Ok(())
-}
-
-/// Commit everything in `workdir` onto the scaffold branch and push.
-/// A no-change tree (rendered files identical to the base tree) skips the
-/// commit instead of failing on `nothing to commit`; the push then still
-/// ensures the branch exists remotely and open_pr reports the real outcome.
-async fn commit_and_push_scaffold(
-    workdir: &std::path::Path,
-    token: &str,
-    redact: &str,
-) -> Result<(), PilotError> {
-    git_in(workdir, token, redact, &["add", "-A"]).await?;
-    let status = git_in(workdir, token, redact, &["status", "--porcelain"]).await?;
-    if !status.trim().is_empty() {
-        git_in(
-            workdir,
-            token,
-            redact,
-            &["commit", "-m", "chore: pilot scaffold"],
-        )
-        .await?;
-    }
-    git_in(
-        workdir,
-        token,
-        redact,
-        &["push", "-u", "origin", SCAFFOLD_BRANCH],
-    )
-    .await?;
-    Ok(())
-}
-
-async fn push_rendered(
-    rendered: &[(String, Vec<u8>)],
-    repo_name: &str,
-    org: &str,
-    token: &str,
-    redacted_token: &str,
-    base_branch: &str,
-) -> Result<(), PilotError> {
-    let workdir =
-        std::env::temp_dir().join(format!("pilot-{repo_name}-{}", Uuid::new_v4().simple()));
-    tokio::fs::create_dir_all(&workdir)
-        .await
-        .map_err(|e| PilotError::Push(e.to_string()))?;
-    let workdir_clone = workdir.clone();
-    let files: Vec<(String, Vec<u8>)> = rendered.to_vec();
-    let remote = format!("https://x-access-token:{token}@github.com/{org}/{repo_name}.git");
-
-    let result = async {
-        // Order matters: branch off the base first (checkout populates the
-        // base tree), then overlay the rendered files, then commit + push.
-        prepare_scaffold_branch(&workdir, &remote, token, redacted_token, base_branch).await?;
-        tokio::task::spawn_blocking(move || -> Result<(), String> {
-            for (rel, bytes) in &files {
-                let dest = workdir_clone.join(rel);
-                if let Some(parent) = dest.parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-                }
-                std::fs::write(&dest, bytes).map_err(|e| e.to_string())?;
-            }
-            Ok(())
-        })
-        .await
-        .map_err(|e| PilotError::Push(e.to_string()))?
-        .map_err(PilotError::Push)?;
-        commit_and_push_scaffold(&workdir, token, redacted_token).await?;
-        Ok::<(), PilotError>(())
-    }
-    .await;
-
-    let _ = tokio::fs::remove_dir_all(&workdir).await;
-    result
-}
-
 /// Minimal closed loop: create repo -> render -> push -> open PR.
 /// Steps 2-4 failing trigger rollback deletion of the created repo.
 pub async fn provision_pilot_consumer(
@@ -746,15 +788,9 @@ pub async fn provision_pilot_consumer(
                 }
             }
         }
-        push_rendered(
-            &rendered,
-            &inputs.repo_name,
-            &github.org,
-            &github.token,
-            "<redacted>",
-            &base_branch,
-        )
-        .await?;
+        github
+            .push_rendered_via_api(&inputs.repo_name, &rendered, &base_branch)
+            .await?;
         let pr_url = github
             .open_pr(&inputs.repo_name, &template_version, &base_branch)
             .await?;
@@ -1193,109 +1229,132 @@ mod tests {
         assert!(validate_base_branch("a..b").is_err());
     }
 
-    /// Regression test for the live `422 ... no history in common` failure:
-    /// the scaffold branch must be cut from the remote base tip. Local
-    /// bare repos only, no network. Skips gracefully when `git` is missing.
-    /// Uses a non-`main` base (`trunk`) to prove nothing hardcodes `main`.
+    /// Regression test for the Data-API push: the scaffold commit must be
+    /// parented on the base tip (shares history, no 422 on open_pr), text
+    /// files ride inline in the tree, non-UTF8 files go through a blob, and
+    /// the branch ref points at the new commit. Local mock server, no
+    /// network, no git binary. Uses a non-`main` base (`trunk`) to prove
+    /// nothing hardcodes `main`.
     #[tokio::test]
-    async fn pilot_push_shares_history_with_main() {
-        use std::process::Command as SyncCommand;
+    async fn pilot_data_api_push_order_and_payloads() {
+        use base64::Engine as _;
+        use std::sync::{Arc, Mutex};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        if SyncCommand::new("git")
-            .arg("--version")
-            .output()
-            .is_err()
-        {
-            eprintln!("git not available, skipping pilot_push_shares_history_with_main");
-            return;
-        }
-        fn git(args: &[&str], dir: &std::path::Path) {
-            let out = SyncCommand::new("git")
-                .args(args)
-                .current_dir(dir)
-                .output()
-                .expect("git command failed to run");
-            assert!(
-                out.status.success(),
-                "git {} failed: {}",
-                args.join(" "),
-                String::from_utf8_lossy(&out.stderr)
-            );
-        }
-        /// Best-effort temp cleanup that also runs on assertion failure.
-        struct Guard {
-            path: std::path::PathBuf,
-        }
-        impl Drop for Guard {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_dir_all(&self.path);
+        let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let seen_srv = seen.clone();
+        let server = tokio::spawn(async move {
+            // Exactly the 5 calls push_rendered_via_api makes for one
+            // binary file: ref, blob, tree, commit, ref-create.
+            for _ in 0..5 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut buf = vec![0u8; 65536];
+                let n = stream.read(&mut buf).await.unwrap();
+                let req = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let head = req.lines().next().unwrap_or("").to_owned();
+                let body = req.split("\r\n\r\n").nth(1).unwrap_or("").to_owned();
+                seen_srv.lock().unwrap().push(format!("{head} || {body}"));
+                let payload = if head.starts_with("GET ") && head.contains("/git/ref/heads/") {
+                    assert!(
+                        head.contains("/repos/o/r/git/ref/heads/trunk"),
+                        "base ref path: {head}"
+                    );
+                    "{\"object\":{\"sha\":\"TIP\"}}".to_string()
+                } else if head.starts_with("POST ") && head.contains("/git/blobs") {
+                    "{\"sha\":\"BLOB1\"}".to_string()
+                } else if head.starts_with("POST ") && head.contains("/git/trees") {
+                    "{\"sha\":\"TREE1\"}".to_string()
+                } else if head.starts_with("POST ") && head.contains("/git/commits") {
+                    "{\"sha\":\"COMMIT1\"}".to_string()
+                } else if head.starts_with("POST ") && head.contains("/git/refs") {
+                    "{\"ref\":\"refs/heads/pilot-scaffold\",\"object\":{\"sha\":\"COMMIT1\"}}"
+                        .to_string()
+                } else {
+                    panic!("unexpected mock request: {head}");
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    payload.len(),
+                    payload
+                );
+                stream.write_all(resp.as_bytes()).await.unwrap();
             }
-        }
+        });
 
-        const BASE: &str = "trunk";
-        let base = std::env::temp_dir().join(format!("pilot-test-{}", Uuid::new_v4().simple()));
-        let _guard = Guard { path: base.clone() };
-        let origin = base.join("origin.git");
-        let seed = base.join("seed");
-        let scaffold = base.join("scaffold");
-        std::fs::create_dir_all(&seed).unwrap();
-
-        // Simulate create_repo(auto_init=true): remote base with one
-        // commit, including a README.md that also exists in the template.
-        std::fs::create_dir_all(&origin).unwrap();
-        git(&["init", "--bare", "-b", BASE], &origin);
-        git(&["init", "-b", BASE], &seed);
-        git(&["config", "user.email", "t@t"], &seed);
-        git(&["config", "user.name", "t"], &seed);
-        std::fs::write(seed.join("README.md"), "remote initial\n").unwrap();
-        git(&["add", "-A"], &seed);
-        git(&["commit", "-m", "initial"], &seed);
-        let remote = origin.display().to_string();
-        git(&["remote", "add", "origin", &remote], &seed);
-        git(&["push", "origin", BASE], &seed);
-
-        // Production order: prepare branch first, then overlay rendered
-        // files (including the colliding README.md), then commit + push.
-        std::fs::create_dir_all(&scaffold).unwrap();
-        prepare_scaffold_branch(&scaffold, &remote, "DUMMY-TOKEN", "REDACTED", BASE)
+        let http = reqwest::Client::builder().build().unwrap();
+        let github = GithubClient {
+            http,
+            api_base: format!("http://{addr}"),
+            org: "o".to_string(),
+            token: "DUMMY".to_string(),
+        };
+        let rendered = vec![
+            ("a.txt".to_string(), b"hello".to_vec()),
+            ("bin.dat".to_string(), vec![0xff, 0xfe, 0x00, 0x01]),
+        ];
+        github
+            .push_rendered_via_api("r", &rendered, "trunk")
             .await
             .unwrap();
-        std::fs::write(scaffold.join("README.md"), "scaffold version\n").unwrap();
-        std::fs::write(scaffold.join("extra.txt"), "x\n").unwrap();
-        commit_and_push_scaffold(&scaffold, "DUMMY-TOKEN", "REDACTED")
+        tokio::time::timeout(std::time::Duration::from_secs(10), server)
             .await
+            .expect("mock server hung")
             .unwrap();
 
-        // Scaffold branch must share history with the base ...
-        let base_ref = format!("{BASE}");
-        let ancestor = SyncCommand::new("git")
-            .arg("--git-dir")
-            .arg(&origin)
-            .args([
-                "merge-base",
-                "--is-ancestor",
-                &base_ref,
-                SCAFFOLD_BRANCH,
-            ])
-            .output()
-            .unwrap();
-        assert!(
-            ancestor.status.success(),
-            "{SCAFFOLD_BRANCH} shares no history with {BASE}"
-        );
-        // ... and the scaffold content must win over the base tree.
-        let show_ref = format!("{SCAFFOLD_BRANCH}:README.md");
-        let readme = SyncCommand::new("git")
-            .arg("--git-dir")
-            .arg(&origin)
-            .args(["show", &show_ref])
-            .output()
-            .unwrap();
-        assert!(readme.status.success());
+        let seen = seen.lock().unwrap();
         assert_eq!(
-            String::from_utf8_lossy(&readme.stdout),
-            "scaffold version\n"
+            seen.len(),
+            5,
+            "expected ref+blob+tree+commit+ref, got {seen:?}"
         );
+
+        let blob_body = seen
+            .iter()
+            .find(|s| s.contains("POST ") && s.contains("/git/blobs"))
+            .expect("blob call");
+        let blob: serde_json::Value =
+            serde_json::from_str(blob_body.split(" || ").nth(1).unwrap()).unwrap();
+        assert_eq!(blob["encoding"], "base64");
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(blob["content"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(decoded, vec![0xff, 0xfe, 0x00, 0x01]);
+
+        let tree_body = seen
+            .iter()
+            .find(|s| s.contains("POST ") && s.contains("/git/trees"))
+            .expect("tree call");
+        let tree: serde_json::Value =
+            serde_json::from_str(tree_body.split(" || ").nth(1).unwrap()).unwrap();
+        assert_eq!(tree["base_tree"], "TIP", "tree must overlay the base tip");
+        let entries = tree["tree"].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        let text = entries.iter().find(|e| e["path"] == "a.txt").unwrap();
+        assert_eq!(text["content"], "hello");
+        assert_eq!(text["mode"], "100644");
+        let bin = entries.iter().find(|e| e["path"] == "bin.dat").unwrap();
+        assert_eq!(bin["sha"], "BLOB1");
+        assert!(bin.get("content").is_none());
+
+        let commit_body = seen
+            .iter()
+            .find(|s| s.contains("POST ") && s.contains("/git/commits"))
+            .expect("commit call");
+        let commit: serde_json::Value =
+            serde_json::from_str(commit_body.split(" || ").nth(1).unwrap()).unwrap();
+        assert_eq!(commit["tree"], "TREE1");
+        assert_eq!(commit["parents"], serde_json::json!(["TIP"]));
+
+        let ref_body = seen
+            .iter()
+            .find(|s| s.contains("POST ") && s.contains("/git/refs"))
+            .expect("ref call");
+        let refr: serde_json::Value =
+            serde_json::from_str(ref_body.split(" || ").nth(1).unwrap()).unwrap();
+        assert_eq!(refr["ref"], "refs/heads/pilot-scaffold");
+        assert_eq!(refr["sha"], "COMMIT1");
     }
 
     /// Regression test for the pilot-consumer-gen PR#1 CI double-red:
