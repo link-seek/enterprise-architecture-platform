@@ -15,3 +15,23 @@ risk_detection:
 
 test:
   command: "cargo test --manifest-path backend/Cargo.toml"
+
+# 流程测试 — pipeline_test.py 验证用（v1.0.20 契约必填，由生成器渲染 __PILOT_*__ 占位）
+pipeline_test:
+  # 自动合并分支：无害的非 DB 改动
+  auto_merge:
+    title_template: "Pipeline Test: 给试点后端添加 /api/pipeline-test 端点 {ts}"
+    body_template: "在 backend/src/main.rs 添加 /api/pipeline-test 端点，返回 JSON。无害测试端点。"
+  # 人工审查分支：命中 risk_detection 的改动
+  human_review:
+    title_template: "Pipeline Test: 给试点后端添加 pipeline_test_{ts} 迁移 {ts}"
+    body_template: "在 backend/migration 中添加迁移文件，给试点表添加 pipeline_test_{ts} 列。命中风险检测，需人工审查。"
+  # 讨论流程
+  discussion:
+    category: "General"
+    body: "@oh 请分析下试点骨架项目的整体结构"
+
+# 部署验证（v1.0.20 契约必填；试点仓暂未部署，url 由生成器按试点 API 地址渲染）
+deploy:
+  url: "__PILOT_API_URL__"
+  health_endpoint: "/health"

@@ -21,8 +21,9 @@ jobs:
     uses: link-seek/issue-resolver-l1/.github/workflows/pr-ci.yml@v1.0.20-pilot
     with:
       # 试点骨架：后端零依赖 cargo test；前端纯静态，无构建测试
+      # 注意 pr-ci 在 working-directory: backend 下执行命令，故此处用裸 cargo test
       enable-backend-tests: true
-      backend-test-cmd: 'cargo test --manifest-path backend/Cargo.toml'
+      backend-test-cmd: 'cargo test'
       enable-frontend-tests: false
       enable-integration: false
       e2e-timeout-minutes: 30

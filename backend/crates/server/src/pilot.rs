@@ -1297,4 +1297,70 @@ mod tests {
             "scaffold version\n"
         );
     }
+
+    /// Regression test for the pilot-consumer-gen PR#1 CI double-red:
+    /// 1. `backend-test-cmd` with `--manifest-path backend/...` fails because
+    ///    L1 pr-ci runs it under `working-directory: backend`.
+    /// 2. `.issue-resolver.yml` missed the v1.0.20 contract sections
+    ///    (`pipeline_test.*`, `deploy.*`) so pipeline-contract-check fails.
+    /// Renders the real on-disk template so drift is caught here, not in CI.
+    #[test]
+    fn pilot_template_satisfies_l1_contract() {
+        let dir = match template_dir() {
+            Ok(d) => d,
+            Err(_) => {
+                eprintln!("template dir absent, skipping pilot_template_satisfies_l1_contract");
+                return;
+            }
+        };
+        let files = collect_template_files(&dir).expect("template dir readable");
+        let rendered = render_all(&files, &fixture_inputs());
+        let get = |name: &str| {
+            let (_, bytes) = rendered
+                .iter()
+                .find(|(rel, _)| rel == name)
+                .unwrap_or_else(|| panic!("template missing {name}"));
+            String::from_utf8(bytes.clone()).expect("template utf8")
+        };
+
+        let on_pr = get(".github/workflows/on-pr.yml");
+        let cmd_line = on_pr
+            .lines()
+            .find(|l| l.contains("backend-test-cmd:"))
+            .expect("on-pr sets backend-test-cmd");
+        assert!(
+            !cmd_line.contains("--manifest-path"),
+            "backend-test-cmd runs under working-directory backend: {cmd_line}"
+        );
+
+        let resolver = get(".issue-resolver.yml");
+        assert!(
+            !has_unrendered_placeholders(&resolver),
+            "unrendered placeholder survived"
+        );
+        // v1.0.20 pipeline-contract-check required leaves.
+        for section in [
+            "pipeline_test:",
+            "auto_merge:",
+            "human_review:",
+            "discussion:",
+            "category:",
+            "deploy:",
+            "health_endpoint:",
+        ] {
+            assert!(resolver.contains(section), "contract field missing: {section}");
+        }
+        assert!(
+            resolver.matches("title_template:").count() >= 2,
+            "auto_merge + human_review each need a title_template"
+        );
+        assert!(
+            resolver.matches("body_template:").count() >= 2,
+            "auto_merge + human_review each need a body_template"
+        );
+        assert!(
+            resolver.contains("https://pilot-api.xieyucheng.top"),
+            "deploy.url must render the pilot api url"
+        );
+    }
 }
