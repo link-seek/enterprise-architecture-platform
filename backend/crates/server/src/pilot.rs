@@ -121,6 +121,24 @@ fn validate_repo_name(name: &str) -> Result<(), PilotError> {
     }
 }
 
+fn validate_org_name(name: &str) -> Result<(), PilotError> {
+    // Same whitelist as repo names: org is interpolated into API URL paths
+    // in every GithubClient call, so `/`, `?`, `#`, spaces etc. must be
+    // rejected before they can reroute a request.
+    let ok = !name.is_empty()
+        && name.len() <= 100
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if ok {
+        Ok(())
+    } else {
+        Err(PilotError::CreateRepo(format!(
+            "invalid PILOT_GITHUB_ORG: {name}"
+        )))
+    }
+}
+
 /// Derive deterministic render inputs from the space plus env overrides.
 /// Only the repo name is validated; URL values may be empty until Task 3
 /// deployment targets exist (placeholders are still fully substituted).
@@ -395,12 +413,11 @@ async fn resolve_github_token(
 impl GithubClient {
     async fn from_env() -> Result<Self, PilotError> {
         let org = std::env::var("PILOT_GITHUB_ORG").map_err(|_| PilotError::MissingCredentials)?;
-        if org.trim().is_empty() {
-            return Err(PilotError::MissingCredentials);
-        }
+        validate_org_name(org.trim())?;
         let api_base = github_api_base();
         let http = reqwest::Client::builder()
             .user_agent("eap-pilot-provisioner")
+            .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| PilotError::CreateRepo(e.to_string()))?;
         let token = resolve_github_token(&http, &api_base, org.trim()).await?;
@@ -521,6 +538,11 @@ impl GithubClient {
     }
 }
 
+/// Text files at or under this size ride inline in the tree payload; bigger
+/// ones go through a blob first so a large scaffold file (e.g. Cargo.lock)
+/// cannot blow the tree request past GitHub's size limit.
+const TREE_INLINE_MAX_BYTES: usize = 100 * 1024;
+
 /// Push rendered files as `SCAFFOLD_BRANCH` through the GitHub Git Data API
 /// (`api.github.com` only — never touches `github.com`'s git port, which is
 /// intermittently blocked from our network). The commit is parented on the
@@ -528,9 +550,9 @@ impl GithubClient {
 /// branch from the fetched tip for the same reason: no `422 no history in
 /// common` on open_pr).
 ///
-/// Text files ride inline in the tree payload; non-UTF8 files go through a
-/// blob first (the tree API only accepts UTF-8 `content`). All scaffold files
-/// land as mode 100644 — the template has no executables.
+/// Small UTF-8 files ride inline in the tree payload; bigger or non-UTF8
+/// files go through a blob first. All scaffold files land as mode 100644 —
+/// the template has no executables.
 impl GithubClient {
     fn api_push_err(&self, ctx: &str, status: reqwest::StatusCode, body: &str) -> PilotError {
         let body: String = body.chars().take(500).collect();
@@ -685,14 +707,18 @@ impl GithubClient {
     ) -> Result<String, PilotError> {
         let mut tree = Vec::with_capacity(rendered.len());
         for (rel, bytes) in rendered {
-            let entry = match std::str::from_utf8(bytes) {
-                Ok(text) => serde_json::json!({
+            let inline = match std::str::from_utf8(bytes) {
+                Ok(text) if bytes.len() <= TREE_INLINE_MAX_BYTES => Some(text),
+                _ => None,
+            };
+            let entry = match inline {
+                Some(text) => serde_json::json!({
                     "path": rel,
                     "mode": "100644",
                     "type": "blob",
                     "content": text,
                 }),
-                Err(_) => {
+                None => {
                     let sha = self.create_blob(repo, bytes).await?;
                     serde_json::json!({
                         "path": rel,
@@ -736,9 +762,11 @@ impl GithubClient {
 
     /// Point `pilot-scaffold` at the new commit. A retry after a partial
     /// success (ref created, later step failed, rollback delete missed) hits
-    /// `422 Reference already exists` on POST — fall back to a non-force
-    /// PATCH so a genuinely diverged branch still errors instead of being
-    /// silently overwritten.
+    /// `422 Reference already exists` on POST — fall back to PATCH. The repo
+    /// was created seconds ago by this same provision run and fail-closed
+    /// owns its lifecycle, so overwriting our own just-pushed branch is
+    /// safe; hence `force: true` (a sibling commit from the retry is never
+    /// fast-forward, `force: false` could not succeed).
     async fn create_branch_ref(&self, repo: &str, commit_sha: &str) -> Result<(), PilotError> {
         let res = self
             .http
@@ -758,7 +786,17 @@ impl GithubClient {
             .map_err(|e| PilotError::Push(format!("create branch ref failed: {e}")))?;
         if res.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
             let body = res.text().await.unwrap_or_default();
-            if body.contains("already exists") {
+            // Parse the payload instead of substring-matching the raw body:
+            // GitHub reports this as message "Reference already exists".
+            let already_exists = serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|v| {
+                    v.get("message")?
+                        .as_str()
+                        .map(|s| s.to_lowercase().contains("already exists"))
+                })
+                .unwrap_or(false);
+            if already_exists {
                 let patched = self
                     .api_patch_json(
                         &format!(
@@ -766,7 +804,7 @@ impl GithubClient {
                             self.org, repo
                         ),
                         "update branch ref",
-                        &serde_json::json!({ "sha": commit_sha, "force": false }),
+                        &serde_json::json!({ "sha": commit_sha, "force": true }),
                     )
                     .await?;
                 return patched
@@ -1294,13 +1332,11 @@ mod tests {
     fn pilot_scrub_redacts_credential_forms() {
         // Token with a char that percent-encoding transforms ('_').
         let token = "ghi_安装令牌_xyz";
-        let url = format!("https://x-access-token:{token}@github.com/link-seek/pilot-consumer-gen.git");
+        let url =
+            format!("https://x-access-token:{token}@github.com/link-seek/pilot-consumer-gen.git");
         let text = format!(
             "fatal: unable to access '{url}': git said '{token}' then '{enc}'",
-            enc = percent_encoding::utf8_percent_encode(
-                token,
-                percent_encoding::NON_ALPHANUMERIC
-            )
+            enc = percent_encoding::utf8_percent_encode(token, percent_encoding::NON_ALPHANUMERIC)
         );
         let scrubbed = scrub_push_output(&text, token, "<redacted>");
         assert!(!scrubbed.contains(token), "bare token leaked: {scrubbed}");
@@ -1371,9 +1407,10 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let seen_srv = seen.clone();
         let server = tokio::spawn(async move {
-            // Exactly the 6 calls push_rendered_via_api makes for one
-            // binary file: ref, commit-tree, blob, tree, commit, ref-create.
-            for _ in 0..6 {
+            // Exactly the 7 calls push_rendered_via_api makes for one
+            // binary + one over-threshold text file: ref, commit-tree,
+            // 2×blob, tree, commit, ref-create.
+            for _ in 0..7 {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 let req = read_request(&mut stream).await;
                 let head = req.lines().next().unwrap_or("").to_owned();
@@ -1422,6 +1459,10 @@ mod tests {
         let rendered = vec![
             ("a.txt".to_string(), b"hello".to_vec()),
             ("bin.dat".to_string(), vec![0xff, 0xfe, 0x00, 0x01]),
+            (
+                "big.txt".to_string(),
+                "x".repeat(TREE_INLINE_MAX_BYTES + 1).into_bytes(),
+            ),
         ];
         github
             .push_rendered_via_api("r", &rendered, "trunk")
@@ -1435,21 +1476,28 @@ mod tests {
         let seen = seen.lock().unwrap();
         assert_eq!(
             seen.len(),
-            6,
-            "expected ref+tree-of-tip+blob+tree+commit+ref, got {seen:?}"
+            7,
+            "expected ref+tree-of-tip+2×blob+tree+commit+ref, got {seen:?}"
         );
 
-        let blob_body = seen
+        let blobs: Vec<serde_json::Value> = seen
             .iter()
-            .find(|s| s.contains("POST ") && s.contains("/git/blobs"))
-            .expect("blob call");
-        let blob: serde_json::Value =
-            serde_json::from_str(blob_body.split(" || ").nth(1).unwrap()).unwrap();
-        assert_eq!(blob["encoding"], "base64");
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(blob["content"].as_str().unwrap())
-            .unwrap();
-        assert_eq!(decoded, vec![0xff, 0xfe, 0x00, 0x01]);
+            .filter(|s| s.contains("POST ") && s.contains("/git/blobs"))
+            .map(|b| serde_json::from_str(b.split(" || ").nth(1).unwrap()).unwrap())
+            .collect();
+        assert_eq!(blobs.len(), 2, "binary + over-threshold text need blobs");
+        let mut decoded: Vec<Vec<u8>> = blobs
+            .iter()
+            .map(|b| {
+                assert_eq!(b["encoding"], "base64");
+                base64::engine::general_purpose::STANDARD
+                    .decode(b["content"].as_str().unwrap())
+                    .unwrap()
+            })
+            .collect();
+        decoded.sort_by_key(|v| v.len());
+        assert_eq!(decoded[0], vec![0xff, 0xfe, 0x00, 0x01]);
+        assert_eq!(decoded[1].len(), TREE_INLINE_MAX_BYTES + 1);
 
         let tree_body = seen
             .iter()
@@ -1462,13 +1510,16 @@ mod tests {
             "tree must overlay the base commit's tree"
         );
         let entries = tree["tree"].as_array().unwrap();
-        assert_eq!(entries.len(), 2);
+        assert_eq!(entries.len(), 3);
         let text = entries.iter().find(|e| e["path"] == "a.txt").unwrap();
         assert_eq!(text["content"], "hello");
         assert_eq!(text["mode"], "100644");
         let bin = entries.iter().find(|e| e["path"] == "bin.dat").unwrap();
         assert_eq!(bin["sha"], "BLOB1");
         assert!(bin.get("content").is_none());
+        let big = entries.iter().find(|e| e["path"] == "big.txt").unwrap();
+        assert_eq!(big["sha"], "BLOB1", "over-threshold text must use a blob");
+        assert!(big.get("content").is_none());
 
         let commit_body = seen
             .iter()
@@ -1565,7 +1616,17 @@ mod tests {
         let patch: serde_json::Value =
             serde_json::from_str(patch_body.split(" || ").nth(1).unwrap()).unwrap();
         assert_eq!(patch["sha"], "COMMIT1");
-        assert_eq!(patch["force"], false);
+        assert_eq!(patch["force"], true);
+    }
+
+    #[test]
+    fn pilot_org_name_validation() {
+        assert!(validate_org_name("link-seek").is_ok());
+        assert!(validate_org_name("").is_err());
+        assert!(validate_org_name("o/r").is_err());
+        assert!(validate_org_name("o?r").is_err());
+        assert!(validate_org_name("o r").is_err());
+        assert!(validate_org_name("o#r").is_err());
     }
 
     /// Regression test for the pilot-consumer-gen PR#1 CI double-red:
@@ -1573,6 +1634,7 @@ mod tests {
     ///    L1 pr-ci runs it under `working-directory: backend`.
     /// 2. `.issue-resolver.yml` missed the v1.0.20 contract sections
     ///    (`pipeline_test.*`, `deploy.*`) so pipeline-contract-check fails.
+    ///
     /// Renders the real on-disk template so drift is caught here, not in CI.
     #[test]
     fn pilot_template_satisfies_l1_contract() {
@@ -1618,7 +1680,10 @@ mod tests {
             "deploy:",
             "health_endpoint:",
         ] {
-            assert!(resolver.contains(section), "contract field missing: {section}");
+            assert!(
+                resolver.contains(section),
+                "contract field missing: {section}"
+            );
         }
         assert!(
             resolver.matches("title_template:").count() >= 2,
