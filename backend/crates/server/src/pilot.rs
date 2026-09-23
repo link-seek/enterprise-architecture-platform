@@ -411,7 +411,10 @@ impl GithubClient {
         })
     }
 
-    async fn create_repo(&self, name: &str) -> Result<String, PilotError> {
+    /// Create the pilot repo and return `(html_url, default_branch)`.
+    /// The caller threads `default_branch` through the push + PR steps so a
+    /// renamed org default (not `main`) still yields common history.
+    async fn create_repo(&self, name: &str) -> Result<(String, String), PilotError> {
         let res = self
             .http
             .post(format!("{}/orgs/{}/repos", self.api_base, self.org))
@@ -434,10 +437,17 @@ impl GithubClient {
             .json()
             .await
             .map_err(|e| PilotError::CreateRepo(e.to_string()))?;
-        body.get("html_url")
+        let html_url = body
+            .get("html_url")
             .and_then(|v| v.as_str())
             .map(|s| s.to_owned())
-            .ok_or_else(|| PilotError::CreateRepo("missing html_url".to_string()))
+            .ok_or_else(|| PilotError::CreateRepo("missing html_url".to_string()))?;
+        let default_branch = body
+            .get("default_branch")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_owned())
+            .ok_or_else(|| PilotError::CreateRepo("missing default_branch".to_string()))?;
+        Ok((html_url, default_branch))
     }
 
     /// Best-effort rollback: deleting the repo must never mask the original error.
@@ -457,7 +467,12 @@ impl GithubClient {
         }
     }
 
-    async fn open_pr(&self, repo: &str, template_version: &str) -> Result<String, PilotError> {
+    async fn open_pr(
+        &self,
+        repo: &str,
+        template_version: &str,
+        base_branch: &str,
+    ) -> Result<String, PilotError> {
         let res = self
             .http
             .post(format!(
@@ -468,7 +483,7 @@ impl GithubClient {
             .json(&serde_json::json!({
                 "title": format!("chore: pilot scaffold (template {template_version})"),
                 "head": SCAFFOLD_BRANCH,
-                "base": "main",
+                "base": base_branch,
                 "body": "Pilot generator initial scaffold. Thin-shell: workflows pin L1, no business code.",
             }))
             .send()
@@ -493,17 +508,28 @@ impl GithubClient {
 
 /// Push rendered files as `SCAFFOLD_BRANCH` via the git CLI. The token travels
 /// only in the remote URL of a temp repo; failures redact it before surfacing.
-/// Run one git command inside `workdir`, redacting the push URL (which
-/// embeds the token) from any surfaced command/error text.
+/// Run one git command inside `workdir`, scrubbing secrets from any
+/// surfaced command/error/output text. Both the full push URL and the bare
+/// token are scrubbed: git may echo either form (truncated, wrapped, or
+/// URL-encoded fragments), and any leak would travel with `PilotError::Push`.
 async fn git_in(
     workdir: &std::path::Path,
     remote: &str,
-    redact_remote: &str,
+    token: &str,
+    redact: &str,
     args: &[&str],
 ) -> Result<String, PilotError> {
+    let scrub = |s: &str| {
+        let s = s.replace(remote, redact);
+        if token.is_empty() {
+            s
+        } else {
+            s.replace(token, redact)
+        }
+    };
     // The `remote add` args embed the token URL, so the echoed command
     // itself must be redacted, not just git's output.
-    let cmd = args.join(" ").replace(remote, redact_remote);
+    let cmd = scrub(&args.join(" "));
     let out = tokio::process::Command::new("git")
         .args(args)
         .current_dir(workdir)
@@ -512,83 +538,109 @@ async fn git_in(
         .await
         .map_err(|e| PilotError::Push(format!("git {cmd} failed: {e}")))?;
     if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr)
-            .into_owned()
-            .replace(remote, redact_remote);
-        let stdout = String::from_utf8_lossy(&out.stdout)
-            .into_owned()
-            .replace(remote, redact_remote);
+        let stderr = scrub(&String::from_utf8_lossy(&out.stderr));
+        let stdout = scrub(&String::from_utf8_lossy(&out.stdout));
         return Err(PilotError::Push(format!(
             "git {cmd} failed: {stderr} {stdout}"
         )));
     }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    Ok(scrub(&String::from_utf8_lossy(&out.stdout)))
 }
 
-/// Set up the scaffold branch cut from the remote `main` tip (create_repo
-/// uses `auto_init`, so `main` always exists with an initial commit).
-/// Rendered files must be written AFTER this step: checking out `main`'s
-/// tree would refuse to overwrite same-named scaffold files (e.g. the
+/// Set up the scaffold branch cut from the remote base branch tip
+/// (create_repo uses `auto_init`, so the base always exists with an initial
+/// commit). Rendered files must be written AFTER this step: checking out the
+/// base tree would refuse to overwrite same-named scaffold files (e.g. the
 /// template's own README.md vs auto_init's README.md).
 async fn prepare_scaffold_branch(
     workdir: &std::path::Path,
     remote: &str,
-    redact_remote: &str,
+    token: &str,
+    redact: &str,
+    base_branch: &str,
 ) -> Result<(), PilotError> {
-    git_in(workdir, remote, redact_remote, &["init", "-b", SCAFFOLD_BRANCH]).await?;
+    git_in(workdir, remote, token, redact, &["init", "-b", SCAFFOLD_BRANCH]).await?;
     git_in(
         workdir,
         remote,
-        redact_remote,
+        token,
+        redact,
         &["config", "user.email", "pilot-generator@eap.local"],
     )
     .await?;
     git_in(
         workdir,
         remote,
-        redact_remote,
+        token,
+        redact,
         &["config", "user.name", "eap-pilot-generator"],
     )
     .await?;
     git_in(
         workdir,
         remote,
-        redact_remote,
+        token,
+        redact,
         &["remote", "add", "origin", remote],
     )
     .await?;
-    git_in(workdir, remote, redact_remote, &["fetch", "origin", "main"]).await?;
-    // Cut the scaffold branch from main's tip so the follow-up open_pr has
-    // common history; without this it fails with
-    // `422 ... no history in common`.
     git_in(
         workdir,
         remote,
-        redact_remote,
-        &["checkout", "-B", SCAFFOLD_BRANCH, "origin/main"],
+        token,
+        redact,
+        &["fetch", "origin", base_branch],
+    )
+    .await?;
+    // Cut the scaffold branch from the base tip so the follow-up open_pr has
+    // common history; without this it fails with
+    // `422 ... no history in common`.
+    let base_ref = format!("origin/{base_branch}");
+    git_in(
+        workdir,
+        remote,
+        token,
+        redact,
+        &["checkout", "-B", SCAFFOLD_BRANCH, &base_ref],
     )
     .await?;
     Ok(())
 }
 
 /// Commit everything in `workdir` onto the scaffold branch and push.
+/// A no-change tree (rendered files identical to the base tree) skips the
+/// commit instead of failing on `nothing to commit`; the push then still
+/// ensures the branch exists remotely and open_pr reports the real outcome.
 async fn commit_and_push_scaffold(
     workdir: &std::path::Path,
     remote: &str,
-    redact_remote: &str,
+    token: &str,
+    redact: &str,
 ) -> Result<(), PilotError> {
-    git_in(workdir, remote, redact_remote, &["add", "-A"]).await?;
-    git_in(
+    git_in(workdir, remote, token, redact, &["add", "-A"]).await?;
+    let status = git_in(
         workdir,
         remote,
-        redact_remote,
-        &["commit", "-m", "chore: pilot scaffold"],
+        token,
+        redact,
+        &["status", "--porcelain"],
     )
     .await?;
+    if !status.trim().is_empty() {
+        git_in(
+            workdir,
+            remote,
+            token,
+            redact,
+            &["commit", "-m", "chore: pilot scaffold"],
+        )
+        .await?;
+    }
     git_in(
         workdir,
         remote,
-        redact_remote,
+        token,
+        redact,
         &["push", "-u", "origin", SCAFFOLD_BRANCH],
     )
     .await?;
@@ -601,18 +653,21 @@ async fn push_rendered(
     org: &str,
     token: &str,
     redacted_token: &str,
+    base_branch: &str,
 ) -> Result<(), PilotError> {
     let workdir =
         std::env::temp_dir().join(format!("pilot-{repo_name}-{}", Uuid::new_v4().simple()));
-    std::fs::create_dir_all(&workdir).map_err(|e| PilotError::Push(e.to_string()))?;
+    tokio::fs::create_dir_all(&workdir)
+        .await
+        .map_err(|e| PilotError::Push(e.to_string()))?;
     let workdir_clone = workdir.clone();
     let files: Vec<(String, Vec<u8>)> = rendered.to_vec();
     let remote = format!("https://x-access-token:{token}@github.com/{org}/{repo_name}.git");
 
     let result = async {
-        // Order matters: branch off main first (checkout populates main's
-        // tree), then overlay the rendered files, then commit + push.
-        prepare_scaffold_branch(&workdir, &remote, redacted_token).await?;
+        // Order matters: branch off the base first (checkout populates the
+        // base tree), then overlay the rendered files, then commit + push.
+        prepare_scaffold_branch(&workdir, &remote, token, redacted_token, base_branch).await?;
         tokio::task::spawn_blocking(move || -> Result<(), String> {
             for (rel, bytes) in &files {
                 let dest = workdir_clone.join(rel);
@@ -626,7 +681,7 @@ async fn push_rendered(
         .await
         .map_err(|e| PilotError::Push(e.to_string()))?
         .map_err(PilotError::Push)?;
-        commit_and_push_scaffold(&workdir, &remote, redacted_token).await?;
+        commit_and_push_scaffold(&workdir, &remote, token, redacted_token).await?;
         Ok::<(), PilotError>(())
     }
     .await;
@@ -645,7 +700,7 @@ pub async fn provision_pilot_consumer(
     let template_version = template_version.trim().to_owned();
     let github = GithubClient::from_env().await?;
 
-    let repo_url = github.create_repo(&inputs.repo_name).await?;
+    let (repo_url, base_branch) = github.create_repo(&inputs.repo_name).await?;
 
     let with_rollback = async {
         let dir = template_dir()?;
@@ -666,9 +721,12 @@ pub async fn provision_pilot_consumer(
             &github.org,
             &github.token,
             "<redacted>",
+            &base_branch,
         )
         .await?;
-        let pr_url = github.open_pr(&inputs.repo_name, &template_version).await?;
+        let pr_url = github
+            .open_pr(&inputs.repo_name, &template_version, &base_branch)
+            .await?;
         Ok::<(String, usize), PilotError>((pr_url, rendered.len()))
     }
     .await;
@@ -1074,8 +1132,9 @@ mod tests {
     }
 
     /// Regression test for the live `422 ... no history in common` failure:
-    /// the scaffold branch must be cut from the remote `main` tip. Local
+    /// the scaffold branch must be cut from the remote base tip. Local
     /// bare repos only, no network. Skips gracefully when `git` is missing.
+    /// Uses a non-`main` base (`trunk`) to prove nothing hardcodes `main`.
     #[tokio::test]
     async fn pilot_push_shares_history_with_main() {
         use std::process::Command as SyncCommand;
@@ -1101,21 +1160,29 @@ mod tests {
                 String::from_utf8_lossy(&out.stderr)
             );
         }
+        /// Best-effort temp cleanup that also runs on assertion failure.
+        struct Guard {
+            path: std::path::PathBuf,
+        }
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.path);
+            }
+        }
 
+        const BASE: &str = "trunk";
         let base = std::env::temp_dir().join(format!("pilot-test-{}", Uuid::new_v4().simple()));
+        let _guard = Guard { path: base.clone() };
         let origin = base.join("origin.git");
         let seed = base.join("seed");
         let scaffold = base.join("scaffold");
         std::fs::create_dir_all(&seed).unwrap();
 
-        // Simulate create_repo(auto_init=true): remote `main` with one
+        // Simulate create_repo(auto_init=true): remote base with one
         // commit, including a README.md that also exists in the template.
-        SyncCommand::new("git")
-            .args(["init", "--bare", "-b", "main"])
-            .arg(&origin)
-            .output()
-            .unwrap();
-        git(&["init", "-b", "main"], &seed);
+        std::fs::create_dir_all(&origin).unwrap();
+        git(&["init", "--bare", "-b", BASE], &origin);
+        git(&["init", "-b", BASE], &seed);
         git(&["config", "user.email", "t@t"], &seed);
         git(&["config", "user.name", "t"], &seed);
         std::fs::write(seed.join("README.md"), "remote initial\n").unwrap();
@@ -1123,36 +1190,43 @@ mod tests {
         git(&["commit", "-m", "initial"], &seed);
         let remote = origin.display().to_string();
         git(&["remote", "add", "origin", &remote], &seed);
-        git(&["push", "origin", "main"], &seed);
+        git(&["push", "origin", BASE], &seed);
 
         // Production order: prepare branch first, then overlay rendered
         // files (including the colliding README.md), then commit + push.
         std::fs::create_dir_all(&scaffold).unwrap();
-        prepare_scaffold_branch(&scaffold, &remote, "REDACTED")
+        prepare_scaffold_branch(&scaffold, &remote, "DUMMY-TOKEN", "REDACTED", BASE)
             .await
             .unwrap();
         std::fs::write(scaffold.join("README.md"), "scaffold version\n").unwrap();
         std::fs::write(scaffold.join("extra.txt"), "x\n").unwrap();
-        commit_and_push_scaffold(&scaffold, &remote, "REDACTED")
+        commit_and_push_scaffold(&scaffold, &remote, "DUMMY-TOKEN", "REDACTED")
             .await
             .unwrap();
 
-        // Scaffold branch must share history with main ...
+        // Scaffold branch must share history with the base ...
+        let base_ref = format!("{BASE}");
         let ancestor = SyncCommand::new("git")
             .arg("--git-dir")
             .arg(&origin)
-            .args(["merge-base", "--is-ancestor", "main", "pilot-scaffold"])
+            .args([
+                "merge-base",
+                "--is-ancestor",
+                &base_ref,
+                SCAFFOLD_BRANCH,
+            ])
             .output()
             .unwrap();
         assert!(
             ancestor.status.success(),
-            "pilot-scaffold shares no history with main"
+            "{SCAFFOLD_BRANCH} shares no history with {BASE}"
         );
-        // ... and the scaffold content must win over main's tree.
+        // ... and the scaffold content must win over the base tree.
+        let show_ref = format!("{SCAFFOLD_BRANCH}:README.md");
         let readme = SyncCommand::new("git")
             .arg("--git-dir")
             .arg(&origin)
-            .args(["show", "pilot-scaffold:README.md"])
+            .args(["show", &show_ref])
             .output()
             .unwrap();
         assert!(readme.status.success());
@@ -1160,7 +1234,5 @@ mod tests {
             String::from_utf8_lossy(&readme.stdout),
             "scaffold version\n"
         );
-
-        let _ = std::fs::remove_dir_all(&base);
     }
 }
