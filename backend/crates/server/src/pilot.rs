@@ -437,17 +437,31 @@ impl GithubClient {
             .json()
             .await
             .map_err(|e| PilotError::CreateRepo(e.to_string()))?;
-        let html_url = body
-            .get("html_url")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_owned())
-            .ok_or_else(|| PilotError::CreateRepo("missing html_url".to_string()))?;
-        let default_branch = body
-            .get("default_branch")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_owned())
-            .ok_or_else(|| PilotError::CreateRepo("missing default_branch".to_string()))?;
-        Ok((html_url, default_branch))
+        // The repo already exists remotely at this point, but provision only
+        // enters with_rollback (which owns delete_repo) afterwards — so a
+        // parse failure here must clean up the orphan itself.
+        let parsed = (|| {
+            let html_url = body
+                .get("html_url")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| s.to_owned())
+                .ok_or_else(|| "missing html_url".to_string())?;
+            let default_branch = body
+                .get("default_branch")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| s.to_owned())
+                .ok_or_else(|| "missing default_branch".to_string())?;
+            Ok::<(String, String), String>((html_url, default_branch))
+        })();
+        match parsed {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                self.delete_repo(name).await;
+                Err(PilotError::CreateRepo(e))
+            }
+        }
     }
 
     /// Best-effort rollback: deleting the repo must never mask the original error.
@@ -508,27 +522,57 @@ impl GithubClient {
 
 /// Push rendered files as `SCAFFOLD_BRANCH` via the git CLI. The token travels
 /// only in the remote URL of a temp repo; failures redact it before surfacing.
+/// Scrub push secrets from surfaced text. Only the credential material is
+/// replaced — host/org/repo stay visible for diagnostics. Covers three
+/// forms: the `x-access-token:<token>@` URL fragment, the bare token
+/// (truncated/wrapped echoes), and its percent-encoded form.
+fn scrub_push_output(s: &str, token: &str, redact: &str) -> String {
+    if token.is_empty() {
+        return s.to_owned();
+    }
+    let cred = format!("x-access-token:{token}@");
+    let s = s.replace(&cred, &format!("x-access-token:{redact}@"));
+    let s = s.replace(token, redact);
+    let encoded: String =
+        percent_encoding::utf8_percent_encode(token, percent_encoding::NON_ALPHANUMERIC)
+            .to_string();
+    if encoded == token {
+        s
+    } else {
+        s.replace(&encoded, redact)
+    }
+}
+
+/// Base branch names arrive from the GitHub create-repo response; validate
+/// before interpolating into git argv so a hostile/empty value can neither
+/// be parsed as an option nor break ref resolution.
+fn validate_base_branch(name: &str) -> Result<(), PilotError> {
+    let ok = !name.is_empty()
+        && name.len() <= 255
+        && !name.starts_with(['-', '/', '.'])
+        && !name.contains("..")
+        && !name.contains("@{")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-'));
+    if ok {
+        Ok(())
+    } else {
+        Err(PilotError::Push(format!("invalid base branch: {name}")))
+    }
+}
+
 /// Run one git command inside `workdir`, scrubbing secrets from any
-/// surfaced command/error/output text. Both the full push URL and the bare
-/// token are scrubbed: git may echo either form (truncated, wrapped, or
-/// URL-encoded fragments), and any leak would travel with `PilotError::Push`.
+/// surfaced command/error/output text (see [`scrub_push_output`]).
 async fn git_in(
     workdir: &std::path::Path,
-    remote: &str,
     token: &str,
     redact: &str,
     args: &[&str],
 ) -> Result<String, PilotError> {
-    let scrub = |s: &str| {
-        let s = s.replace(remote, redact);
-        if token.is_empty() {
-            s
-        } else {
-            s.replace(token, redact)
-        }
-    };
     // The `remote add` args embed the token URL, so the echoed command
-    // itself must be redacted, not just git's output.
+    // itself must be scrubbed, not just git's output.
+    let scrub = |s: &str| scrub_push_output(s, token, redact);
     let cmd = scrub(&args.join(" "));
     let out = tokio::process::Command::new("git")
         .args(args)
@@ -559,10 +603,10 @@ async fn prepare_scaffold_branch(
     redact: &str,
     base_branch: &str,
 ) -> Result<(), PilotError> {
-    git_in(workdir, remote, token, redact, &["init", "-b", SCAFFOLD_BRANCH]).await?;
+    validate_base_branch(base_branch)?;
+    git_in(workdir, token, redact, &["init", "-b", SCAFFOLD_BRANCH]).await?;
     git_in(
         workdir,
-        remote,
         token,
         redact,
         &["config", "user.email", "pilot-generator@eap.local"],
@@ -570,7 +614,6 @@ async fn prepare_scaffold_branch(
     .await?;
     git_in(
         workdir,
-        remote,
         token,
         redact,
         &["config", "user.name", "eap-pilot-generator"],
@@ -578,7 +621,6 @@ async fn prepare_scaffold_branch(
     .await?;
     git_in(
         workdir,
-        remote,
         token,
         redact,
         &["remote", "add", "origin", remote],
@@ -586,22 +628,21 @@ async fn prepare_scaffold_branch(
     .await?;
     git_in(
         workdir,
-        remote,
         token,
         redact,
-        &["fetch", "origin", base_branch],
+        &["fetch", "origin", "--", base_branch],
     )
     .await?;
-    // Cut the scaffold branch from the base tip so the follow-up open_pr has
-    // common history; without this it fails with
-    // `422 ... no history in common`.
-    let base_ref = format!("origin/{base_branch}");
+    // Cut the scaffold branch from the just-fetched tip via FETCH_HEAD: a
+    // bare `fetch origin <base>` only guarantees FETCH_HEAD, not an
+    // `origin/<base>` tracking ref on every git version/config, so
+    // `checkout origin/<base>` could fail with unknown revision.
+    // (FETCH_HEAD is a fixed rev, not user input — no `--` needed here.)
     git_in(
         workdir,
-        remote,
         token,
         redact,
-        &["checkout", "-B", SCAFFOLD_BRANCH, &base_ref],
+        &["checkout", "-B", SCAFFOLD_BRANCH, "FETCH_HEAD"],
     )
     .await?;
     Ok(())
@@ -613,23 +654,14 @@ async fn prepare_scaffold_branch(
 /// ensures the branch exists remotely and open_pr reports the real outcome.
 async fn commit_and_push_scaffold(
     workdir: &std::path::Path,
-    remote: &str,
     token: &str,
     redact: &str,
 ) -> Result<(), PilotError> {
-    git_in(workdir, remote, token, redact, &["add", "-A"]).await?;
-    let status = git_in(
-        workdir,
-        remote,
-        token,
-        redact,
-        &["status", "--porcelain"],
-    )
-    .await?;
+    git_in(workdir, token, redact, &["add", "-A"]).await?;
+    let status = git_in(workdir, token, redact, &["status", "--porcelain"]).await?;
     if !status.trim().is_empty() {
         git_in(
             workdir,
-            remote,
             token,
             redact,
             &["commit", "-m", "chore: pilot scaffold"],
@@ -638,7 +670,6 @@ async fn commit_and_push_scaffold(
     }
     git_in(
         workdir,
-        remote,
         token,
         redact,
         &["push", "-u", "origin", SCAFFOLD_BRANCH],
@@ -681,7 +712,7 @@ async fn push_rendered(
         .await
         .map_err(|e| PilotError::Push(e.to_string()))?
         .map_err(PilotError::Push)?;
-        commit_and_push_scaffold(&workdir, &remote, token, redacted_token).await?;
+        commit_and_push_scaffold(&workdir, token, redacted_token).await?;
         Ok::<(), PilotError>(())
     }
     .await;
@@ -1131,6 +1162,37 @@ mod tests {
         server.await.unwrap();
     }
 
+    #[test]
+    fn pilot_scrub_redacts_credential_forms() {
+        // Token with a char that percent-encoding transforms ('_').
+        let token = "ghi_安装令牌_xyz";
+        let url = format!("https://x-access-token:{token}@github.com/link-seek/pilot-consumer-gen.git");
+        let text = format!(
+            "fatal: unable to access '{url}': git said '{token}' then '{enc}'",
+            enc = percent_encoding::utf8_percent_encode(
+                token,
+                percent_encoding::NON_ALPHANUMERIC
+            )
+        );
+        let scrubbed = scrub_push_output(&text, token, "<redacted>");
+        assert!(!scrubbed.contains(token), "bare token leaked: {scrubbed}");
+        assert!(
+            scrubbed.contains("x-access-token:<redacted>@"),
+            "credential not redacted in place: {scrubbed}"
+        );
+        // Diagnostics must survive: host/org/repo stay visible.
+        for keep in ["github.com", "link-seek", "pilot-consumer-gen"] {
+            assert!(scrubbed.contains(keep), "lost diagnostics: {scrubbed}");
+        }
+        // Empty token must not nuke the whole string.
+        assert_eq!(scrub_push_output("abc", "", "<redacted>"), "abc");
+        // Bad branch names are rejected before reaching git argv.
+        assert!(validate_base_branch("main").is_ok());
+        assert!(validate_base_branch("").is_err());
+        assert!(validate_base_branch("-f").is_err());
+        assert!(validate_base_branch("a..b").is_err());
+    }
+
     /// Regression test for the live `422 ... no history in common` failure:
     /// the scaffold branch must be cut from the remote base tip. Local
     /// bare repos only, no network. Skips gracefully when `git` is missing.
@@ -1200,7 +1262,7 @@ mod tests {
             .unwrap();
         std::fs::write(scaffold.join("README.md"), "scaffold version\n").unwrap();
         std::fs::write(scaffold.join("extra.txt"), "x\n").unwrap();
-        commit_and_push_scaffold(&scaffold, &remote, "DUMMY-TOKEN", "REDACTED")
+        commit_and_push_scaffold(&scaffold, "DUMMY-TOKEN", "REDACTED")
             .await
             .unwrap();
 
