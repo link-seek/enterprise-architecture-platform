@@ -32,7 +32,7 @@ jobs:
     if: |
       github.event_name == 'issues' &&
       github.event.label.name == 'deploy-broken'
-    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@v1.0.20-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@v1.0.21-pilot
     with:
       deploy-broken-issue: ${{ github.event.issue.number }}
       issue-repo: link-seek/enterprise-architecture-platform
@@ -74,7 +74,7 @@ jobs:
   deploy:
     needs: resolve-tag
     if: needs.resolve-tag.outputs.tag != ''
-    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@v1.0.20-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@v1.0.21-pilot
     with:
       image-tag: ${{ needs.resolve-tag.outputs.tag }}
       runner-label: eap-prod
