@@ -1,11 +1,14 @@
-import { useQuery } from '@apollo/client/react'
+import { useQuery, useMutation } from '@apollo/client/react'
 import { gql } from '@apollo/client'
 import { useParams, Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ArrowLeft, Plus, Pencil, Trash2, Link2 } from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { ArrowLeft, Plus, Pencil, Trash2, Link2, Rocket } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { StageCrudDialog, StageDeleteDialog, StageCapabilitiesCell, StageCapabilityDialog, type ValueStreamStage } from './value-stream-stages'
@@ -14,6 +17,7 @@ export const GET_VALUE_STREAM_DETAIL = gql`
   query GetValueStreamDetail($spaceId: String!, $id: String!) {
     valueStreamById(spaceId: $spaceId, id: $id) {
       id
+      logicalId
       name
       description
       businessVersion
@@ -70,6 +74,7 @@ interface ValueStreamRun {
 interface ValueStreamDetailQuery {
   valueStreamById: {
     id: string
+    logicalId: string
     name: string
     description: string
     businessVersion: string
@@ -88,6 +93,24 @@ interface ValueStreamDetailQuery {
 
 interface ValueStreamRunsQuery {
   valueStreamRunsByValueStream: ValueStreamRun[]
+}
+
+const VALUE_STREAM_PUBLISH = gql`
+  mutation ValueStreamPublish($logicalId: String!, $templateVersion: String!) {
+    valueStreamPublish(logicalId: $logicalId, templateVersion: $templateVersion) {
+      runId
+      status
+      repoUrl
+      prUrl
+    }
+  }
+`
+
+interface ValueStreamPublishResult {
+  runId: string
+  status: string
+  repoUrl: string
+  prUrl: string
 }
 
 export default function ValueStreamDetail() {
@@ -110,6 +133,7 @@ export default function ValueStreamDetail() {
   const [editingStage, setEditingStage] = useState<ValueStreamStage | null>(null)
   const [deletingStage, setDeletingStage] = useState<ValueStreamStage | null>(null)
   const [capabilityStage, setCapabilityStage] = useState<ValueStreamStage | null>(null)
+  const [publishOpen, setPublishOpen] = useState(false)
 
   const vs = data?.valueStreamById
   const stages = useMemo(
@@ -290,9 +314,23 @@ export default function ValueStreamDetail() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>运行实例</CardTitle>
-                {runs.filter((r) => r.status === 'live').length > 0 && (
-                  <Badge>live {runs.filter((r) => r.status === 'live').length}</Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  {runs.filter((r) => r.status === 'live').length > 0 && (
+                    <Badge>live {runs.filter((r) => r.status === 'live').length}</Badge>
+                  )}
+                  {vs && vs.status === 'active' && isEntityOwner(vs.ownerId) && id && spaceId && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPublishOpen(true)}
+                      aria-label="发布上线"
+                      title="发布上线：创建运行实例并开通消费仓"
+                    >
+                      <Rocket className="h-4 w-4 mr-2" />
+                      发布上线
+                    </Button>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -353,10 +391,98 @@ export default function ValueStreamDetail() {
                 open={!!capabilityStage}
                 onOpenChange={(v) => { if (!v) setCapabilityStage(null) }}
               />
+              {vs && (
+                <PublishDialog
+                  open={publishOpen}
+                  onOpenChange={setPublishOpen}
+                  valueStreamId={id}
+                  logicalId={vs.logicalId}
+                  name={vs.name}
+                  businessVersion={vs.businessVersion}
+                />
+              )}
             </>
           )}
         </>
       )}
     </div>
+  )
+}
+
+function PublishDialog({ open, onOpenChange, valueStreamId, logicalId, name, businessVersion }: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  valueStreamId: string
+  logicalId: string
+  name: string
+  businessVersion: string
+}) {
+  const [templateVersion, setTemplateVersion] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<ValueStreamPublishResult | null>(null)
+  const [publishMut] = useMutation<{ valueStreamPublish?: ValueStreamPublishResult }>(VALUE_STREAM_PUBLISH)
+
+  async function handlePublish() {
+    if (!templateVersion.trim()) {
+      setError('请填写模板版本')
+      return
+    }
+    setLoading(true); setError(null)
+    try {
+      const res = await publishMut({
+        variables: { logicalId, templateVersion: templateVersion.trim() },
+        refetchQueries: [{ query: GET_VALUE_STREAM_RUNS, variables: { valueStreamId } }],
+      })
+      const out = res.data?.valueStreamPublish
+      if (!out) throw new Error('发布无返回')
+      setDone(out)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '发布失败')
+    } finally { setLoading(false) }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { setError(null); setDone(null) } onOpenChange(v) }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>发布上线</DialogTitle></DialogHeader>
+        <div className="space-y-4 py-4 text-sm">
+          {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
+          {done === null ? (
+            <>
+              <p className="text-muted-foreground">
+                将为价值流「{name}」（当前版本 <span className="font-mono">{businessVersion}</span>）创建运行实例并开通消费仓。
+                同一价值流重复发布会直接返回已有的 live 运行；同空间已有 live 消费仓时将复用，不重复建仓。
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="vs-publish-template">模板版本</Label>
+                <Input
+                  id="vs-publish-template"
+                  placeholder="如 v1.0.0-pilot"
+                  value={templateVersion}
+                  onChange={(e) => setTemplateVersion(e.target.value)}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="font-medium">发布成功，运行实例已上线：</p>
+              <ul className="space-y-1 text-sm">
+                <li>状态 <Badge>{done.status}</Badge></li>
+                <li className="font-mono text-xs break-all">仓库 {done.repoUrl || '-'}</li>
+                {done.prUrl && <li className="font-mono text-xs break-all">PR {done.prUrl}</li>}
+              </ul>
+            </>
+          )}
+        </div>
+        <DialogFooter>
+          {done === null && (
+            <Button onClick={handlePublish} disabled={loading}>
+              {loading ? '发布中...' : '确认发布'}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
