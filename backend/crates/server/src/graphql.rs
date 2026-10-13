@@ -1004,7 +1004,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
         |ctx| {
             FieldFuture::new(async move {
                 use sea_orm::ActiveValue::Set;
-                use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
+                use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ExprTrait, QueryFilter};
 
                 check_value_stream_auth(&ctx, OperationType::Create)?;
                 let db = ctx.data::<DatabaseConnection>()?;
