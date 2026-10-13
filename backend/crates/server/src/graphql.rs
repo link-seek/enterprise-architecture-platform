@@ -1013,6 +1013,11 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 if template_version.is_empty() {
                     return Err(async_graphql::Error::new("templateVersion must not be empty."));
                 }
+                if template_version.len() > 128 {
+                    return Err(async_graphql::Error::new(
+                        "templateVersion too long (max 128 chars).",
+                    ));
+                }
 
                 let repo = SeaOrmValueStreamRepo::new(db.clone());
                 let active = repo
@@ -1026,6 +1031,29 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 // Serialize same-space publishes end-to-end (space-scoped
                 // repo names). Guard held until the resolver returns.
                 let _space_guard = lock_space_publish(active.space_id).await;
+
+                // Reclaim stale provisioning rows: a crashed/timed-out attempt
+                // holds the unique slot otherwise, and retries would stall on
+                // the orphan instead of progressing. Older than 30 minutes.
+                let cutoff = chrono::Utc::now() - chrono::Duration::minutes(30);
+                let stale_rows = value_stream_run::Entity::find()
+                    .filter(value_stream_run::Column::ValueStreamId.eq(active.id))
+                    .filter(
+                        value_stream_run::Column::Status
+                            .eq(ValueStreamRunStatus::Provisioning),
+                    )
+                    .filter(value_stream_run::Column::UpdatedAt.lt(cutoff))
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                for stale in stale_rows {
+                    let mut am: value_stream_run::ActiveModel = stale.into();
+                    am.status = Set(ValueStreamRunStatus::Archived);
+                    am.snapshot_json =
+                        Set(Some(snapshot("provision-timeout-reclaim")));
+                    am.updated_at = Set(chrono::Utc::now());
+                    am.update(db).await.map_err(db_err_to_graphql)?;
+                }
 
                 let now = chrono::Utc::now();
                 let snapshot = |mode: &str| {
@@ -1185,7 +1213,8 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                             // Compensate: don't leave a provisioning orphan
                             // holding the unique slot behind an unlinked repo.
                             // Lookup/archive failures here are logged, never
-                            // swallowed into a fake success.
+                            // swallowed into a fake success. The created repo
+                            // is deleted too, otherwise it would orphan.
                             Err(update_err) => {
                                 match value_stream_run::Entity::find_by_id(run_id)
                                     .one(db)
@@ -1212,6 +1241,11 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                                                 "publish compensation archive failed for run {run_id}: {comp_err}"
                                             );
                                         }
+                                        crate::pilot::delete_pilot_repo(
+                                            active.space_id,
+                                            &template_version,
+                                        )
+                                        .await;
                                     }
                                     Ok(None) => {
                                         tracing::warn!(
@@ -1228,42 +1262,51 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                             }
                         }
                     }
-                    Err(e) => {
-                        // Repo name taken (422) while a sibling went live
-                        // underneath us: link to the winner instead of
-                        // archiving with a misleading failure.
-                        let msg = e.to_string();
-                        if msg.contains("422") && !vs_ids.is_empty() {
-                            if let Some(space_live) = value_stream_run::Entity::find()
-                                .filter(
-                                    value_stream_run::Column::ValueStreamId.is_in(vs_ids),
-                                )
-                                .filter(
-                                    value_stream_run::Column::Status
-                                        .eq(ValueStreamRunStatus::Live),
-                                )
-                                .one(db)
-                                .await
-                                .map_err(db_err_to_graphql)?
-                            {
-                                let mut am: value_stream_run::ActiveModel = run.into();
-                                am.status = Set(ValueStreamRunStatus::Archived);
-                                am.snapshot_json =
-                                    Set(Some(snapshot("superseded-by-space-repo")));
-                                am.updated_at = Set(chrono::Utc::now());
-                                am.update(db).await.map_err(db_err_to_graphql)?;
-                                let out = link_space_repo(
-                                    db,
-                                    active.id,
-                                    space_live.repo_url.clone(),
-                                    space_live.chain_path.clone(),
-                                    space_live.pinned_versions.clone(),
-                                    snapshot("reused-space-repo"),
-                                )
-                                .await?;
-                                return Ok(Some(FieldValue::owned_any(out)));
-                            }
+                    Err(crate::pilot::PilotError::RepoExists(_)) if !vs_ids.is_empty() => {
+                        // Name taken: a sibling won the race for this
+                        // space-scoped repo. Link to the winner when live;
+                        // otherwise report busy (retry links automatically).
+                        if let Some(space_live) = value_stream_run::Entity::find()
+                            .filter(
+                                value_stream_run::Column::ValueStreamId.is_in(vs_ids),
+                            )
+                            .filter(
+                                value_stream_run::Column::Status
+                                    .eq(ValueStreamRunStatus::Live),
+                            )
+                            .one(db)
+                            .await
+                            .map_err(db_err_to_graphql)?
+                        {
+                            let mut am: value_stream_run::ActiveModel = run.into();
+                            am.status = Set(ValueStreamRunStatus::Archived);
+                            am.snapshot_json =
+                                Set(Some(snapshot("superseded-by-space-repo")));
+                            am.updated_at = Set(chrono::Utc::now());
+                            am.update(db).await.map_err(db_err_to_graphql)?;
+                            let out = link_space_repo(
+                                db,
+                                active.id,
+                                space_live.repo_url.clone(),
+                                space_live.chain_path.clone(),
+                                space_live.pinned_versions.clone(),
+                                snapshot("reused-space-repo"),
+                            )
+                            .await?;
+                            return Ok(Some(FieldValue::owned_any(out)));
                         }
+                        let mut am: value_stream_run::ActiveModel = run.into();
+                        am.status = Set(ValueStreamRunStatus::Archived);
+                        am.snapshot_json =
+                            Set(Some(snapshot("repo-name-taken-provisioning")));
+                        am.updated_at = Set(chrono::Utc::now());
+                        am.update(db).await.map_err(db_err_to_graphql)?;
+                        return Err(async_graphql::Error::new(
+                            "Consumer repo is being provisioned by a concurrent publish; retry to link it automatically.",
+                        ));
+                    }
+                    Err(e) => {
+                        let msg = e.to_string();
                         let mut am: value_stream_run::ActiveModel = run.into();
                         am.status = Set(ValueStreamRunStatus::Archived);
                         am.snapshot_json = Set(Some(
@@ -1277,7 +1320,13 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                             .to_string(),
                         ));
                         am.updated_at = Set(chrono::Utc::now());
-                        am.update(db).await.map_err(db_err_to_graphql)?;
+                        // Archive failure must not mask the original
+                        // provisioning error: warn and still report it.
+                        if let Err(archive_err) = am.update(db).await {
+                            tracing::warn!(
+                                "publish failure-archive failed: {archive_err}"
+                            );
+                        }
                         Err(async_graphql::Error::new(format!(
                             "Provisioning failed: {msg}. \
                              If the space repo already exists, retry publishing to link it."
@@ -1523,7 +1572,14 @@ fn run_to_output(
         run_id: run.id.to_string(),
         status: status.to_owned(),
         repo_url: run.repo_url.clone(),
-        pr_url: pr_url.to_owned(),
+        // Fresh provisions pass the PR link; reuse paths persist it in
+        // `chain_path`, so fall back to the stored value for a consistent
+        // `prUrl` contract instead of dropping it.
+        pr_url: if pr_url.is_empty() {
+            run.chain_path.clone()
+        } else {
+            pr_url.to_owned()
+        },
         reused: reused && run.status == ValueStreamRunStatus::Live,
         template_version: run_template_of(run),
     }

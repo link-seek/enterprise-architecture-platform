@@ -72,6 +72,8 @@ pub enum PilotError {
     GithubAuth(String),
     #[error("create repo failed: {0}")]
     CreateRepo(String),
+    #[error("repo already exists: {0}")]
+    RepoExists(String),
     #[error("render failed: {0}")]
     Render(String),
     #[error("push failed: {0}")]
@@ -464,6 +466,12 @@ impl GithubClient {
             let status = res.status();
             let body = res.text().await.unwrap_or_default();
             let body: String = body.chars().take(500).collect();
+            // Name taken (typically a sibling publish won the race for this
+            // space-scoped repo): surface structurally so callers can link
+            // instead of string-sniffing the formatted message.
+            if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
+                return Err(PilotError::RepoExists(name.to_owned()));
+            }
             return Err(PilotError::CreateRepo(format!("{status}: {body}")));
         }
         let body: serde_json::Value = res
@@ -983,6 +991,27 @@ fn validate_base_branch(name: &str) -> Result<(), PilotError> {
     } else {
         Err(PilotError::Push(format!("invalid base branch: {name}")))
     }
+}
+
+/// Best-effort deletion of a pilot consumer repo (publish compensation).
+/// Resolves the same space-scoped name as provisioning; API failures only
+/// warn (same policy as the in-flow rollback) and never error.
+pub async fn delete_pilot_repo(space_id: Uuid, template_version: &str) {
+    let inputs = match resolve_inputs(space_id, template_version) {
+        Ok(inputs) => inputs,
+        Err(e) => {
+            tracing::warn!("pilot compensation delete skipped (bad inputs): {e}");
+            return;
+        }
+    };
+    let github = match GithubClient::from_env().await {
+        Ok(github) => github,
+        Err(e) => {
+            tracing::warn!("pilot compensation delete skipped (no creds): {e}");
+            return;
+        }
+    };
+    github.delete_repo(&inputs.repo_name).await;
 }
 
 /// Minimal closed loop: create repo -> render -> push -> open PR.
