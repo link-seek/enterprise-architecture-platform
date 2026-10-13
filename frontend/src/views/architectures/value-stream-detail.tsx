@@ -474,6 +474,14 @@ function PublishDialog({ open, onOpenChange, valueStreamId, logicalId, name, bus
                 />
               </div>
             </>
+          ) : done.status !== 'live' ? (
+            <>
+              <p className="font-medium">发布处理中（{done.status}），请稍后刷新运行实例列表：</p>
+              <ul className="space-y-1 text-sm">
+                {done.templateVersion && <li>模板版本 <span className="font-mono text-xs">{done.templateVersion}</span></li>}
+                <li className="font-mono text-xs break-all">仓库 {done.repoUrl || '-'}</li>
+              </ul>
+            </>
           ) : (
             <>
               <p className="font-medium">

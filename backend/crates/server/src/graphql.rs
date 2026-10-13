@@ -1004,13 +1004,13 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
         |ctx| {
             FieldFuture::new(async move {
                 use sea_orm::ActiveValue::Set;
-                use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ExprTrait, QueryFilter};
+                use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 
                 check_value_stream_auth(&ctx, OperationType::Create)?;
                 let db = ctx.data::<DatabaseConnection>()?;
                 let logical_id = parse_uuid_arg(&ctx, "logicalId")?;
-                let template_version = ctx.args.try_get("templateVersion")?.string()?.to_owned();
-                if template_version.trim().is_empty() {
+                let template_version = ctx.args.try_get("templateVersion")?.string()?.trim().to_owned();
+                if template_version.is_empty() {
                     return Err(async_graphql::Error::new("templateVersion must not be empty."));
                 }
 
@@ -1033,26 +1033,6 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     })
                     .to_string()
                 };
-                // `pinned_template_of` reads back the template recorded at
-                // provision time so reuse responses report the effective
-                // version instead of silently echoing the requested one.
-                let pinned_template_of = |run: &value_stream_run::Model| {
-                    run.pinned_versions
-                        .0
-                        .get("template")
-                        .cloned()
-                        .unwrap_or_default()
-                };
-                let to_output = |run: &value_stream_run::Model, pr_url: &str, reused: bool| {
-                    ValueStreamPublishOutput {
-                        run_id: run.id.to_string(),
-                        status: format!("{:?}", run.status).to_lowercase(),
-                        repo_url: run.repo_url.clone(),
-                        pr_url: pr_url.to_owned(),
-                        reused,
-                        template_version: pinned_template_of(run),
-                    }
-                };
 
                 // 1. Live run for this logical version → return as-is.
                 if let Some(live) = value_stream_run::Entity::find()
@@ -1062,10 +1042,12 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     .await
                     .map_err(db_err_to_graphql)?
                 {
-                    return Ok(Some(FieldValue::owned_any(to_output(&live, "", true))));
+                    return Ok(Some(FieldValue::owned_any(run_to_output(&live, "", true))));
                 }
 
-                // 2. Space already has a live consumer repo → link, don't rebuild.
+                // Space scope for the double-checked link below: pilot repo
+                // names are space-scoped (`pilot-{space}`), so at most one
+                // consumer repo exists per space.
                 let vs_ids: Vec<Uuid> = value_stream::Entity::find()
                     .filter(value_stream::Column::SpaceId.eq(active.space_id))
                     .filter(value_stream::Column::DeletedAt.is_null())
@@ -1075,29 +1057,25 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     .into_iter()
                     .map(|v| v.id)
                     .collect();
+                // 2. Space already has a live consumer repo → link, don't rebuild.
                 if !vs_ids.is_empty() {
                     if let Some(space_live) = value_stream_run::Entity::find()
-                        .filter(value_stream_run::Column::ValueStreamId.is_in(vs_ids))
+                        .filter(value_stream_run::Column::ValueStreamId.is_in(vs_ids.clone()))
                         .filter(value_stream_run::Column::Status.eq(ValueStreamRunStatus::Live))
                         .one(db)
                         .await
                         .map_err(db_err_to_graphql)?
                     {
-                        let run = value_stream_run::ActiveModel {
-                            id: Set(Uuid::now_v7()),
-                            value_stream_id: Set(active.id),
-                            repo_url: Set(space_live.repo_url.clone()),
-                            chain_path: Set(space_live.chain_path.clone()),
-                            status: Set(ValueStreamRunStatus::Live),
-                            pinned_versions: Set(space_live.pinned_versions.clone()),
-                            snapshot_json: Set(Some(snapshot("reused-space-repo"))),
-                            created_at: Set(now),
-                            updated_at: Set(now),
-                        }
-                        .insert(db)
-                        .await
-                        .map_err(db_err_to_graphql)?;
-                        return Ok(Some(FieldValue::owned_any(to_output(&run, "", true))));
+                        let out = link_space_repo(
+                            db,
+                            active.id,
+                            space_live.repo_url.clone(),
+                            space_live.chain_path.clone(),
+                            space_live.pinned_versions.clone(),
+                            snapshot("reused-space-repo"),
+                        )
+                        .await?;
+                        return Ok(Some(FieldValue::owned_any(out)));
                     }
                 }
 
@@ -1120,29 +1098,60 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 .await;
                 let run = match inserted {
                     Ok(run) => run,
-                    Err(_) => {
-                        if let Some(winner) = value_stream_run::Entity::find()
-                            .filter(value_stream_run::Column::ValueStreamId.eq(active.id))
-                            .filter(
-                                value_stream_run::Column::Status
-                                    .eq(ValueStreamRunStatus::Provisioning)
-                                    .or(value_stream_run::Column::Status
-                                        .eq(ValueStreamRunStatus::Live)),
-                            )
-                            .one(db)
-                            .await
-                            .map_err(db_err_to_graphql)?
-                        {
-                            return Ok(Some(FieldValue::owned_any(to_output(&winner, "", true))));
+                    // Unique violation = lost race: return the winner's row.
+                    // Any other DB error is real (connection/disk/...) and
+                    // must surface, never be mistaken for a race.
+                    Err(e) if is_unique_violation(&e) => {
+                        match find_open_run(db, active.id).await.map_err(db_err_to_graphql)? {
+                            Some(winner) => {
+                                return Ok(Some(FieldValue::owned_any(run_to_output(
+                                    &winner, "", true,
+                                ))))
+                            }
+                            None => {
+                                return Err(async_graphql::Error::new(
+                                    "Failed to create publish run; please retry.",
+                                ))
+                            }
                         }
-                        return Err(async_graphql::Error::new(
-                            "Failed to create publish run; please retry.",
-                        ));
                     }
+                    Err(e) => return Err(db_err_to_graphql(e)),
                 };
+
+                // 4. Double-checked space link: a sibling version may have
+                // gone live between our checks and our insert (same
+                // space-scoped repo name). Supersede our provisioning row and
+                // link instead of provisioning a duplicate repo.
+                if !vs_ids.is_empty() {
+                    if let Some(space_live) = value_stream_run::Entity::find()
+                        .filter(value_stream_run::Column::ValueStreamId.is_in(vs_ids.clone()))
+                        .filter(value_stream_run::Column::Status.eq(ValueStreamRunStatus::Live))
+                        .one(db)
+                        .await
+                        .map_err(db_err_to_graphql)?
+                    {
+                        let mut am: value_stream_run::ActiveModel = run.into();
+                        am.status = Set(ValueStreamRunStatus::Archived);
+                        am.snapshot_json =
+                            Set(Some(snapshot("superseded-by-space-repo")));
+                        am.updated_at = Set(chrono::Utc::now());
+                        am.update(db).await.map_err(db_err_to_graphql)?;
+                        let out = link_space_repo(
+                            db,
+                            active.id,
+                            space_live.repo_url.clone(),
+                            space_live.chain_path.clone(),
+                            space_live.pinned_versions.clone(),
+                            snapshot("reused-space-repo"),
+                        )
+                        .await?;
+                        return Ok(Some(FieldValue::owned_any(out)));
+                    }
+                }
 
                 match crate::pilot::provision_pilot_consumer(active.space_id, &template_version).await {
                     Ok(outcome) => {
+                        let run_id = run.id;
                         let mut pinned = std::collections::HashMap::new();
                         pinned.insert("template".to_owned(), outcome.template_version.clone());
                         let mut am: value_stream_run::ActiveModel = run.into();
@@ -1163,10 +1172,77 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                             .to_string(),
                         ));
                         am.updated_at = Set(chrono::Utc::now());
-                        let run = am.update(db).await.map_err(db_err_to_graphql)?;
-                        Ok(Some(FieldValue::owned_any(to_output(&run, &outcome.pr_url, false))))
+                        match am.update(db).await {
+                            Ok(run) => Ok(Some(FieldValue::owned_any(run_to_output(
+                                &run,
+                                &outcome.pr_url,
+                                false,
+                            )))),
+                            // Compensate: don't leave a provisioning orphan
+                            // holding the unique slot behind an unlinked repo.
+                            Err(update_err) => {
+                                if let Some(orphan) =
+                                    value_stream_run::Entity::find_by_id(run_id)
+                                        .await
+                                        .unwrap_or(None)
+                                {
+                                    let mut am2: value_stream_run::ActiveModel =
+                                        orphan.into();
+                                    am2.status = Set(ValueStreamRunStatus::Archived);
+                                    am2.snapshot_json = Set(Some(
+                                        serde_json::json!({
+                                            "logicalId": logical_id.to_string(),
+                                            "businessVersion": active.business_version.clone(),
+                                            "templateVersion": outcome.template_version.clone(),
+                                            "repoUrl": outcome.repo_url.clone(),
+                                            "mode": "update-failed",
+                                            "error": update_err.to_string(),
+                                        })
+                                        .to_string(),
+                                    ));
+                                    am2.updated_at = Set(chrono::Utc::now());
+                                    let _ = am2.update(db).await;
+                                }
+                                Err(db_err_to_graphql(update_err))
+                            }
+                        }
                     }
                     Err(e) => {
+                        // Repo name taken (422) while a sibling went live
+                        // underneath us: link to the winner instead of
+                        // archiving with a misleading failure.
+                        let msg = e.to_string();
+                        if msg.contains("422") && !vs_ids.is_empty() {
+                            if let Some(space_live) = value_stream_run::Entity::find()
+                                .filter(
+                                    value_stream_run::Column::ValueStreamId.is_in(vs_ids),
+                                )
+                                .filter(
+                                    value_stream_run::Column::Status
+                                        .eq(ValueStreamRunStatus::Live),
+                                )
+                                .one(db)
+                                .await
+                                .map_err(db_err_to_graphql)?
+                            {
+                                let mut am: value_stream_run::ActiveModel = run.into();
+                                am.status = Set(ValueStreamRunStatus::Archived);
+                                am.snapshot_json =
+                                    Set(Some(snapshot("superseded-by-space-repo")));
+                                am.updated_at = Set(chrono::Utc::now());
+                                am.update(db).await.map_err(db_err_to_graphql)?;
+                                let out = link_space_repo(
+                                    db,
+                                    active.id,
+                                    space_live.repo_url.clone(),
+                                    space_live.chain_path.clone(),
+                                    space_live.pinned_versions.clone(),
+                                    snapshot("reused-space-repo"),
+                                )
+                                .await?;
+                                return Ok(Some(FieldValue::owned_any(out)));
+                            }
+                        }
                         let mut am: value_stream_run::ActiveModel = run.into();
                         am.status = Set(ValueStreamRunStatus::Archived);
                         am.snapshot_json = Set(Some(
@@ -1175,13 +1251,16 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                                 "businessVersion": active.business_version.clone(),
                                 "templateVersion": template_version,
                                 "mode": "provision-failed",
-                                "error": e.to_string(),
+                                "error": msg.clone(),
                             })
                             .to_string(),
                         ));
                         am.updated_at = Set(chrono::Utc::now());
                         am.update(db).await.map_err(db_err_to_graphql)?;
-                        Err(async_graphql::Error::new(format!("Provisioning failed: {e}")))
+                        Err(async_graphql::Error::new(format!(
+                            "Provisioning failed: {msg}. \
+                             If the space repo already exists, retry publishing to link it."
+                        )))
                     }
                 }
             })
@@ -1328,6 +1407,107 @@ fn db_err_to_graphql(e: impl std::fmt::Display) -> async_graphql::Error {
     async_graphql::Error::new("Internal server error").extend_with(|_err, extensions| {
         extensions.set("code", "INTERNAL_ERROR".to_owned());
     })
+}
+
+/// True when a DB error is a unique-constraint violation (lost publish race).
+/// Backend here is SQLite-only: unique failures surface as
+/// "UNIQUE constraint failed: ...".
+fn is_unique_violation(e: &sea_orm::DbErr) -> bool {
+    e.to_string().contains("UNIQUE constraint failed")
+}
+
+/// Newest open run for a value stream version, if any. Used for idempotency
+/// reads and lost-race fallbacks (the partial unique index guarantees at
+/// most one such row going forward; legacy dupes resolve deterministically).
+async fn find_open_run(
+    db: &DatabaseConnection,
+    version_id: Uuid,
+) -> Result<Option<value_stream_run::Model>, sea_orm::DbErr> {
+    use sea_orm::{ColumnTrait, EntityTrait, ExprTrait, QueryFilter, QueryOrder};
+    value_stream_run::Entity::find()
+        .filter(value_stream_run::Column::ValueStreamId.eq(version_id))
+        .filter(
+            value_stream_run::Column::Status
+                .eq(ValueStreamRunStatus::Live)
+                .or(value_stream_run::Column::Status.eq(ValueStreamRunStatus::Provisioning)),
+        )
+        .order_by_desc(value_stream_run::Column::CreatedAt)
+        .one(db)
+        .await
+}
+
+/// Effective template recorded on a run row (`pinned_versions.template`,
+/// written at provision time). Empty when the row predates template pinning.
+fn run_template_of(run: &value_stream_run::Model) -> String {
+    run.pinned_versions
+        .0
+        .get("template")
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Render a run row as a `ValueStreamPublishResult`. `reused` is true only
+/// for live rows that already existed (idempotent reuse); a still-
+/// `provisioning` row is returned with `reused=false` so the UI shows
+/// "in progress, poll later" instead of a misleading reuse message.
+/// Status strings are matched explicitly (never `Debug` formatting) so the
+/// GraphQL contract can't silently drift with enum refactors.
+fn run_to_output(
+    run: &value_stream_run::Model,
+    pr_url: &str,
+    reused: bool,
+) -> ValueStreamPublishOutput {
+    let status = match run.status {
+        ValueStreamRunStatus::Live => "live",
+        ValueStreamRunStatus::Provisioning => "provisioning",
+        ValueStreamRunStatus::Defined => "defined",
+        ValueStreamRunStatus::Archived => "archived",
+    };
+    ValueStreamPublishOutput {
+        run_id: run.id.to_string(),
+        status: status.to_owned(),
+        repo_url: run.repo_url.clone(),
+        pr_url: pr_url.to_owned(),
+        reused: reused && run.status == ValueStreamRunStatus::Live,
+        template_version: run_template_of(run),
+    }
+}
+
+/// Insert a live link row pointing at an already-provisioned repo (space
+/// reuse / race-link paths). A unique-violation loser falls back to the
+/// winner's row instead of 500ing.
+async fn link_space_repo(
+    db: &DatabaseConnection,
+    version_id: Uuid,
+    repo_url: String,
+    chain_path: String,
+    pinned_versions: shared_common::value_objects::StringStringMap,
+    snapshot_json: String,
+) -> async_graphql::Result<ValueStreamPublishOutput> {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    let now = chrono::Utc::now();
+    let inserted = value_stream_run::ActiveModel {
+        id: Set(Uuid::now_v7()),
+        value_stream_id: Set(version_id),
+        repo_url: Set(repo_url),
+        chain_path: Set(chain_path),
+        status: Set(ValueStreamRunStatus::Live),
+        pinned_versions: Set(pinned_versions),
+        snapshot_json: Set(Some(snapshot_json)),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(db)
+    .await;
+    match inserted {
+        Ok(run) => Ok(run_to_output(&run, "", true)),
+        Err(e) if is_unique_violation(&e) => match find_open_run(db, version_id).await {
+            Ok(Some(winner)) => Ok(run_to_output(&winner, "", true)),
+            Ok(None) => Err(db_err_to_graphql(e)),
+            Err(e) => Err(db_err_to_graphql(e)),
+        },
+        Err(e) => Err(db_err_to_graphql(e)),
+    }
 }
 
 fn register_space_domain_mutations(builder: &mut Builder) {
