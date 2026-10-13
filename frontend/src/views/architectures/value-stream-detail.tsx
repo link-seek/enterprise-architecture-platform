@@ -396,7 +396,7 @@ export default function ValueStreamDetail() {
                 open={!!capabilityStage}
                 onOpenChange={(v) => { if (!v) setCapabilityStage(null) }}
               />
-              {vs && (
+              {vs && id && (
                 <PublishDialog
                   open={publishOpen}
                   onOpenChange={setPublishOpen}

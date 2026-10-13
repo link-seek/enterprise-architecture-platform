@@ -1023,6 +1023,10 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 ensure_space_edit_access(&ctx, db, active.space_id).await?;
                 ensure_entity_owner_or_admin(&ctx, active.owner_id).await?;
 
+                // Serialize same-space publishes end-to-end (space-scoped
+                // repo names). Guard held until the resolver returns.
+                let _space_guard = lock_space_publish(active.space_id).await;
+
                 let now = chrono::Utc::now();
                 let snapshot = |mode: &str| {
                     serde_json::json!({
@@ -1180,29 +1184,45 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                             )))),
                             // Compensate: don't leave a provisioning orphan
                             // holding the unique slot behind an unlinked repo.
+                            // Lookup/archive failures here are logged, never
+                            // swallowed into a fake success.
                             Err(update_err) => {
-                                if let Some(orphan) =
-                                    value_stream_run::Entity::find_by_id(run_id)
-                                        .one(db)
-                                        .await
-                                        .unwrap_or(None)
+                                match value_stream_run::Entity::find_by_id(run_id)
+                                    .one(db)
+                                    .await
                                 {
-                                    let mut am2: value_stream_run::ActiveModel =
-                                        orphan.into();
-                                    am2.status = Set(ValueStreamRunStatus::Archived);
-                                    am2.snapshot_json = Set(Some(
-                                        serde_json::json!({
-                                            "logicalId": logical_id.to_string(),
-                                            "businessVersion": active.business_version.clone(),
-                                            "templateVersion": outcome.template_version.clone(),
-                                            "repoUrl": outcome.repo_url.clone(),
-                                            "mode": "update-failed",
-                                            "error": update_err.to_string(),
-                                        })
-                                        .to_string(),
-                                    ));
-                                    am2.updated_at = Set(chrono::Utc::now());
-                                    let _ = am2.update(db).await;
+                                    Ok(Some(orphan)) => {
+                                        let mut am2: value_stream_run::ActiveModel =
+                                            orphan.into();
+                                        am2.status = Set(ValueStreamRunStatus::Archived);
+                                        am2.snapshot_json = Set(Some(
+                                            serde_json::json!({
+                                                "logicalId": logical_id.to_string(),
+                                                "businessVersion": active.business_version.clone(),
+                                                "templateVersion": outcome.template_version.clone(),
+                                                "repoUrl": outcome.repo_url.clone(),
+                                                "mode": "update-failed",
+                                                "error": update_err.to_string(),
+                                            })
+                                            .to_string(),
+                                        ));
+                                        am2.updated_at = Set(chrono::Utc::now());
+                                        if let Err(comp_err) = am2.update(db).await {
+                                            tracing::warn!(
+                                                "publish compensation archive failed for run {run_id}: {comp_err}"
+                                            );
+                                        }
+                                    }
+                                    Ok(None) => {
+                                        tracing::warn!(
+                                            "publish compensation: run {run_id} vanished after update failure"
+                                        );
+                                    }
+                                    Err(lookup_err) => {
+                                        tracing::warn!(
+                                            "publish compensation lookup failed for run {run_id}: {lookup_err}"
+                                        );
+                                    }
                                 }
                                 Err(db_err_to_graphql(update_err))
                             }
@@ -1411,10 +1431,45 @@ fn db_err_to_graphql(e: impl std::fmt::Display) -> async_graphql::Error {
 }
 
 /// True when a DB error is a unique-constraint violation (lost publish race).
-/// Backend here is SQLite-only: unique failures surface as
-/// "UNIQUE constraint failed: ...".
+/// Matches the structured sqlx error first (`2067` = SQLite unique), falling
+/// back to message sniffing for driver/SeaORM wording drift. Backend here is
+/// SQLite-only, so both paths agree in practice.
 fn is_unique_violation(e: &sea_orm::DbErr) -> bool {
-    e.to_string().contains("UNIQUE constraint failed")
+    match e {
+        sea_orm::DbErr::Exec(sea_orm::RuntimeErr::SqlxError(sqlx_err))
+        | sea_orm::DbErr::Query(sea_orm::RuntimeErr::SqlxError(sqlx_err)) => {
+            use sea_orm::sqlx::error::DatabaseError;
+            match sqlx_err {
+                sea_orm::sqlx::Error::Database(db_err) => {
+                    db_err.code().as_deref() == Some("2067")
+                }
+                _ => e.to_string().contains("UNIQUE constraint failed"),
+            }
+        }
+        _ => e.to_string().contains("UNIQUE constraint failed"),
+    }
+}
+
+/// Per-space publish serialization. Pilot repo names are space-scoped
+/// (`pilot-{space}`), so two concurrent publishes in one space would both
+/// pass the row checks and provision duplicate repos fighting over the same
+/// name. This in-process mutex serializes same-space publishes end-to-end
+/// (check → provision → flip).
+/// Deployment note: the backend runs as a single instance; a multi-replica
+/// rollout would need the slot in the DB instead.
+static PUBLISH_SPACE_LOCKS: std::sync::OnceLock<
+    tokio::sync::Mutex<std::collections::HashMap<Uuid, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+> = std::sync::OnceLock::new();
+
+async fn lock_space_publish(space_id: Uuid) -> tokio::sync::OwnedMutexGuard<()> {
+    let entry = {
+        let mut table = PUBLISH_SPACE_LOCKS
+            .get_or_init(Default::default)
+            .lock()
+            .await;
+        table.entry(space_id).or_default().clone()
+    };
+    entry.lock_owned().await
 }
 
 /// Newest open run for a value stream version, if any. Used for idempotency
