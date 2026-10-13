@@ -125,30 +125,29 @@ test.describe('Value Stream Management - Version Control', () => {
     const archiveButton = row.getByRole('button').filter({ hasText: /归档|Archive/ })
       .or(row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-archive"]') }));
     
-    if (await archiveButton.isVisible()) {
-      await archiveButton.click();
+    // ArchiveButton 是纯图标按钮（无文字），只走图标分支定位。
+    // 按钮必须存在：找不到就是产品 bug，硬断言失败，不许静默跳过。
+    await expect(archiveButton).toBeVisible({ timeout: 10000 });
+    await archiveButton.click();
 
-      // Archive is applied directly (no confirmation dialog — the archive
-      // button on the row archives immediately). The mutation fires async
-      // with refetchQueries, so wait for the UI to reflect the new status
-      // BEFORE reloading — otherwise the reload cancels the in-flight
-      // mutation request (especially against a remote backend with latency)
-      // and the value stream is never archived.
-      await expect(row.getByText('archived')).toBeVisible({ timeout: 10000 });
+    // Archive is applied directly (no confirmation dialog — the archive
+    // button on the row archives immediately). The mutation fires async
+    // with refetchQueries, so wait for the UI to reflect the new status
+    // BEFORE reloading — otherwise the reload cancels the in-flight
+    // mutation request (especially against a remote backend with latency)
+    // and the value stream is never archived.
+    await expect(row.getByText('archived')).toBeVisible({ timeout: 10000 });
 
-      // Reload and re-assert to verify the backend persisted the archived
-      // status (not just an optimistic UI update).
-      await page.reload();
-      const updatedRow = page.locator('tr').filter({ hasText: name });
-      await expect(updatedRow.getByText('archived')).toBeVisible({ timeout: 10000 });
+    // Reload and re-assert to verify the backend persisted the archived
+    // status (not just an optimistic UI update).
+    await page.reload();
+    const updatedRow = page.locator('tr').filter({ hasText: name });
+    await expect(updatedRow.getByText('archived')).toBeVisible({ timeout: 10000 });
 
-      // Verify archive button disappears (archived items shouldn't have archive button)
-      const archiveButtonAfter = updatedRow.getByRole('button').filter({ hasText: /归档|Archive/ })
-        .or(updatedRow.getByRole('button').filter({ has: page.locator('svg[class*="lucide-archive"]') }));
-      await expect(archiveButtonAfter).not.toBeVisible();
-    } else {
-      console.log('Archive button not found - skipping archive test');
-    }
+    // Verify archive button disappears (archived items shouldn't have archive button)
+    const archiveButtonAfter = updatedRow.getByRole('button').filter({ hasText: /归档|Archive/ })
+      .or(updatedRow.getByRole('button').filter({ has: page.locator('svg[class*="lucide-archive"]') }));
+    await expect(archiveButtonAfter).not.toBeVisible();
 
     // Self-delete and verify (单例自删自证)
     await selfDeleteAndVerify(request, [name]);
