@@ -52,6 +52,50 @@ pub struct ProvisionOutcome {
     pub files_rendered: usize,
 }
 
+/// Hermetic test hook for `provision_pilot_consumer` (cfg(test) only,
+/// zero residue in production builds). Tests install a plain function
+/// pointer; no env vars are consulted so a stray env cannot leak fake
+/// `live` rows into staging/prod.
+#[cfg(test)]
+pub type TestProvisionFn = fn(Uuid, String) -> Result<ProvisionOutcome, PilotError>;
+
+#[cfg(test)]
+static TEST_PROVISION_FN: std::sync::OnceLock<std::sync::Mutex<Option<TestProvisionFn>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(test)]
+static TEST_PROVISION_CALLS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(test)]
+fn test_provision_fn() -> &'static std::sync::Mutex<Option<TestProvisionFn>> {
+    TEST_PROVISION_FN.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// Install (`Some`) or clear (`None`) the hermetic provision mock. Resets
+/// the call counter so each test starts from zero.
+#[cfg(test)]
+pub fn __test_set_provision_mock(f: Option<TestProvisionFn>) {
+    *test_provision_fn().lock().unwrap() = f;
+    TEST_PROVISION_CALLS.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Number of `provision_pilot_consumer` entries since the last mock install.
+#[cfg(test)]
+pub fn __test_provision_calls() -> usize {
+    TEST_PROVISION_CALLS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[cfg(test)]
+fn test_provision_mock(
+    space_id: Uuid,
+    template_version: &str,
+) -> Option<Result<ProvisionOutcome, PilotError>> {
+    let f: Option<TestProvisionFn> = *test_provision_fn().lock().unwrap();
+    let f = f?;
+    Some(f(space_id, template_version.to_owned()))
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PilotError {
     #[error("template version must not be empty")]
@@ -997,6 +1041,10 @@ fn validate_base_branch(name: &str) -> Result<(), PilotError> {
 /// Resolves the same space-scoped name as provisioning; API failures only
 /// warn (same policy as the in-flow rollback) and never error.
 pub async fn delete_pilot_repo(space_id: Uuid, template_version: &str) {
+    #[cfg(test)]
+    if test_provision_fn().lock().unwrap().is_some() {
+        return;
+    }
     let inputs = match resolve_inputs(space_id, template_version) {
         Ok(inputs) => inputs,
         Err(e) => {
@@ -1020,6 +1068,13 @@ pub async fn provision_pilot_consumer(
     space_id: Uuid,
     template_version: &str,
 ) -> Result<ProvisionOutcome, PilotError> {
+    #[cfg(test)]
+    {
+        TEST_PROVISION_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Some(mocked) = test_provision_mock(space_id, template_version) {
+            return mocked;
+        }
+    }
     let inputs = resolve_inputs(space_id, template_version)?;
     let template_version = template_version.trim().to_owned();
     let github = GithubClient::from_env().await?;

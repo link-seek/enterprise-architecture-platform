@@ -6252,4 +6252,281 @@ mod tests {
             .await
             .expect("GraphQL schema must build; a referenced type name is not registered");
     }
+
+    static PUBLISH_SERIAL: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+
+    fn publish_serial() -> &'static tokio::sync::Mutex<()> {
+        PUBLISH_SERIAL.get_or_init(|| tokio::sync::Mutex::new(()))
+    }
+
+    fn admin_claims() -> crate::middleware::Claims {
+        crate::middleware::Claims {
+            sub: "test-admin".to_owned(),
+            exp: 9_999_999_999,
+            iat: 0,
+            user_id: Uuid::now_v7(),
+            role: "admin".to_owned(),
+        }
+    }
+
+    async fn setup_publish_db() -> DatabaseConnection {
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        migration::Migrator::up(&db, None).await.unwrap();
+        db
+    }
+
+    async fn insert_space(db: &DatabaseConnection) -> space::Model {
+        use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+        let now = chrono::Utc::now();
+        space::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            name: Set("publish-space".to_owned()),
+            description: Set(None),
+            visibility: Set(SpaceVisibility::Private),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deleted_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+    }
+
+    async fn insert_value_stream(
+        db: &DatabaseConnection,
+        space_id: Uuid,
+        owner_id: Uuid,
+        logical_id: Uuid,
+    ) -> value_stream::Model {
+        use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+        let now = chrono::Utc::now();
+        value_stream::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            logical_id: Set(logical_id),
+            business_version: Set("1.0.0".to_owned()),
+            status: Set(LifecycleStatus::Active),
+            name: Set("publish-vs".to_owned()),
+            description: Set(None),
+            triggering_event: Set(None),
+            end_deliverable: Set(None),
+            owner_id: Set(Some(owner_id)),
+            importance: Set(ValueStreamImportance::High),
+            stakeholders: Set(shared_common::value_objects::StringVec(vec![])),
+            performance_metrics: Set(shared_common::value_objects::StringStringMap::default()),
+            created_by: Set(Some(owner_id)),
+            updated_by: Set(Some(owner_id)),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deleted_at: Set(None),
+            space_id: Set(space_id),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+    }
+
+    const PUBLISH_MUTATION: &str = r#"mutation($logicalId: String!, $templateVersion: String!) {
+        valueStreamPublish(logicalId: $logicalId, templateVersion: $templateVersion) {
+            runId status repoUrl prUrl reused templateVersion
+        }
+    }"#;
+
+    async fn exec_publish(
+        schema: &GraphqlSchema,
+        claims: crate::middleware::Claims,
+        logical_id: Uuid,
+        template_version: &str,
+    ) -> async_graphql::Response {
+        let vars = async_graphql::Variables::from_json(serde_json::json!({
+            "logicalId": logical_id.to_string(),
+            "templateVersion": template_version,
+        }));
+        schema
+            .execute(
+                async_graphql::Request::new(PUBLISH_MUTATION)
+                    .variables(vars)
+                    .data(claims),
+            )
+            .await
+    }
+
+    fn publish_json(resp: &async_graphql::Response) -> serde_json::Value {
+        serde_json::to_value(&resp.data).unwrap()
+    }
+
+    fn mock_success(
+        _: Uuid,
+        v: String,
+    ) -> Result<crate::pilot::ProvisionOutcome, crate::pilot::PilotError> {
+        Ok(crate::pilot::ProvisionOutcome {
+            repo_url: "https://github.com/org/pilot-aaa".to_owned(),
+            pr_url: "https://github.com/org/pilot-aaa/pull/1".to_owned(),
+            template_version: v,
+            files_rendered: 3,
+        })
+    }
+
+    fn mock_fail(
+        _: Uuid,
+        _: String,
+    ) -> Result<crate::pilot::ProvisionOutcome, crate::pilot::PilotError> {
+        Err(crate::pilot::PilotError::CreateRepo("boom".to_owned()))
+    }
+
+    #[test]
+    fn publish_run_to_output_contract() {
+        use std::collections::HashMap;
+        let live = value_stream_run::Model {
+            id: Uuid::now_v7(),
+            value_stream_id: Uuid::now_v7(),
+            repo_url: "https://github.com/org/pilot-aaa".to_owned(),
+            chain_path: "https://github.com/org/pilot-aaa/pull/1".to_owned(),
+            status: ValueStreamRunStatus::Live,
+            pinned_versions: shared_common::value_objects::StringStringMap(HashMap::from([(
+                "template".to_owned(),
+                "v1".to_owned(),
+            )])),
+            snapshot_json: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let out = run_to_output(&live, "", true);
+        assert_eq!(out.status, "live");
+        assert!(out.reused);
+        assert_eq!(out.pr_url, "https://github.com/org/pilot-aaa/pull/1");
+        assert_eq!(out.template_version, "v1");
+
+        let fresh = run_to_output(&live, "https://pr/9", false);
+        assert!(!fresh.reused);
+        assert_eq!(fresh.pr_url, "https://pr/9");
+
+        let provisioning = value_stream_run::Model {
+            status: ValueStreamRunStatus::Provisioning,
+            ..live.clone()
+        };
+        let out = run_to_output(&provisioning, "", true);
+        assert_eq!(out.status, "provisioning");
+        assert!(!out.reused);
+    }
+
+    #[tokio::test]
+    async fn publish_success_writes_live_run() {
+        let _guard = publish_serial().lock().await;
+        crate::pilot::__test_set_provision_mock(Some(mock_success));
+        let db = setup_publish_db().await;
+        let schema = build_graphql_schema(&db).await.unwrap();
+        let claims = admin_claims();
+        let sp = insert_space(&db).await;
+        let logical = Uuid::now_v7();
+        insert_value_stream(&db, sp.id, claims.user_id, logical).await;
+
+        let resp = exec_publish(&schema, claims, logical, "v1.0.0-pilot").await;
+        assert!(resp.errors.is_empty(), "errors: {:?}", resp.errors);
+        let json = publish_json(&resp);
+        let node = &json["valueStreamPublish"];
+        assert_eq!(node["status"], "live");
+        assert_eq!(node["reused"], false);
+        assert_eq!(node["repoUrl"], "https://github.com/org/pilot-aaa");
+        assert_eq!(node["prUrl"], "https://github.com/org/pilot-aaa/pull/1");
+        assert_eq!(node["templateVersion"], "v1.0.0-pilot");
+        assert_eq!(crate::pilot::__test_provision_calls(), 1);
+
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        let rows = value_stream_run::Entity::find()
+            .filter(value_stream_run::Column::Status.eq(ValueStreamRunStatus::Live))
+            .all(&db)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].repo_url, "https://github.com/org/pilot-aaa");
+        crate::pilot::__test_set_provision_mock(None);
+    }
+
+    #[tokio::test]
+    async fn publish_idempotent_reuses_live() {
+        let _guard = publish_serial().lock().await;
+        crate::pilot::__test_set_provision_mock(Some(mock_success));
+        let db = setup_publish_db().await;
+        let schema = build_graphql_schema(&db).await.unwrap();
+        let claims = admin_claims();
+        let sp = insert_space(&db).await;
+        let logical = Uuid::now_v7();
+        insert_value_stream(&db, sp.id, claims.user_id, logical).await;
+
+        let first = exec_publish(&schema, claims.clone(), logical, "v1.0.0-pilot").await;
+        assert!(first.errors.is_empty());
+        let first_id = publish_json(&first)["valueStreamPublish"]["runId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        crate::pilot::__test_set_provision_mock(Some(mock_success));
+        let second = exec_publish(&schema, claims, logical, "v1.0.0-pilot").await;
+        assert!(second.errors.is_empty(), "errors: {:?}", second.errors);
+        let node = publish_json(&second)["valueStreamPublish"].clone();
+        assert_eq!(node["runId"], first_id);
+        assert_eq!(node["reused"], true);
+        assert_eq!(node["status"], "live");
+        assert_eq!(crate::pilot::__test_provision_calls(), 0);
+        crate::pilot::__test_set_provision_mock(None);
+    }
+
+    #[tokio::test]
+    async fn publish_reuses_space_repo_url() {
+        let _guard = publish_serial().lock().await;
+        crate::pilot::__test_set_provision_mock(Some(mock_success));
+        let db = setup_publish_db().await;
+        let schema = build_graphql_schema(&db).await.unwrap();
+        let claims = admin_claims();
+        let sp = insert_space(&db).await;
+        let logical_a = Uuid::now_v7();
+        let logical_b = Uuid::now_v7();
+        insert_value_stream(&db, sp.id, claims.user_id, logical_a).await;
+        insert_value_stream(&db, sp.id, claims.user_id, logical_b).await;
+
+        let first = exec_publish(&schema, claims.clone(), logical_a, "v1.0.0-pilot").await;
+        assert!(first.errors.is_empty());
+        let repo_a = publish_json(&first)["valueStreamPublish"]["repoUrl"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        crate::pilot::__test_set_provision_mock(Some(mock_success));
+        let second = exec_publish(&schema, claims, logical_b, "v1.0.0-pilot").await;
+        assert!(second.errors.is_empty(), "errors: {:?}", second.errors);
+        let node = publish_json(&second)["valueStreamPublish"].clone();
+        assert_eq!(node["repoUrl"], repo_a);
+        assert_eq!(node["reused"], true);
+        assert_eq!(crate::pilot::__test_provision_calls(), 0);
+        crate::pilot::__test_set_provision_mock(None);
+    }
+
+    #[tokio::test]
+    async fn publish_failure_archives_with_snapshot() {
+        let _guard = publish_serial().lock().await;
+        crate::pilot::__test_set_provision_mock(Some(mock_fail));
+        let db = setup_publish_db().await;
+        let schema = build_graphql_schema(&db).await.unwrap();
+        let claims = admin_claims();
+        let sp = insert_space(&db).await;
+        let logical = Uuid::now_v7();
+        let vs = insert_value_stream(&db, sp.id, claims.user_id, logical).await;
+
+        let resp = exec_publish(&schema, claims, logical, "v9.9.9").await;
+        assert!(!resp.errors.is_empty());
+        assert!(resp.errors[0].message.contains("Provisioning failed"));
+
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        let rows = value_stream_run::Entity::find()
+            .filter(value_stream_run::Column::ValueStreamId.eq(vs.id))
+            .all(&db)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, ValueStreamRunStatus::Archived);
+        let snap = rows[0].snapshot_json.clone().unwrap();
+        assert!(snap.contains("provision-failed"));
+        assert!(snap.contains("boom"));
+        crate::pilot::__test_set_provision_mock(None);
+    }
 }
