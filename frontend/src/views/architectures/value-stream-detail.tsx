@@ -102,6 +102,8 @@ const VALUE_STREAM_PUBLISH = gql`
       status
       repoUrl
       prUrl
+      reused
+      templateVersion
     }
   }
 `
@@ -111,6 +113,8 @@ interface ValueStreamPublishResult {
   status: string
   repoUrl: string
   prUrl: string
+  reused: boolean
+  templateVersion: string
 }
 
 export default function ValueStreamDetail() {
@@ -128,6 +132,7 @@ export default function ValueStreamDetail() {
     errorPolicy: 'ignore',
   })
   const runs = runsData?.valueStreamRunsByValueStream ?? []
+  const liveCount = useMemo(() => runs.filter((r) => r.status === 'live').length, [runs])
 
   const [stageDialogOpen, setStageDialogOpen] = useState(false)
   const [editingStage, setEditingStage] = useState<ValueStreamStage | null>(null)
@@ -315,10 +320,10 @@ export default function ValueStreamDetail() {
               <div className="flex items-center justify-between">
                 <CardTitle>运行实例</CardTitle>
                 <div className="flex items-center gap-2">
-                  {runs.filter((r) => r.status === 'live').length > 0 && (
-                    <Badge>live {runs.filter((r) => r.status === 'live').length}</Badge>
+                  {liveCount > 0 && (
+                    <Badge>live {liveCount}</Badge>
                   )}
-                  {vs && vs.status === 'active' && isEntityOwner(vs.ownerId) && id && spaceId && (
+                  {vs && vs.status === 'active' && vs.logicalId && isEntityOwner(vs.ownerId) && id && spaceId && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -424,6 +429,10 @@ function PublishDialog({ open, onOpenChange, valueStreamId, logicalId, name, bus
   const [publishMut] = useMutation<{ valueStreamPublish?: ValueStreamPublishResult }>(VALUE_STREAM_PUBLISH)
 
   async function handlePublish() {
+    if (!logicalId) {
+      setError('价值流缺少 logicalId，无法发布')
+      return
+    }
     if (!templateVersion.trim()) {
       setError('请填写模板版本')
       return
@@ -443,7 +452,7 @@ function PublishDialog({ open, onOpenChange, valueStreamId, logicalId, name, bus
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) { setError(null); setDone(null) } onOpenChange(v) }}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { setError(null); setDone(null); setTemplateVersion('') } onOpenChange(v) }}>
       <DialogContent>
         <DialogHeader><DialogTitle>发布上线</DialogTitle></DialogHeader>
         <div className="space-y-4 py-4 text-sm">
@@ -461,14 +470,18 @@ function PublishDialog({ open, onOpenChange, valueStreamId, logicalId, name, bus
                   placeholder="如 v1.0.0-pilot"
                   value={templateVersion}
                   onChange={(e) => setTemplateVersion(e.target.value)}
+                  disabled={loading}
                 />
               </div>
             </>
           ) : (
             <>
-              <p className="font-medium">发布成功，运行实例已上线：</p>
+              <p className="font-medium">
+                {done.reused ? '已有 live 运行，本次直接复用（未重新建仓）：' : '发布成功，运行实例已上线：'}
+              </p>
               <ul className="space-y-1 text-sm">
                 <li>状态 <Badge>{done.status}</Badge></li>
+                {done.templateVersion && <li>模板版本 <span className="font-mono text-xs">{done.templateVersion}</span></li>}
                 <li className="font-mono text-xs break-all">仓库 {done.repoUrl || '-'}</li>
                 {done.prUrl && <li className="font-mono text-xs break-all">PR {done.prUrl}</li>}
               </ul>

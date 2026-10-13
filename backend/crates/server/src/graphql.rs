@@ -528,13 +528,18 @@ struct ProcessPublishVersionOutput {
 /// Result of the `valueStreamPublish` mutation: the run row backing this
 /// publish plus where the provisioned consumer repo lives. `pr_url` is empty
 /// when no fresh provisioning happened (idempotent reuse of an existing live
-/// run, either for this logical version or for the space).
+/// run, either for this logical version or for the space); `reused` flags
+/// exactly that so the UI can tell "already live" apart from "just
+/// provisioned". `template_version` is the effective template (requested on
+/// fresh provision, pinned on reuse).
 #[derive(Clone, Debug)]
 struct ValueStreamPublishOutput {
     run_id: String,
     status: String,
     repo_url: String,
     pr_url: String,
+    reused: bool,
+    template_version: String,
 }
 
 // ============================================================================
@@ -1013,7 +1018,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 let active = repo
                     .find_active_by_logical_id(logical_id)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .map_err(domain_err_to_graphql)?
                     .ok_or_else(|| async_graphql::Error::new("No active value stream found for this logicalId."))?;
                 ensure_space_edit_access(&ctx, db, active.space_id).await?;
                 ensure_entity_owner_or_admin(&ctx, active.owner_id).await?;
@@ -1028,12 +1033,24 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     })
                     .to_string()
                 };
-                let to_output = |run: &value_stream_run::Model, pr_url: &str| {
+                // `pinned_template_of` reads back the template recorded at
+                // provision time so reuse responses report the effective
+                // version instead of silently echoing the requested one.
+                let pinned_template_of = |run: &value_stream_run::Model| {
+                    run.pinned_versions
+                        .0
+                        .get("template")
+                        .cloned()
+                        .unwrap_or_default()
+                };
+                let to_output = |run: &value_stream_run::Model, pr_url: &str, reused: bool| {
                     ValueStreamPublishOutput {
                         run_id: run.id.to_string(),
-                        status: "live".to_owned(),
+                        status: format!("{:?}", run.status).to_lowercase(),
                         repo_url: run.repo_url.clone(),
                         pr_url: pr_url.to_owned(),
+                        reused,
+                        template_version: pinned_template_of(run),
                     }
                 };
 
@@ -1045,7 +1062,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     .await
                     .map_err(db_err_to_graphql)?
                 {
-                    return Ok(Some(FieldValue::owned_any(to_output(&live, ""))));
+                    return Ok(Some(FieldValue::owned_any(to_output(&live, "", true))));
                 }
 
                 // 2. Space already has a live consumer repo → link, don't rebuild.
@@ -1072,7 +1089,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                             repo_url: Set(space_live.repo_url.clone()),
                             chain_path: Set(space_live.chain_path.clone()),
                             status: Set(ValueStreamRunStatus::Live),
-                            pinned_versions: Set(shared_common::value_objects::StringStringMap::default()),
+                            pinned_versions: Set(space_live.pinned_versions.clone()),
                             snapshot_json: Set(Some(snapshot("reused-space-repo"))),
                             created_at: Set(now),
                             updated_at: Set(now),
@@ -1080,12 +1097,15 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                         .insert(db)
                         .await
                         .map_err(db_err_to_graphql)?;
-                        return Ok(Some(FieldValue::owned_any(to_output(&run, ""))));
+                        return Ok(Some(FieldValue::owned_any(to_output(&run, "", true))));
                     }
                 }
 
                 // 3. Fresh provision: row first (provisioning), then repo.
-                let run = value_stream_run::ActiveModel {
+                // The partial unique index `ux_vs_runs_open_per_version`
+                // makes a lost race fail here (before any provisioning side
+                // effect); fall back to the winner's row instead of 500ing.
+                let inserted = value_stream_run::ActiveModel {
                     id: Set(Uuid::now_v7()),
                     value_stream_id: Set(active.id),
                     repo_url: Set(String::new()),
@@ -1097,17 +1117,54 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     updated_at: Set(now),
                 }
                 .insert(db)
-                .await
-                .map_err(db_err_to_graphql)?;
+                .await;
+                let run = match inserted {
+                    Ok(run) => run,
+                    Err(_) => {
+                        if let Some(winner) = value_stream_run::Entity::find()
+                            .filter(value_stream_run::Column::ValueStreamId.eq(active.id))
+                            .filter(
+                                value_stream_run::Column::Status
+                                    .eq(ValueStreamRunStatus::Provisioning)
+                                    .or(value_stream_run::Column::Status
+                                        .eq(ValueStreamRunStatus::Live)),
+                            )
+                            .one(db)
+                            .await
+                            .map_err(db_err_to_graphql)?
+                        {
+                            return Ok(Some(FieldValue::owned_any(to_output(&winner, "", true))));
+                        }
+                        return Err(async_graphql::Error::new(
+                            "Failed to create publish run; please retry.",
+                        ));
+                    }
+                };
 
                 match crate::pilot::provision_pilot_consumer(active.space_id, &template_version).await {
                     Ok(outcome) => {
+                        let mut pinned = std::collections::HashMap::new();
+                        pinned.insert("template".to_owned(), outcome.template_version.clone());
                         let mut am: value_stream_run::ActiveModel = run.into();
                         am.repo_url = Set(outcome.repo_url.clone());
+                        am.chain_path = Set(outcome.pr_url.clone());
                         am.status = Set(ValueStreamRunStatus::Live);
+                        am.pinned_versions =
+                            Set(shared_common::value_objects::StringStringMap(pinned));
+                        am.snapshot_json = Set(Some(
+                            serde_json::json!({
+                                "logicalId": logical_id.to_string(),
+                                "businessVersion": active.business_version.clone(),
+                                "templateVersion": outcome.template_version.clone(),
+                                "prUrl": outcome.pr_url.clone(),
+                                "filesRendered": outcome.files_rendered,
+                                "mode": "provisioned",
+                            })
+                            .to_string(),
+                        ));
                         am.updated_at = Set(chrono::Utc::now());
                         let run = am.update(db).await.map_err(db_err_to_graphql)?;
-                        Ok(Some(FieldValue::owned_any(to_output(&run, &outcome.pr_url))))
+                        Ok(Some(FieldValue::owned_any(to_output(&run, &outcome.pr_url, false))))
                     }
                     Err(e) => {
                         let mut am: value_stream_run::ActiveModel = run.into();
@@ -1115,6 +1172,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                         am.snapshot_json = Set(Some(
                             serde_json::json!({
                                 "logicalId": logical_id.to_string(),
+                                "businessVersion": active.business_version.clone(),
                                 "templateVersion": template_version,
                                 "mode": "provision-failed",
                                 "error": e.to_string(),
@@ -4268,6 +4326,18 @@ fn register_space_scoped_queries(builder: &mut Builder) {
             FieldFuture::new(async move {
                 let v = ctx.parent_value.try_downcast_ref::<ValueStreamPublishOutput>()?;
                 Ok(Some(FieldValue::value(v.pr_url.clone())))
+            })
+        }))
+        .field(Field::new("reused", TypeRef::named_nn(TypeRef::BOOLEAN), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<ValueStreamPublishOutput>()?;
+                Ok(Some(FieldValue::value(v.reused)))
+            })
+        }))
+        .field(Field::new("templateVersion", TypeRef::named_nn(TypeRef::STRING), |ctx| {
+            FieldFuture::new(async move {
+                let v = ctx.parent_value.try_downcast_ref::<ValueStreamPublishOutput>()?;
+                Ok(Some(FieldValue::value(v.template_version.clone())))
             })
         }));
     builder.outputs.push(vs_publish_result_type);
