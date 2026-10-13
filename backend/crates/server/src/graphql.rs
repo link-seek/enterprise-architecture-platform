@@ -1183,6 +1183,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                             Err(update_err) => {
                                 if let Some(orphan) =
                                     value_stream_run::Entity::find_by_id(run_id)
+                                        .one(db)
                                         .await
                                         .unwrap_or(None)
                                 {
