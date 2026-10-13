@@ -1439,7 +1439,7 @@ fn is_unique_violation(e: &sea_orm::DbErr) -> bool {
         sea_orm::DbErr::Exec(sea_orm::RuntimeErr::SqlxError(sqlx_err))
         | sea_orm::DbErr::Query(sea_orm::RuntimeErr::SqlxError(sqlx_err)) => {
             use sea_orm::sqlx::error::DatabaseError;
-            match sqlx_err {
+            match &**sqlx_err {
                 sea_orm::sqlx::Error::Database(db_err) => {
                     db_err.code().as_deref() == Some("2067")
                 }
