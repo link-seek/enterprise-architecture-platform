@@ -1032,6 +1032,17 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 // repo names). Guard held until the resolver returns.
                 let _space_guard = lock_space_publish(active.space_id).await;
 
+                let now = chrono::Utc::now();
+                let snapshot = |mode: &str| {
+                    serde_json::json!({
+                        "logicalId": logical_id.to_string(),
+                        "businessVersion": active.business_version.clone(),
+                        "templateVersion": template_version.clone(),
+                        "mode": mode,
+                    })
+                    .to_string()
+                };
+
                 // Reclaim stale provisioning rows: a crashed/timed-out attempt
                 // holds the unique slot otherwise, and retries would stall on
                 // the orphan instead of progressing. Older than 30 minutes.
@@ -1054,17 +1065,6 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     am.updated_at = Set(chrono::Utc::now());
                     am.update(db).await.map_err(db_err_to_graphql)?;
                 }
-
-                let now = chrono::Utc::now();
-                let snapshot = |mode: &str| {
-                    serde_json::json!({
-                        "logicalId": logical_id.to_string(),
-                        "businessVersion": active.business_version.clone(),
-                        "templateVersion": template_version.clone(),
-                        "mode": mode,
-                    })
-                    .to_string()
-                };
 
                 // 1. Live run for this logical version → return as-is.
                 if let Some(live) = value_stream_run::Entity::find()
