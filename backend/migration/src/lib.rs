@@ -70,6 +70,7 @@ mod m20250101_000067_add_pipeline_test_1789542235_to_organizations;
 mod m20250101_000068_add_e2e_verify_1_to_organizations;
 mod m20250101_000069_add_pipeline_test_1789625944_to_organizations;
 mod m20260917_000001_value_stream_runs;
+mod m20261013_000001_vs_runs_open_uniqueness;
 
 pub struct Migrator;
 
@@ -147,6 +148,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000068_add_e2e_verify_1_to_organizations::Migration),
             Box::new(m20250101_000069_add_pipeline_test_1789625944_to_organizations::Migration),
             Box::new(m20260917_000001_value_stream_runs::Migration),
+            Box::new(m20261013_000001_vs_runs_open_uniqueness::Migration),
         ]
     }
 }
