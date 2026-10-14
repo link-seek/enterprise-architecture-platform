@@ -9,6 +9,7 @@ pub trait CapabilityRepository: Send + Sync + 'static {
     async fn find_by_id(&self, id: Uuid) -> Result<Option<BusinessCapability>, DomainError>;
     async fn save(&self, cap: &BusinessCapability) -> Result<BusinessCapability, DomainError>;
     async fn soft_delete(&self, id: Uuid) -> Result<(), DomainError>;
+    async fn archive(&self, id: Uuid) -> Result<(), DomainError>;
     async fn list_active(
         &self,
         page: u64,

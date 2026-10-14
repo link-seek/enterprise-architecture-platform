@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Plus, Pencil, Trash2, Loader2, MoreVertical, UserRoundCog, Link2, AppWindow } from 'lucide-react'
+import { Plus, Pencil, Trash2, Loader2, MoreVertical, UserRoundCog, Link2, AppWindow, Archive } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo, memo } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -20,8 +20,14 @@ import { friendlyDeleteError } from './crud'
 const GET_CAPABILITIES = gql`
   query GetCapabilities($spaceId: String!) {
     businessCapabilitiesBySpace(spaceId: $spaceId) {
-      id name description level maturity businessValue status ownerId
+      id name description level maturity businessValue businessVersion status ownerId
     }
+  }
+`
+
+const ARCHIVE_CAPABILITY = gql`
+  mutation ArchiveCapability($id: String!) {
+    capabilityArchive(id: $id)
   }
 `
 
@@ -104,7 +110,7 @@ const CAPABILITY_PROCESS_DELETE = gql`
 
 interface Capability {
   id: string; name: string; description: string
-  level: string; maturity: string; businessValue: string; status: string
+  level: string; maturity: string; businessValue: string; businessVersion?: string | null; status: string
   ownerId?: string | null
 }
 
@@ -124,10 +130,43 @@ interface ProcessRelation {
 
 const EMPTY_CAPABILITIES: Capability[] = []
 
-const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer, onProcesses, onApplicationSupport }: {
+// 状态徽标与价值流 / 业务流程统一：archived 红色，deprecated 次级，其余描边。
+function statusVariant(status: string): 'default' | 'destructive' | 'secondary' | 'outline' {
+  if (status === 'archived') return 'destructive'
+  if (status === 'deprecated') return 'secondary'
+  return 'outline'
+}
+
+// 归档按钮（inline、无确认框，与价值流 ArchiveButton 同交互）。
+function CapabilityArchiveButton({ id, spaceId }: { id: string; spaceId: string }) {
+  const [archiveMut] = useMutation(ARCHIVE_CAPABILITY, {
+    refetchQueries: [{ query: GET_CAPABILITIES, variables: { spaceId } }],
+  })
+  const [loading, setLoading] = useState(false)
+
+  async function handleArchive() {
+    setLoading(true)
+    try {
+      await archiveMut({ variables: { id } })
+    } catch (err) {
+      console.error('Archive failed:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Button variant="ghost" size="sm" aria-label="归档" title="归档" onClick={handleArchive} disabled={loading}>
+      {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
+    </Button>
+  )
+}
+
+const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, spaceId, onEdit, onDelete, onTransfer, onProcesses, onApplicationSupport }: {
   nodes: Capability[]
   isOwned: (cap: Capability) => boolean
   isMobile: boolean
+  spaceId?: string
   onEdit: (cap: Capability) => void
   onDelete: (cap: Capability) => void
   onTransfer: (cap: Capability) => void
@@ -147,7 +186,10 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
           <div key={cap.id} className="rounded-lg border p-4 space-y-2">
             <div className="flex items-start justify-between gap-2">
               <p className="font-medium break-words">{cap.name}</p>
-              <Badge variant="outline">{cap.status}</Badge>
+              <div className="flex gap-1 shrink-0">
+                {cap.businessVersion && <Badge variant="secondary" className="font-mono">{cap.businessVersion}</Badge>}
+                <Badge variant={statusVariant(cap.status)}>{cap.status}</Badge>
+              </div>
             </div>
             <div className="flex flex-wrap gap-1">
               <Badge variant="secondary">{cap.level}</Badge>
@@ -158,10 +200,13 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
               <Button variant="ghost" size="sm" aria-label="应用支撑" title="应用支撑" onClick={() => onApplicationSupport(cap)}>
                 <AppWindow className="h-3.5 w-3.5" />
               </Button>
+              {owned && cap.status === 'active' && spaceId && (
+                <CapabilityArchiveButton id={cap.id} spaceId={spaceId} />
+              )}
               {owned && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0" aria-label="更多操作">
+                    <Button variant="ghost" size="sm" className="h-11 w-11 p-0" aria-label="更多操作">
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -197,6 +242,7 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
           <TableHead>层级</TableHead>
           <TableHead>成熟度</TableHead>
           <TableHead>业务价值</TableHead>
+          <TableHead>版本</TableHead>
           <TableHead>状态</TableHead>
           <TableHead>操作</TableHead>
         </TableRow>
@@ -210,7 +256,10 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
             <TableCell>{cap.level}</TableCell>
             <TableCell>{cap.maturity}</TableCell>
             <TableCell>{cap.businessValue}</TableCell>
-            <TableCell><Badge variant="outline">{cap.status}</Badge></TableCell>
+            <TableCell>
+              {cap.businessVersion ? <Badge variant="secondary" className="font-mono">{cap.businessVersion}</Badge> : '-'}
+            </TableCell>
+            <TableCell><Badge variant={statusVariant(cap.status)}>{cap.status}</Badge></TableCell>
             <TableCell>
               <div className="flex gap-1">
                 <Button variant="ghost" size="sm" aria-label="应用支撑" title="应用支撑" onClick={() => onApplicationSupport(cap)}>
@@ -227,6 +276,9 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
                     <Button variant="ghost" size="sm" aria-label="转移所有权" onClick={() => onTransfer(cap)}>
                       <UserRoundCog className="h-3.5 w-3.5" />
                     </Button>
+                    {cap.status === 'active' && spaceId && (
+                      <CapabilityArchiveButton id={cap.id} spaceId={spaceId} />
+                    )}
                     <Button variant="ghost" size="sm" aria-label="删除" onClick={() => onDelete(cap)}>
                       <Trash2 className="h-3.5 w-3.5 text-destructive" />
                     </Button>
@@ -276,16 +328,22 @@ export default function Capabilities() {
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
           {Boolean(error) && <div className="text-center py-8 text-destructive">加载失败</div>}
           {data && (
-            <CapabilityList
-              nodes={data.businessCapabilitiesBySpace ?? EMPTY_CAPABILITIES}
-              isOwned={(cap) => isEntityOwner(cap.ownerId)}
-              isMobile={isMobile}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-              onTransfer={handleTransfer}
-              onProcesses={handleProcesses}
-              onApplicationSupport={handleApplicationSupport}
-            />
+            <>
+              <CapabilityList
+                nodes={data.businessCapabilitiesBySpace ?? EMPTY_CAPABILITIES}
+                isOwned={(cap) => isEntityOwner(cap.ownerId)}
+                isMobile={isMobile}
+                spaceId={spaceId}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                onTransfer={handleTransfer}
+                onProcesses={handleProcesses}
+                onApplicationSupport={handleApplicationSupport}
+              />
+              <div className="flex items-center justify-between mt-4">
+                <p className="text-sm text-muted-foreground">共 {data.businessCapabilitiesBySpace?.length ?? 0} 条</p>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
