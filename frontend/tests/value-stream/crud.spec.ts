@@ -292,8 +292,8 @@ test.describe('Value Stream Management - CRUD Operations', () => {
     // Verify all value stream data displayed
     await expect(page.getByText(name)).toBeVisible();
     await expect(page.getByText('这是一个用于查看详情的测试价值流')).toBeVisible();
-    await expect(page.getByText('1.0.0')).toBeVisible();
-    await expect(page.getByText('active')).toBeVisible();
+    await expect(page.getByText('1.0.0').first()).toBeVisible();
+    await expect(page.getByText('active').first()).toBeVisible();
     
     // Look for "返回列表" button and click it
     const backButton = page.getByRole('button', { name: '返回列表' });

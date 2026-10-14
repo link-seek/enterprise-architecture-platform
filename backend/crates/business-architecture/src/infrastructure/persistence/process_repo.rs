@@ -6,13 +6,13 @@ use sea_orm::{
 use shared_common::enums::LifecycleStatus;
 use uuid::Uuid;
 
-use crate::application::version::bump_minor;
+use crate::application::version::parse as parse_semver;
 use crate::domain::error::DomainError;
 use crate::domain::process::entity::{
     AffectedProcessLink, BusinessProcess, ProcessStep, PublishVersionResult,
 };
 use crate::domain::process::repository::{ProcessRepository, ProcessStepRepository};
-use crate::infrastructure::persistence::entities::{business_capability, business_process, capability_process, process_step};
+use crate::infrastructure::persistence::entities::{business_capability, business_process, capability_process, capability_realization, participation, process_reference, process_step};
 
 impl From<business_process::Model> for BusinessProcess {
     fn from(m: business_process::Model) -> Self {
@@ -207,9 +207,13 @@ impl ProcessRepository for SeaOrmProcessRepo {
             .await?
             .ok_or(DomainError::ProcessNotFound)?;
 
-        // Enforce the `Deprecated → Archived` edge so the compatibility window
-        // cannot be skipped by archiving an `Active` process directly.
-        if model.status != LifecycleStatus::Deprecated {
+        // Unified lifecycle: `Active | Deprecated → Archived`. Active rows can
+        // be retired whole-line; Deprecated rows are old versions leaving the
+        // compatibility window.
+        if !matches!(
+            model.status,
+            LifecycleStatus::Active | LifecycleStatus::Deprecated
+        ) {
             return Err(DomainError::InvalidTransition {
                 from: format!("{:?}", model.status),
                 to: "Archived".to_string(),
@@ -302,19 +306,24 @@ impl ProcessStepRepository for SeaOrmProcessRepo {
 }
 
 impl SeaOrmProcessRepo {
-    /// Publish a new minor version of the active process identified by
-    /// `logical_id`. The old active version transitions to `Deprecated`
-    /// (compatibility window) instead of being archived immediately; a new
-    /// `Active` row is inserted with the same `logical_id` and `bump_minor`
-    /// version. All of this runs inside a single transaction.
+    /// Publish a new version of the active process identified by
+    /// `logical_id`. Unified publish policy (same as value streams): the
+    /// caller supplies an explicit semver `new_version` (strictly validated);
+    /// the old active version transitions to `Deprecated` (compatibility
+    /// window); capability links are MOVED to the new row in the same
+    /// transaction ("现行版本拥有现行关联"). All of this runs inside a
+    /// single transaction.
     ///
-    /// The result also carries the capability links that still reference the
-    /// old (now deprecated) version, so the caller can warn about version
-    /// anchoring before/after the publish.
+    /// The result also carries the moved capability links so the caller can
+    /// render the publish impact receipt.
     pub async fn publish_new_version(
         &self,
         logical_id: Uuid,
+        new_version: &str,
     ) -> Result<PublishVersionResult, DomainError> {
+        // Strict semver, same rule as value-stream versions.
+        let new_parsed = parse_semver(new_version).map_err(DomainError::from)?;
+        let new_version = new_version.to_owned();
         let txn = self.db.begin().await?;
 
         let old = business_process::Entity::find()
@@ -325,7 +334,29 @@ impl SeaOrmProcessRepo {
             .await?
             .ok_or(DomainError::ProcessVersionNotFound)?;
 
-        let new_version = bump_minor(&old.business_version)?;
+        // Monotonicity: the new version must be greater than every existing
+        // version of this logicalId (no duplicates, no rollbacks). Unparseable
+        // history rows are data corruption, not skippable: fail loudly.
+        let existing_versions = business_process::Entity::find()
+            .filter(business_process::Column::LogicalId.eq(logical_id))
+            .filter(business_process::Column::DeletedAt.is_null())
+            .all(&txn)
+            .await?;
+        for row in &existing_versions {
+            let v = crate::application::version::parse(&row.business_version).map_err(|e| {
+                DomainError::Validation(format!(
+                    "stored version '{}' is not valid semver: {e}",
+                    row.business_version
+                ))
+            })?;
+            if new_parsed <= v {
+                return Err(DomainError::InvalidTransition {
+                    from: row.business_version.clone(),
+                    to: new_version.clone(),
+                    entity: "BusinessProcess".to_string(),
+                });
+            }
+        }
 
         // Collect capability links pointing at the old version row before it is
         // deprecated (transactions see a consistent snapshot).
@@ -360,11 +391,30 @@ impl SeaOrmProcessRepo {
             })
             .collect();
 
-        // Old active version → Deprecated (compatibility window).
-        let mut old_active: business_process::ActiveModel = old.clone().into();
-        old_active.status = Set(LifecycleStatus::Deprecated);
-        old_active.updated_at = Set(chrono::Utc::now());
-        old_active.update(&txn).await?;
+        // Old active version → Deprecated (compatibility window). Conditional
+        // compare-and-swap: the flip only lands if the row is still Active.
+        // Concurrent double-publishes serialize on the row lock; the loser
+        // matches zero rows and aborts instead of creating a second Active.
+        let flipped = business_process::Entity::update_many()
+            .col_expr(
+                business_process::Column::Status,
+                sea_orm::sea_query::Expr::value(LifecycleStatus::Deprecated),
+            )
+            .col_expr(
+                business_process::Column::UpdatedAt,
+                sea_orm::sea_query::Expr::value(chrono::Utc::now()),
+            )
+            .filter(business_process::Column::Id.eq(old.id))
+            .filter(business_process::Column::Status.eq(LifecycleStatus::Active))
+            .exec(&txn)
+            .await?;
+        if flipped.rows_affected != 1 {
+            return Err(DomainError::InvalidTransition {
+                from: "Active".to_string(),
+                to: "Deprecated".to_string(),
+                entity: "BusinessProcess".to_string(),
+            });
+        }
 
         let now = chrono::Utc::now();
         let new_id = Uuid::new_v4();
@@ -391,6 +441,74 @@ impl SeaOrmProcessRepo {
             space_id: Set(old.space_id),
         };
         let new_model = new_active.insert(&txn).await?;
+
+        // Copy steps to the new version (same content, new ids). Without this
+        // the new version would ship with zero steps, breaking parity with
+        // value-stream publishes (which copy stages).
+        let old_steps = process_step::Entity::find()
+            .filter(process_step::Column::ProcessId.eq(old.id))
+            .filter(process_step::Column::DeletedAt.is_null())
+            .all(&txn)
+            .await?;
+        for step in &old_steps {
+            let step_active = process_step::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                name: Set(step.name.clone()),
+                description: Set(step.description.clone()),
+                sequence_order: Set(step.sequence_order),
+                business_rules: Set(step.business_rules.clone()),
+                required_inputs: Set(step.required_inputs.clone()),
+                produced_outputs: Set(step.produced_outputs.clone()),
+                role_id: Set(step.role_id),
+                process_id: Set(new_id),
+                created_at: Set(step.created_at),
+                updated_at: Set(now),
+                deleted_at: Set(None),
+            };
+            step_active.insert(&txn).await?;
+        }
+
+        // Move version-anchored associations to the new row with single UPDATEs
+        // (same transaction). UPDATE moves every current link — including ones
+        // added concurrently after the receipt snapshot — so nothing is lost,
+        // unlike INSERT(new)+DELETE(old) which can orphan concurrent inserts.
+        // The live version owns the live links; the deprecated row keeps its
+        // content snapshot, link-free, still queryable for history/rollback.
+        // Moved: capability links, realizations, participations (RACI) and
+        // application references. Steps were copied above; run history rows
+        // intentionally stay on the version they ran against.
+        capability_process::Entity::update_many()
+            .col_expr(
+                capability_process::Column::ProcessId,
+                sea_orm::sea_query::Expr::value(new_id),
+            )
+            .filter(capability_process::Column::ProcessId.eq(old.id))
+            .exec(&txn)
+            .await?;
+        capability_realization::Entity::update_many()
+            .col_expr(
+                capability_realization::Column::ProcessId,
+                sea_orm::sea_query::Expr::value(new_id),
+            )
+            .filter(capability_realization::Column::ProcessId.eq(old.id))
+            .exec(&txn)
+            .await?;
+        participation::Entity::update_many()
+            .col_expr(
+                participation::Column::BusinessProcessId,
+                sea_orm::sea_query::Expr::value(new_id),
+            )
+            .filter(participation::Column::BusinessProcessId.eq(old.id))
+            .exec(&txn)
+            .await?;
+        process_reference::Entity::update_many()
+            .col_expr(
+                process_reference::Column::BusinessProcessId,
+                sea_orm::sea_query::Expr::value(new_id),
+            )
+            .filter(process_reference::Column::BusinessProcessId.eq(old.id))
+            .exec(&txn)
+            .await?;
 
         txn.commit().await?;
 

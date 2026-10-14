@@ -60,24 +60,30 @@ test.describe('Value Stream Management - Version Control', () => {
     
     // Click version control (GitBranch) button
     await row.getByRole('button').filter({ has: page.locator('svg[class*="lucide-git-branch"]') }).click();
-    
-    // Verify create version dialog opens
+
+    // Verify unified publish dialog opens (同一发布仪式：价值流 = 业务流程)
     await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByRole('heading', { name: /新建版本|Create New Version/ })).toBeVisible();
-    
-    // Enter new version name
+    await expect(page.getByRole('heading', { name: /发布新版本|新建版本/ })).toBeVisible();
+
+    // Enter new version (suggested value prefilled, override to be explicit)
     await page.getByRole('textbox', { name: /版本|Version/ }).fill('2.0.0');
-    
-    // Click "创建" button
-    await page.getByRole('button', { name: /创建|Create/ }).click();
-    
+
+    // Click confirm
+    await page.getByRole('button', { name: /确认发布|创建|Create/ }).click();
+
+    // Unified ritual shows a success receipt inside the dialog — close it explicitly
+    await expect(page.getByText(/发布成功/)).toBeVisible({ timeout: 10000 });
+    await page.getByRole('button', { name: /关闭|Close/ }).first().click();
+
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
-    
-    // Verify success message or UI update
-    // The UI should reflect the new version somehow
-    
-    // After versioning there are two rows (1.0.0 archived + 2.0.0 active);
+
+    // Unified publish policy: old 1.0.0 → deprecated (compatibility window),
+    // new 2.0.0 → active.
+    const oldRow = page.locator('tr').filter({ hasText: name }).filter({ hasText: '1.0.0' });
+    await expect(oldRow.getByText('deprecated')).toBeVisible({ timeout: 10000 });
+
+    // After versioning there are two rows (1.0.0 deprecated + 2.0.0 active);
     // click history (History) button on the active row
     const activeRow = page.locator('tr').filter({ hasText: name }).filter({ hasText: 'active' });
     await activeRow.getByRole('button', { name: '历史' }).click();
@@ -94,6 +100,11 @@ test.describe('Value Stream Management - Version Control', () => {
     // Close history dialog
     await historyDialog.getByRole('button', { name: '关闭' }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
+
+    // Retire the deprecated old row via the archive button (visible on
+    // deprecated rows under the unified policy), then verify archived.
+    await oldRow.getByRole('button').filter({ has: page.locator('svg[class*="lucide-archive"]') }).click();
+    await expect(oldRow.getByText('archived')).toBeVisible({ timeout: 10000 });
 
     // Self-delete and verify (单例自删自证) — cleanup expands by logicalId so
     // both the archived 1.0.0 and active 2.0.0 rows are removed.
@@ -229,7 +240,7 @@ test.describe('Value Stream Management - Version Control', () => {
 
     // Empty version name: the submit button is disabled and the dialog stays open
     await page.getByRole('textbox', { name: /版本|Version/ }).clear();
-    await expect(page.getByRole('button', { name: /创建|Create/ })).toBeDisabled();
+    await expect(page.getByRole('button', { name: /确认发布|创建|Create/ })).toBeDisabled();
     await expect(page.getByRole('dialog')).toBeVisible();
 
     // Close dialog

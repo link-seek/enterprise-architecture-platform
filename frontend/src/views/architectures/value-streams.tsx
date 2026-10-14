@@ -1,4 +1,4 @@
-import { useQuery } from '@apollo/client/react'
+import { useQuery, useMutation, useApolloClient } from '@apollo/client/react'
 import { gql } from '@apollo/client'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
@@ -7,9 +7,11 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Link, useParams } from 'react-router-dom'
 import { Plus, Pencil, Trash2, History, GitBranch, MoreVertical, UserRoundCog, type LucideIcon } from 'lucide-react'
-import { useState, useCallback, memo } from 'react'
+import { useState, useCallback, useEffect, memo } from 'react'
 import { ValueStreamCrudDialog, ValueStreamDeleteDialog } from './crud'
-import { VersionHistoryDialog, CreateVersionDialog, ArchiveButton, GET_VALUE_STREAMS } from './version-control'
+import { VersionHistoryDialog, ArchiveButton, ARCHIVE_VALUE_STREAM, GET_VALUE_STREAMS, GET_VALUE_STREAM_VERSIONS } from './version-control'
+import { VersionPublishDialog, suggestNextVersion, type PublishImpactItem } from './version-publish-dialog'
+import { GET_STAGE_CAPABILITIES } from './value-stream-stages'
 import { TransferOwnershipDialog } from './transfer-ownership-dialog'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { useIsMobile } from '@/hooks/use-media-query'
@@ -39,6 +41,106 @@ interface ValueStreamsQuery {
 }
 
 const EMPTY_VALUE_STREAMS: ValueStream[] = []
+
+const PUBLISH_VALUE_STREAM_VERSION = gql`
+  mutation ValueStreamCreateVersion($currentId: String!, $newVersion: String!, $newName: String, $newDescription: String) {
+    valueStreamCreateVersion(currentId: $currentId, newVersion: $newVersion, newName: $newName, newDescription: $newDescription) {
+      id name description businessVersion status importance logicalId
+    }
+  }
+`
+
+const GET_STAGES_BY_VS = gql`
+  query GetStagesByValueStream($valueStreamId: String!) {
+    valueStreamStagesByValueStream(valueStreamId: $valueStreamId) {
+      id name sequenceOrder
+    }
+  }
+`
+
+// 价值流发布包装：取阶段及各阶段关联能力，喂给统一发布弹窗。
+function ValueStreamPublishDialog({ item, spaceId, onOpenChange }: {
+  item: ValueStream | null
+  spaceId: string
+  onOpenChange: (v: boolean) => void
+}) {
+  const client = useApolloClient()
+  const [items, setItems] = useState<PublishImpactItem[]>([])
+  const [impactLoading, setImpactLoading] = useState(false)
+  const [impactError, setImpactError] = useState<string | null>(null)
+  const [publishMut] = useMutation(PUBLISH_VALUE_STREAM_VERSION)
+  const itemId = item?.id
+
+  useEffect(() => {
+    if (!itemId) return
+    let cancelled = false
+    setImpactLoading(true)
+    setImpactError(null)
+    setItems([])
+    ;(async () => {
+      const { data } = await client.query<{ valueStreamStagesByValueStream?: { id: string; name: string }[] }>({
+        query: GET_STAGES_BY_VS,
+        variables: { valueStreamId: itemId },
+        fetchPolicy: 'network-only',
+      })
+      const stages = data?.valueStreamStagesByValueStream ?? []
+      const rows = await Promise.all(stages.map(async (s) => {
+        const r = await client.query<{ capabilitiesByStage?: { id: string; name: string }[] }>({
+          query: GET_STAGE_CAPABILITIES,
+          variables: { stageId: s.id },
+          fetchPolicy: 'network-only',
+        })
+        const caps = r.data?.capabilitiesByStage ?? []
+        return {
+          id: s.id,
+          name: `阶段 ${s.name}`,
+          detail: caps.length > 0 ? caps.map(c => c.name).join('、') : '无关联能力',
+        } as PublishImpactItem
+      }))
+      if (!cancelled) {
+        setItems(rows)
+        setImpactLoading(false)
+      }
+    })().catch((err) => {
+      if (!cancelled) {
+        setImpactError(err instanceof Error ? err.message : '加载失败')
+        setImpactLoading(false)
+      }
+    })
+    return () => { cancelled = true }
+  }, [itemId, client])
+
+  return (
+    <VersionPublishDialog
+      open={!!item}
+      onOpenChange={onOpenChange}
+      title="发布新版本"
+      currentVersion={item?.businessVersion}
+      suggestedVersion={suggestNextVersion(item?.businessVersion)}
+      impactIntro="以下阶段及其能力关联将整体迁移到新版，旧版进入 deprecated 兼容期："
+      impactItems={items}
+      impactLoading={impactLoading}
+      impactError={impactError}
+      impactEmptyText="该价值流暂无阶段，直接发布新版。"
+      confirmLabel="确认发布"
+      successTitle="发布成功，阶段与关联已迁移到新版:"
+      onConfirm={async (newVersion) => {
+        if (!item) return []
+        const res = await publishMut({
+          variables: {
+            currentId: item.id,
+            newVersion,
+            newName: item.name,
+            newDescription: item.description,
+          },
+          refetchQueries: [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
+        })
+        void res
+        return items
+      }}
+    />
+  )
+}
 
 type BadgeVariant = NonNullable<BadgeProps['variant']>
 
@@ -73,7 +175,10 @@ function buildActions(vs: ValueStream, isOwned: boolean, onEdit: (vs: ValueStrea
   if (isOwned) {
     actions.unshift(
       { icon: Pencil, label: '编辑', onClick: () => onEdit(vs) },
-      { icon: GitBranch, label: '新版本', onClick: () => onVersion(vs) },
+      // 统一发布策略：仅 active 行可发布新版。
+      ...(vs.status === 'active'
+        ? [{ icon: GitBranch, label: '新版本', onClick: () => onVersion(vs) } as ValueStreamAction]
+        : []),
       { icon: UserRoundCog, label: '转移所有权', onClick: () => onTransfer(vs) },
       { icon: Trash2, label: '删除', onClick: () => onDelete(vs), destructive: true },
     )
@@ -126,7 +231,7 @@ const ValueStreamList = memo(function ValueStreamList({ nodes, isOwned, isMobile
               </Link>
               {owned && (
                 <div className="flex items-center gap-1">
-                  {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
+                  {vs.status !== 'archived' && <ArchiveButton id={vs.id} spaceId={spaceId} mutation={ARCHIVE_VALUE_STREAM} refetchQuery={GET_VALUE_STREAMS} />}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="sm" className="h-11 w-11 p-0" aria-label="更多操作" title="更多操作">
@@ -192,7 +297,7 @@ const ValueStreamList = memo(function ValueStreamList({ nodes, isOwned, isMobile
                     {actions.filter((a) => !a.destructive).map((action) => (
                       <ActionButton key={action.label} action={action} />
                     ))}
-                    {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
+                    {vs.status !== 'archived' && <ArchiveButton id={vs.id} spaceId={spaceId} mutation={ARCHIVE_VALUE_STREAM} refetchQuery={GET_VALUE_STREAMS} />}
                     {actions.filter((a) => a.destructive).map((action) => (
                       <ActionButton key={action.label} action={action} />
                     ))}
@@ -215,9 +320,7 @@ export default function ValueStreams() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<ValueStream | null>(null)
   const [deleting, setDeleting] = useState<ValueStream | null>(null)
-  const [historyOpen, setHistoryOpen] = useState(false)
   const [historyLogicalId, setHistoryLogicalId] = useState<string | null>(null)
-  const [versionOpen, setVersionOpen] = useState(false)
   const [versionItem, setVersionItem] = useState<ValueStream | null>(null)
   const [transferItem, setTransferItem] = useState<ValueStream | null>(null)
 
@@ -228,8 +331,8 @@ export default function ValueStreams() {
 
   const handleEdit = useCallback((vs: ValueStream) => { setEditing(vs); setDialogOpen(true) }, [])
   const handleDelete = useCallback((vs: ValueStream) => setDeleting(vs), [])
-  const handleVersion = useCallback((vs: ValueStream) => { setVersionItem(vs); setVersionOpen(true) }, [])
-  const handleHistory = useCallback((vs: ValueStream) => { setHistoryLogicalId(vs.logicalId); setHistoryOpen(true) }, [])
+  const handleVersion = useCallback((vs: ValueStream) => { setVersionItem(vs) }, [])
+  const handleHistory = useCallback((vs: ValueStream) => { setHistoryLogicalId(vs.logicalId) }, [])
   const handleTransfer = useCallback((vs: ValueStream) => setTransferItem(vs), [])
 
   if (!spaceId) {
@@ -283,8 +386,8 @@ export default function ValueStreams() {
 
       <ValueStreamCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} />
       <ValueStreamDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
-      <VersionHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} spaceId={spaceId} logicalId={historyLogicalId} />
-      <CreateVersionDialog open={versionOpen} onOpenChange={setVersionOpen} currentItem={versionItem} spaceId={spaceId} />
+      <VersionHistoryDialog open={historyLogicalId !== null} onOpenChange={(v) => { if (!v) setHistoryLogicalId(null) }} spaceId={spaceId} logicalId={historyLogicalId} query={GET_VALUE_STREAM_VERSIONS} dataKey="valueStreamsBySpaceAndLogicalId" />
+      <ValueStreamPublishDialog item={versionItem} spaceId={spaceId} onOpenChange={(v) => { if (!v) setVersionItem(null) }} />
       <TransferOwnershipDialog
         open={!!transferItem}
         onOpenChange={(v) => { if (!v) setTransferItem(null) }}

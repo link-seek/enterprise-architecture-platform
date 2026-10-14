@@ -82,10 +82,11 @@ impl ValueStream {
         self
     }
 
-    /// Archive this value stream. Only active streams can be archived.
-    /// This is a lifecycle state transition: Active → Archived (one-way).
+    /// Archive this value stream. Active (whole-line retirement) or
+    /// Deprecated (old-version retirement) rows can be archived.
+    /// Unified lifecycle: Active | Deprecated → Archived (one-way).
     pub fn archive(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
-        if self.status != LifecycleStatus::Active {
+        if !matches!(self.status, LifecycleStatus::Active | LifecycleStatus::Deprecated) {
             return Err(DomainError::InvalidTransition {
                 from: format!("{:?}", self.status),
                 to: "Archived".to_string(),
@@ -97,9 +98,25 @@ impl ValueStream {
         Ok(())
     }
 
+    /// Deprecate this value stream (compatibility window after a publish).
+    /// Only the active row can be deprecated.
+    pub fn deprecate(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
+        if self.status != LifecycleStatus::Active {
+            return Err(DomainError::InvalidTransition {
+                from: format!("{:?}", self.status),
+                to: "Deprecated".to_string(),
+                entity: "ValueStream".to_string(),
+            });
+        }
+        self.status = LifecycleStatus::Deprecated;
+        self.updated_at = now;
+        Ok(())
+    }
+
     /// Create a new version of this value stream.
-    /// The current version is archived, and a new version is returned
-    /// with the same logical_id but a new id and business_version.
+    /// The current version enters the Deprecated compatibility window, and a
+    /// new version is returned with the same logical_id but a new id and
+    /// business_version. Unified publish policy: Active → Deprecated.
     pub fn create_new_version(
         &mut self,
         new_id: Uuid,
@@ -112,13 +129,13 @@ impl ValueStream {
         if self.status != LifecycleStatus::Active {
             return Err(DomainError::InvalidTransition {
                 from: format!("{:?}", self.status),
-                to: "Archived (for versioning)".to_string(),
+                to: "Deprecated (for versioning)".to_string(),
                 entity: "ValueStream".to_string(),
             });
         }
 
-        // Archive current version
-        self.archive(now)?;
+        // Deprecate current version (compatibility window)
+        self.deprecate(now)?;
 
         // Create new version with same logical_id
         let new_vs = ValueStream {

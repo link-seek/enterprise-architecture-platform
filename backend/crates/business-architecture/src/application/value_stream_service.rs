@@ -57,10 +57,11 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
     }
 
     /// Create a new version of an existing value stream.
-    /// The current active version is archived, and a new version is created
+    /// The current active version is deprecated, and a new version is created
     /// with the same logical_id. The current version's stages are copied to
-    /// the new version. The whole operation (archive + insert + stage copy)
-    /// runs inside a single transaction.
+    /// the new version and their capability links are moved over. The whole
+    /// operation (deprecate + insert + stage copy + link move) runs inside a
+    /// single transaction.
     pub async fn create_version(
         &self,
         current_id: Uuid,

@@ -304,17 +304,78 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
     ) -> Result<(), DomainError> {
         let txn = self.db.begin().await?;
 
-        // 1. Archive the current version.
+        // Unified publish policy (same contract as process publishes):
+        // strict semver + monotonicity against every existing version of this
+        // logicalId (no duplicates, no rollbacks). Unparseable history rows
+        // are data corruption: fail loudly instead of skipping.
+        let new_parsed = crate::application::version::parse(&new_version.business_version)
+            .map_err(DomainError::from)?;
+        let existing_versions = value_stream::Entity::find()
+            .filter(value_stream::Column::LogicalId.eq(new_version.logical_id))
+            .filter(value_stream::Column::DeletedAt.is_null())
+            .all(&txn)
+            .await?;
+        for row in &existing_versions {
+            let v = crate::application::version::parse(&row.business_version).map_err(|e| {
+                DomainError::Validation(format!(
+                    "stored version '{}' is not valid semver: {e}",
+                    row.business_version
+                ))
+            })?;
+            if new_parsed <= v {
+                return Err(DomainError::InvalidTransition {
+                    from: row.business_version.clone(),
+                    to: new_version.business_version.clone(),
+                    entity: "ValueStream".to_string(),
+                });
+            }
+        }
+
+        // 1. Deprecate the current version (compatibility window). The row must
+        // still be Active: silently "deprecating" an already-archived row
+        // would resurrect it, and a concurrent second publish must fail
+        // instead of producing two Active rows.
         let current_model = value_stream::Entity::find_by_id(current.id)
             .one(&txn)
             .await?
             .ok_or(DomainError::ValueStreamNotFound)?;
-        let mut current_active: value_stream::ActiveModel = current_model.into();
-        current_active.status = Set(LifecycleStatus::Archived);
-        current_active.updated_at = Set(current.updated_at);
-        current_active.update(&txn).await.map_err(|e| {
-            DomainError::Database(format!("save_version_atomic: archive current version: {e}"))
-        })?;
+        if current_model.status != LifecycleStatus::Active {
+            return Err(DomainError::InvalidTransition {
+                from: format!("{:?}", current_model.status),
+                to: "Deprecated".to_string(),
+                entity: "ValueStream".to_string(),
+            });
+        }
+        // Conditional compare-and-swap: the flip only lands if the row is
+        // still Active. Concurrent double-publishes serialize on the row
+        // lock; the loser matches zero rows and aborts instead of producing
+        // two Active rows.
+        let flipped = value_stream::Entity::update_many()
+            .col_expr(
+                value_stream::Column::Status,
+                sea_orm::sea_query::Expr::value(LifecycleStatus::Deprecated),
+            )
+            .col_expr(
+                value_stream::Column::UpdatedAt,
+                sea_orm::sea_query::Expr::value(current.updated_at),
+            )
+            .filter(value_stream::Column::Id.eq(current.id))
+            .filter(value_stream::Column::Status.eq(LifecycleStatus::Active))
+            .exec(&txn)
+            .await
+            .map_err(|e| {
+                DomainError::Database(format!(
+                    "save_version_atomic: deprecate current version {}: {e}",
+                    current.id
+                ))
+            })?;
+        if flipped.rows_affected != 1 {
+            return Err(DomainError::InvalidTransition {
+                from: "Active".to_string(),
+                to: "Deprecated".to_string(),
+                entity: "ValueStream".to_string(),
+            });
+        }
 
         // 2. Insert the new version.
         let new_active = value_stream::ActiveModel {
@@ -368,12 +429,15 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
             })?;
         }
 
-        // 4. Copy `stage_capabilities` associations from the old stages to the
-        //    corresponding new stages (matched by sequence_order). Without this
-        //    the new version's stages would have no capability links while the
-        //    old links remain attached to the just-archived stage rows.
+        // 4. Move `stage_capabilities` associations from the old stages to the
+        //    corresponding new stages (matched by sequence_order). Unified
+        //    publish policy: the live version owns the live links ("现行版本
+        //    拥有现行关联"); old rows keep their content snapshot, link-free.
+        //    Without this the new version's stages would have no capability
+        //    links at all.
         let old_stages = value_stream_stage::Entity::find()
             .filter(value_stream_stage::Column::ValueStreamId.eq(current.id))
+            .filter(value_stream_stage::Column::DeletedAt.is_null())
             .all(&txn)
             .await
             .map_err(|e| {
@@ -390,33 +454,22 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
             let Some(old_stage_id) = old_stage_id_by_seq.get(&stage.sequence_order) else {
                 continue;
             };
-            let links = stage_capability::Entity::find()
+            // Move (single UPDATE): every current link — including ones added
+            // concurrently — lands on the new stage; nothing is orphaned.
+            stage_capability::Entity::update_many()
+                .col_expr(
+                    stage_capability::Column::StageId,
+                    sea_orm::sea_query::Expr::value(stage.id),
+                )
                 .filter(stage_capability::Column::StageId.eq(*old_stage_id))
-                .all(&txn)
+                .exec(&txn)
                 .await
                 .map_err(|e| {
                     DomainError::Database(format!(
-                        "save_version_atomic: list stage_capabilities of stage {old_stage_id}: {e}"
+                        "save_version_atomic: move stage_capabilities {old_stage_id} → {}: {e}",
+                        stage.id
                     ))
                 })?;
-            for link in links {
-                let active = stage_capability::ActiveModel {
-                    stage_id: Set(stage.id),
-                    capability_id: Set(link.capability_id),
-                };
-                stage_capability::Entity::insert(active)
-                    .on_conflict(sea_orm::sea_query::OnConflict::new().do_nothing().to_owned())
-                    .exec(&txn)
-                    .await
-                    .map_err(|e| {
-                        DomainError::Database(format!(
-                            "save_version_atomic: copy stage_capability ({}, {}) → {}: {e}",
-                            old_stage_id,
-                            link.capability_id,
-                            stage.id
-                        ))
-                    })?;
-            }
         }
 
         txn.commit().await?;

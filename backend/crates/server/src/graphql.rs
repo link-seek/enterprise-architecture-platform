@@ -507,7 +507,7 @@ struct CapabilityProcessRelation {
     valid: bool,
 }
 
-/// A capability that referenced the old process version before a publish.
+/// A capability link moved to the new process version by a publish.
 #[derive(Clone, Debug)]
 struct AffectedProcessLinkOutput {
     capability_id: String,
@@ -517,8 +517,7 @@ struct AffectedProcessLinkOutput {
 }
 
 /// Result of the `processPublishVersion` mutation: the newly created active
-/// version plus the capability links that now point at the deprecated old
-/// version.
+/// version plus the capability links moved to it in the same transaction.
 #[derive(Clone, Debug)]
 struct ProcessPublishVersionOutput {
     id: String,
@@ -2108,8 +2107,8 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                 let am = business_process::ActiveModel {
                     id: Set(Uuid::now_v7()),
                     logical_id: Set(Uuid::now_v7()),
-                    // Strict semver ("1.0.0"): `publish_new_version` bumps the
-                    // minor component with semver, which rejects a leading 'v'.
+                    // Strict semver ("1.0.0", no leading 'v'); later versions
+                    // are user-supplied via processPublishVersion.
                     business_version: Set("1.0.0".to_owned()),
                     status: Set(LifecycleStatus::Active),
                     name: Set(name),
@@ -2166,6 +2165,14 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                     .ok_or_else(|| async_graphql::Error::new("Process not found."))?;
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
                 ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
+
+                // Unified lifecycle: only Active rows are mutable (same rule
+                // as value streams and capabilities).
+                if existing.status != LifecycleStatus::Active {
+                    return Err(async_graphql::Error::new(
+                        "Cannot modify non-active process.",
+                    ));
+                }
 
                 let mut am: business_process::ActiveModel = existing.into();
                 if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) {
@@ -2315,10 +2322,10 @@ fn register_process_domain_mutations(builder: &mut Builder) {
     builder.mutations.push(transfer);
 
     // ── processPublishVersion ─────────────────────────────────────────
-    // Publish a new minor version of the active process identified by
-    // logicalId. The old active row becomes Deprecated (compatibility window)
-    // and the result lists the capability links now pointing at the old
-    // version so the UI can warn about version anchoring.
+    // Unified publish policy (same as value streams): explicit semver
+    // `newVersion`; old active row → Deprecated; capability links MOVED to
+    // the new row in the same transaction. Result lists the moved links for
+    // the UI impact receipt.
     let publish = Field::new(
         "processPublishVersion",
         TypeRef::named_nn("ProcessPublishVersionResult"),
@@ -2327,6 +2334,7 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                 check_value_stream_auth(&ctx, OperationType::Create)?;
                 let db = ctx.data::<DatabaseConnection>()?;
                 let logical_id = parse_uuid_arg(&ctx, "logicalId")?;
+                let new_version = ctx.args.try_get("newVersion").map_err(|_| async_graphql::Error::new("Missing required argument 'newVersion'"))?.string()?;
 
                 let repo = SeaOrmProcessRepo::new(db.clone());
                 // Enforce space-level ACL + entity ownership before publishing.
@@ -2339,7 +2347,7 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                 ensure_entity_owner_or_admin(&ctx, active.owner_id).await?;
 
                 let result = repo
-                    .publish_new_version(logical_id)
+                    .publish_new_version(logical_id, &new_version)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
 
@@ -2362,12 +2370,13 @@ fn register_process_domain_mutations(builder: &mut Builder) {
             })
         },
     )
-    .argument(InputValue::new("logicalId", TypeRef::named_nn(TypeRef::STRING)));
+    .argument(InputValue::new("logicalId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("newVersion", TypeRef::named_nn(TypeRef::STRING)));
     builder.mutations.push(publish);
 
     // ── processArchive ────────────────────────────────────────────────
-    // Only `Deprecated → Archived` is allowed: the Deprecated compatibility
-    // window cannot be skipped by archiving an Active process directly.
+    // Unified lifecycle: `Active | Deprecated → Archived` (same as value
+    // streams and capabilities).
     let archive = Field::new(
         "processArchive",
         TypeRef::named_nn(TypeRef::BOOLEAN),
@@ -5081,6 +5090,7 @@ fn register_space_scoped_queries(builder: &mut Builder) {
         TypeRef::named_nn_list_nn("ValueStreams"),
         |ctx| {
             FieldFuture::new(async move {
+                use sea_orm::QueryOrder;
                 let db = ctx.data::<DatabaseConnection>()?;
                 let space_id = parse_uuid_arg(&ctx, "spaceId")?;
                 let logical_id = parse_uuid_arg(&ctx, "logicalId")?;
@@ -5094,6 +5104,7 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                     .filter(value_stream::Column::SpaceId.eq(space_id))
                     .filter(value_stream::Column::LogicalId.eq(logical_id))
                     .filter(value_stream::Column::DeletedAt.is_null())
+                    .order_by_asc(value_stream::Column::CreatedAt)
                     .all(db)
                     .await
                     .map_err(db_err_to_graphql)?;
@@ -5106,6 +5117,42 @@ fn register_space_scoped_queries(builder: &mut Builder) {
     .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("logicalId", TypeRef::named_nn(TypeRef::STRING)));
     builder.queries.push(vs_by_logical);
+
+    // ── businessProcessesBySpaceAndLogicalId ──────────────────────────
+    // Unified publish policy: processes get the same version-history viewer
+    // as value streams.
+    let proc_by_logical = Field::new(
+        "businessProcessesBySpaceAndLogicalId",
+        TypeRef::named_nn_list_nn("BusinessProcesses"),
+        |ctx| {
+            FieldFuture::new(async move {
+                use sea_orm::QueryOrder;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let logical_id = parse_uuid_arg(&ctx, "logicalId")?;
+                let (actor_id, actor_role) = caller_identity(&ctx);
+                let service = space_service(db);
+                service
+                    .ensure_can_read(space_id, actor_id, actor_role)
+                    .await
+                    .map_err(domain_err_to_graphql)?;
+                let rows = business_process::Entity::find()
+                    .filter(business_process::Column::SpaceId.eq(space_id))
+                    .filter(business_process::Column::LogicalId.eq(logical_id))
+                    .filter(business_process::Column::DeletedAt.is_null())
+                    .order_by_asc(business_process::Column::CreatedAt)
+                    .all(db)
+                    .await
+                    .map_err(db_err_to_graphql)?;
+                let values: Vec<FieldValue> =
+                    rows.into_iter().map(FieldValue::owned_any).collect();
+                Ok(Some(FieldValue::list(values)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("logicalId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.queries.push(proc_by_logical);
 
     // ── Child-entity by-parent queries ────────────────────────────────
     // These close the cross-tenant read gap: the auto-query for child
