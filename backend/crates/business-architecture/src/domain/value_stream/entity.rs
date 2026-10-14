@@ -118,7 +118,6 @@ impl ValueStream {
     /// new version is returned with the same logical_id but a new id and
     /// business_version. Unified publish policy: Active → Deprecated.
     pub fn create_new_version(
-    pub fn create_new_version(
         &mut self,
         new_id: Uuid,
         new_version: String,
@@ -130,7 +129,7 @@ impl ValueStream {
         if self.status != LifecycleStatus::Active {
             return Err(DomainError::InvalidTransition {
                 from: format!("{:?}", self.status),
-                to: "Archived (for versioning)".to_string(),
+                to: "Deprecated (for versioning)".to_string(),
                 entity: "ValueStream".to_string(),
             });
         }
