@@ -120,6 +120,19 @@ impl CapabilityRepository for SeaOrmCapabilityRepo {
         Ok(())
     }
 
+    async fn archive(&self, id: Uuid) -> Result<(), DomainError> {
+        // Enforce the `Active → Archived` edge via the domain rule so the
+        // transition stays consistent with `BusinessCapability::archive`.
+        let mut cap = self
+            .find_by_id(id)
+            .await?
+            .ok_or(DomainError::CapabilityNotFound)?;
+        cap.archive(chrono::Utc::now())?;
+        self.save(&cap).await?;
+
+        Ok(())
+    }
+
     async fn list_active(
         &self,
         page: u64,

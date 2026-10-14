@@ -166,11 +166,16 @@ function ProcessList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer, o
               {owned && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0" aria-label="更多操作">
+                    <Button variant="ghost" size="sm" className="h-11 w-11 p-0" aria-label="更多操作">
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    {p.status === 'active' && p.logicalId && (
+                      <DropdownMenuItem onClick={() => onPublish(p)}>
+                        <GitBranch className="h-4 w-4 mr-2" />发布新版本
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem onClick={() => onEdit(p)}>
                       <Pencil className="h-4 w-4 mr-2" />编辑
                     </DropdownMenuItem>
@@ -307,16 +312,21 @@ export default function Processes() {
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
           {Boolean(error) && <div className="text-center py-8 text-destructive">加载失败</div>}
           {data && (
-            <ProcessList
-              nodes={data.businessProcessesBySpace ?? []}
-              isOwned={(p) => isEntityOwner(p.ownerId)}
-              isMobile={isMobile}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-              onTransfer={handleTransfer}
-              onPublish={handlePublish}
-              onApplicationSupport={handleApplicationSupport}
-            />
+            <>
+              <ProcessList
+                nodes={data.businessProcessesBySpace ?? []}
+                isOwned={(p) => isEntityOwner(p.ownerId)}
+                isMobile={isMobile}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                onTransfer={handleTransfer}
+                onPublish={handlePublish}
+                onApplicationSupport={handleApplicationSupport}
+              />
+              <div className="flex items-center justify-between mt-4">
+                <p className="text-sm text-muted-foreground">共 {data.businessProcessesBySpace?.length ?? 0} 条</p>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

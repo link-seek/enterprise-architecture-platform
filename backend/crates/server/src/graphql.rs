@@ -27,6 +27,8 @@ use business_architecture::domain::space::entity::{Space as DomainSpace, SpaceMe
 use business_architecture::domain::error::DomainError;
 use business_architecture::infrastructure::persistence::value_stream_repo::SeaOrmValueStreamRepo;
 use business_architecture::infrastructure::persistence::process_repo::SeaOrmProcessRepo;
+use business_architecture::domain::capability::repository::CapabilityRepository;
+use business_architecture::infrastructure::persistence::capability_repo::SeaOrmCapabilityRepo;
 use business_architecture::infrastructure::persistence::space_repo::{SeaOrmSpaceRepo, SeaOrmMembershipRepo};
 use business_architecture::infrastructure::persistence::space_audit_repo::SeaOrmAuditLogRepo;
 use shared_common::enums::ValueStreamImportance;
@@ -1887,6 +1889,15 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
                 ensure_space_edit_access(&ctx, db, existing.space_id).await?;
                 ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
 
+                // Archived capabilities are retired anchors: links stay, but
+                // the definition itself is frozen (mirrors the value-stream
+                // domain rule; see D2 in discussions#752).
+                if existing.status != LifecycleStatus::Active {
+                    return Err(async_graphql::Error::new(
+                        "Cannot modify archived capability.",
+                    ));
+                }
+
                 let mut am: business_capability::ActiveModel = existing.into();
                 if let Some(v) = ctx.args.get("name").and_then(|v| v.string().ok()) {
                     am.name = Set(v.to_owned());
@@ -1981,6 +1992,40 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
     )
     .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
     builder.mutations.push(delete);
+
+    // ── capabilityArchive ────────────────────────────────────────────
+    // Lifecycle: `Active → Archived` (one-way, value-stream style). No
+    // Deprecated window: capabilities carry no version chain, and
+    // `link_process` already rejects new relations to non-active rows.
+    // Same auth chain as the other capability writes (role permission +
+    // space ACL + entity owner/admin).
+    let archive_capability = Field::new(
+        "capabilityArchive",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                check_value_stream_auth(&ctx, OperationType::Update)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let id = parse_uuid_arg(&ctx, "id")?;
+
+                let existing = business_capability::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Capability not found."))?;
+                ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+                ensure_entity_owner_or_admin(&ctx, existing.owner_id).await?;
+
+                let repo = SeaOrmCapabilityRepo::new(db.clone());
+                repo.archive(id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(archive_capability);
 
     // ── capabilityTransferOwnership ──────────────────────────────────
     let transfer = Field::new(

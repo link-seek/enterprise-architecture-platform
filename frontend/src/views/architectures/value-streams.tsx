@@ -93,6 +93,9 @@ const ValueStreamList = memo(function ValueStreamList({ nodes, isOwned, isMobile
   onHistory: (vs: ValueStream) => void
   onTransfer: (vs: ValueStream) => void
 }) {
+  if (nodes.length === 0) {
+    return <div className="text-center py-8 text-muted-foreground">暂无数据</div>
+  }
   if (isMobile) {
     return (
       <div className="space-y-3">
