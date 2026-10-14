@@ -319,12 +319,36 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
                 entity: "ValueStream".to_string(),
             });
         }
-        let mut current_active: value_stream::ActiveModel = current_model.into();
-        current_active.status = Set(LifecycleStatus::Deprecated);
-        current_active.updated_at = Set(current.updated_at);
-        current_active.update(&txn).await.map_err(|e| {
-            DomainError::Database(format!("save_version_atomic: archive current version: {e}"))
-        })?;
+        // Conditional compare-and-swap: the flip only lands if the row is
+        // still Active. Concurrent double-publishes serialize on the row
+        // lock; the loser matches zero rows and aborts instead of producing
+        // two Active rows.
+        let flipped = value_stream::Entity::update_many()
+            .col_expr(
+                value_stream::Column::Status,
+                sea_orm::sea_query::Expr::value(LifecycleStatus::Deprecated),
+            )
+            .col_expr(
+                value_stream::Column::UpdatedAt,
+                sea_orm::sea_query::Expr::value(current.updated_at),
+            )
+            .filter(value_stream::Column::Id.eq(current.id))
+            .filter(value_stream::Column::Status.eq(LifecycleStatus::Active))
+            .exec(&txn)
+            .await
+            .map_err(|e| {
+                DomainError::Database(format!(
+                    "save_version_atomic: deprecate current version {}: {e}",
+                    current.id
+                ))
+            })?;
+        if flipped.rows_affected != 1 {
+            return Err(DomainError::InvalidTransition {
+                from: "Active".to_string(),
+                to: "Deprecated".to_string(),
+                entity: "ValueStream".to_string(),
+            });
+        }
 
         // 2. Insert the new version.
         let new_active = value_stream::ActiveModel {

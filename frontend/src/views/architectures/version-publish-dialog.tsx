@@ -9,6 +9,8 @@ import { Loader2 } from 'lucide-react'
 
 // 与后端 `bump_minor` 对齐：X.Y.Z → X.(Y+1).Z（保留 patch）。
 // 全串匹配：拒绝 `v` 前缀、两段式、多段等非严格 semver，后端会同样拒绝。
+// 注意：前端比后端更严——后端 semver::Version::parse 允许 prerelease/build
+// 后缀（如 2.0.0-rc.1），前端输入框不接受；以后端校验为准，前端只做即时提示。
 export function isValidSemver(v: string): boolean {
   return /^\d+\.\d+\.\d+$/.test(v.trim())
 }
@@ -17,6 +19,26 @@ export function suggestNextVersion(current?: string | null): string {
   const m = (current ?? '').trim().match(/^(\d+)\.(\d+)\.(\d+)$/)
   if (!m) return '1.1.0'
   return `${m[1]}.${parseInt(m[2], 10) + 1}.${m[3]}`
+}
+
+function getVersionError(trimmed: string, currentVersion?: string | null): string | null {
+  if (!trimmed) return null
+  if (!isValidSemver(trimmed)) return '版本号须为严格 semver（如 2.0.0，无 v 前缀）'
+  if (trimmed === (currentVersion ?? '').trim()) return '新版本号不能与当前版本相同'
+  return null
+}
+
+function renderImpactList(items: PublishImpactItem[]) {
+  return (
+    <ul className="space-y-1">
+      {items.map(item => (
+        <li key={item.id} className="flex items-center gap-2">
+          <span>{item.name}</span>
+          {item.detail && <span className="font-mono text-xs text-muted-foreground">{item.detail}</span>}
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 // 统一发布仪式（discussions#752 统一发布策略 v1）：当前版本 → 新版本号 →
@@ -61,13 +83,7 @@ export function VersionPublishDialog({ open, onOpenChange, title, currentVersion
   }, [open, suggestedVersion])
 
   const trimmed = newVersion.trim()
-  const versionError = !trimmed
-    ? null
-    : !isValidSemver(trimmed)
-      ? '版本号须为严格 semver（如 2.0.0，无 v 前缀）'
-      : trimmed === (currentVersion ?? '').trim()
-        ? '新版本号不能与当前版本相同'
-        : null
+  const versionError = getVersionError(trimmed, currentVersion)
   const canConfirm = !loading && !impactLoading && !impactError && trimmed !== '' && versionError === null
 
   async function handleConfirm() {
@@ -100,16 +116,7 @@ export function VersionPublishDialog({ open, onOpenChange, title, currentVersion
     if (impactItems.length === 0) {
       return <p className="text-muted-foreground">{impactEmptyText}</p>
     }
-    return (
-      <ul className="space-y-1">
-        {impactItems.map(item => (
-          <li key={item.id} className="flex items-center gap-2">
-            <span>{item.name}</span>
-            {item.detail && <span className="font-mono text-xs text-muted-foreground">{item.detail}</span>}
-          </li>
-        ))}
-      </ul>
-    )
+    return renderImpactList(impactItems)
   }
 
   return (
@@ -141,14 +148,7 @@ export function VersionPublishDialog({ open, onOpenChange, title, currentVersion
               {done.length === 0 ? (
                 <p className="text-muted-foreground">无受影响的关联。</p>
               ) : (
-                <ul className="space-y-1">
-                  {done.map(item => (
-                    <li key={item.id} className="flex items-center gap-2">
-                      <span>{item.name}</span>
-                      {item.detail && <span className="font-mono text-xs text-muted-foreground">{item.detail}</span>}
-                    </li>
-                  ))}
-                </ul>
+                renderImpactList(done)
               )}
             </>
           )}
