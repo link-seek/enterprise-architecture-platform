@@ -166,7 +166,7 @@ function ProcessList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer, o
               {owned && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="h-11 w-11 p-0" aria-label="更多操作">
+                    <Button variant="ghost" size="sm" className="h-11 w-11 p-0" aria-label="更多操作" title="更多操作">
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -257,13 +257,13 @@ function ProcessList({ nodes, isOwned, isMobile, onEdit, onDelete, onTransfer, o
                         <GitBranch className="h-3.5 w-3.5" />
                       </Button>
                     )}
-                    <Button variant="ghost" size="sm" onClick={() => onEdit(p)} aria-label="编辑">
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(p)} aria-label="编辑" title="编辑">
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onTransfer(p)} aria-label="转移所有权">
+                    <Button variant="ghost" size="sm" onClick={() => onTransfer(p)} aria-label="转移所有权" title="转移所有权">
                       <UserRoundCog className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onDelete(p)} aria-label="删除">
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(p)} aria-label="删除" title="删除">
                       <Trash2 className="h-3.5 w-3.5 text-destructive" />
                     </Button>
                   </>

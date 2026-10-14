@@ -206,7 +206,7 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
               {owned && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="h-11 w-11 p-0" aria-label="更多操作">
+                    <Button variant="ghost" size="sm" className="h-11 w-11 p-0" aria-label="更多操作" title="更多操作">
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -270,16 +270,16 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
                     <Button variant="ghost" size="sm" aria-label="关联流程" title="关联流程" onClick={() => onProcesses(cap)}>
                       <Link2 className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" aria-label="编辑" onClick={() => onEdit(cap)}>
+                    <Button variant="ghost" size="sm" aria-label="编辑" title="编辑" onClick={() => onEdit(cap)}>
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" aria-label="转移所有权" onClick={() => onTransfer(cap)}>
+                    <Button variant="ghost" size="sm" aria-label="转移所有权" title="转移所有权" onClick={() => onTransfer(cap)}>
                       <UserRoundCog className="h-3.5 w-3.5" />
                     </Button>
                     {cap.status === 'active' && spaceId && (
                       <CapabilityArchiveButton id={cap.id} spaceId={spaceId} />
                     )}
-                    <Button variant="ghost" size="sm" aria-label="删除" onClick={() => onDelete(cap)}>
+                    <Button variant="ghost" size="sm" aria-label="删除" title="删除" onClick={() => onDelete(cap)}>
                       <Trash2 className="h-3.5 w-3.5 text-destructive" />
                     </Button>
                   </>

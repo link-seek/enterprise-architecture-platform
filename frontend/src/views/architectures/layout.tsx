@@ -185,7 +185,7 @@ export default function ArchLayout() {
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Mobile header */}
         <header className="md:hidden sticky top-0 z-10 flex h-14 items-center gap-3 border-b bg-card px-4">
-          <Button variant="ghost" size="icon" onClick={() => setDrawerOpen(true)} aria-label="打开菜单">
+          <Button variant="ghost" size="icon" onClick={() => setDrawerOpen(true)} aria-label="打开菜单" title="打开菜单">
             <Menu className="h-5 w-5" />
           </Button>
           <h1 className="text-base font-semibold truncate">{spaceName}</h1>

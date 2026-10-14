@@ -207,7 +207,7 @@ export function ArchiveButton({ id, onArchived, spaceId }: { id: string; onArchi
   }
 
   return (
-    <Button variant="ghost" size="sm" onClick={handleArchive} disabled={loading}>
+    <Button variant="ghost" size="sm" aria-label="归档" title="归档" onClick={handleArchive} disabled={loading}>
       {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
     </Button>
   )
