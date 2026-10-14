@@ -304,13 +304,13 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
     ) -> Result<(), DomainError> {
         let txn = self.db.begin().await?;
 
-        // 1. Archive the current version.
+        // 1. Deprecate the current version (compatibility window).
         let current_model = value_stream::Entity::find_by_id(current.id)
             .one(&txn)
             .await?
             .ok_or(DomainError::ValueStreamNotFound)?;
         let mut current_active: value_stream::ActiveModel = current_model.into();
-        current_active.status = Set(LifecycleStatus::Archived);
+        current_active.status = Set(LifecycleStatus::Deprecated);
         current_active.updated_at = Set(current.updated_at);
         current_active.update(&txn).await.map_err(|e| {
             DomainError::Database(format!("save_version_atomic: archive current version: {e}"))
@@ -368,10 +368,12 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
             })?;
         }
 
-        // 4. Copy `stage_capabilities` associations from the old stages to the
-        //    corresponding new stages (matched by sequence_order). Without this
-        //    the new version's stages would have no capability links while the
-        //    old links remain attached to the just-archived stage rows.
+        // 4. Move `stage_capabilities` associations from the old stages to the
+        //    corresponding new stages (matched by sequence_order). Unified
+        //    publish policy: the live version owns the live links ("现行版本
+        //    拥有现行关联"); old rows keep their content snapshot, link-free.
+        //    Without this the new version's stages would have no capability
+        //    links at all.
         let old_stages = value_stream_stage::Entity::find()
             .filter(value_stream_stage::Column::ValueStreamId.eq(current.id))
             .all(&txn)
@@ -417,6 +419,17 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
                         ))
                     })?;
             }
+            // Move, don't copy: drop the old links so the live version is the
+            // sole owner of the live associations.
+            stage_capability::Entity::delete_many()
+                .filter(stage_capability::Column::StageId.eq(*old_stage_id))
+                .exec(&txn)
+                .await
+                .map_err(|e| {
+                    DomainError::Database(format!(
+                        "save_version_atomic: delete old stage_capabilities of stage {old_stage_id}: {e}"
+                    ))
+                })?;
         }
 
         txn.commit().await?;

@@ -6,7 +6,7 @@ use sea_orm::{
 use shared_common::enums::LifecycleStatus;
 use uuid::Uuid;
 
-use crate::application::version::bump_minor;
+use crate::application::version::parse as parse_semver;
 use crate::domain::error::DomainError;
 use crate::domain::process::entity::{
     AffectedProcessLink, BusinessProcess, ProcessStep, PublishVersionResult,
@@ -207,9 +207,13 @@ impl ProcessRepository for SeaOrmProcessRepo {
             .await?
             .ok_or(DomainError::ProcessNotFound)?;
 
-        // Enforce the `Deprecated → Archived` edge so the compatibility window
-        // cannot be skipped by archiving an `Active` process directly.
-        if model.status != LifecycleStatus::Deprecated {
+        // Unified lifecycle: `Active | Deprecated → Archived`. Active rows can
+        // be retired whole-line; Deprecated rows are old versions leaving the
+        // compatibility window.
+        if !matches!(
+            model.status,
+            LifecycleStatus::Active | LifecycleStatus::Deprecated
+        ) {
             return Err(DomainError::InvalidTransition {
                 from: format!("{:?}", model.status),
                 to: "Archived".to_string(),
@@ -302,19 +306,24 @@ impl ProcessStepRepository for SeaOrmProcessRepo {
 }
 
 impl SeaOrmProcessRepo {
-    /// Publish a new minor version of the active process identified by
-    /// `logical_id`. The old active version transitions to `Deprecated`
-    /// (compatibility window) instead of being archived immediately; a new
-    /// `Active` row is inserted with the same `logical_id` and `bump_minor`
-    /// version. All of this runs inside a single transaction.
+    /// Publish a new version of the active process identified by
+    /// `logical_id`. Unified publish policy (same as value streams): the
+    /// caller supplies an explicit semver `new_version` (strictly validated);
+    /// the old active version transitions to `Deprecated` (compatibility
+    /// window); capability links are MOVED to the new row in the same
+    /// transaction ("现行版本拥有现行关联"). All of this runs inside a
+    /// single transaction.
     ///
-    /// The result also carries the capability links that still reference the
-    /// old (now deprecated) version, so the caller can warn about version
-    /// anchoring before/after the publish.
+    /// The result also carries the moved capability links so the caller can
+    /// render the publish impact receipt.
     pub async fn publish_new_version(
         &self,
         logical_id: Uuid,
+        new_version: &str,
     ) -> Result<PublishVersionResult, DomainError> {
+        // Strict semver, same rule as value-stream versions.
+        parse_semver(new_version)?;
+        let new_version = new_version.to_owned();
         let txn = self.db.begin().await?;
 
         let old = business_process::Entity::find()
@@ -324,8 +333,6 @@ impl SeaOrmProcessRepo {
             .one(&txn)
             .await?
             .ok_or(DomainError::ProcessVersionNotFound)?;
-
-        let new_version = bump_minor(&old.business_version)?;
 
         // Collect capability links pointing at the old version row before it is
         // deprecated (transactions see a consistent snapshot).
@@ -391,6 +398,24 @@ impl SeaOrmProcessRepo {
             space_id: Set(old.space_id),
         };
         let new_model = new_active.insert(&txn).await?;
+
+        // Move capability links to the new row (same transaction). The live
+        // version owns the live links; the deprecated row keeps its content
+        // snapshot, link-free, still queryable for history/rollback.
+        for link in &links {
+            let active = capability_process::ActiveModel {
+                capability_id: Set(link.capability_id),
+                process_id: Set(new_id),
+            };
+            capability_process::Entity::insert(active)
+                .on_conflict(sea_orm::sea_query::OnConflict::new().do_nothing().to_owned())
+                .exec(&txn)
+                .await?;
+        }
+        capability_process::Entity::delete_many()
+            .filter(capability_process::Column::ProcessId.eq(old.id))
+            .exec(&txn)
+            .await?;
 
         txn.commit().await?;
 

@@ -1,10 +1,9 @@
 import { useQuery, useMutation } from '@apollo/client/react'
 import { gql } from '@apollo/client'
-import { useState, useEffect } from 'react'
+import type { DocumentNode } from '@apollo/client'
+import { useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Loader2, Archive } from 'lucide-react'
@@ -27,14 +26,6 @@ const ARCHIVE_VALUE_STREAM = gql`
   }
 `
 
-const CREATE_VERSION = gql`
-  mutation ValueStreamCreateVersion($currentId: String!, $newVersion: String!, $newName: String, $newDescription: String) {
-    valueStreamCreateVersion(currentId: $currentId, newVersion: $newVersion, newName: $newName, newDescription: $newDescription) {
-      id name description businessVersion status importance logicalId
-    }
-  }
-`
-
 const GET_VALUE_STREAMS = gql`
   query GetValueStreamsForVersion($spaceId: String!) {
     valueStreamsBySpace(spaceId: $spaceId) {
@@ -44,27 +35,31 @@ const GET_VALUE_STREAMS = gql`
 `
 
 // ============================================================================
-// Version History Dialog
+// Version History Dialog (shared by value streams and business processes:
+// unified publish policy, one viewer)
 // ============================================================================
 
-export function VersionHistoryDialog({ open, onOpenChange, spaceId, logicalId }: {
+export function VersionHistoryDialog({ open, onOpenChange, spaceId, logicalId, title, query, dataKey }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   spaceId: string
   logicalId: string | null
+  title?: string
+  query: DocumentNode
+  dataKey: string
 }) {
-  const { data, loading } = useQuery<{ valueStreamsBySpaceAndLogicalId: { id: string; name: string; description: string; businessVersion: string; status: string; createdAt: string; updatedAt: string }[] }>(GET_VALUE_STREAM_VERSIONS, {
+  const { data, loading } = useQuery<any>(query, {
     variables: { spaceId, logicalId },
     skip: !logicalId || !spaceId,
   })
 
-  const versions = data?.valueStreamsBySpaceAndLogicalId || []
+  const versions = (data?.[dataKey] || []) as { id: string; name: string; description: string; businessVersion: string; status: string; createdAt: string; updatedAt: string }[]
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>版本历史</DialogTitle>
+          <DialogTitle>{title ?? '版本历史'}</DialogTitle>
         </DialogHeader>
         <div className="py-4">
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
@@ -84,7 +79,7 @@ export function VersionHistoryDialog({ open, onOpenChange, spaceId, logicalId }:
                     <TableCell className="font-mono">{v.businessVersion}</TableCell>
                     <TableCell>{v.name}</TableCell>
                     <TableCell>
-                      <Badge variant={v.status === 'active' ? 'default' : 'destructive'}>
+                      <Badge variant={v.status === 'archived' ? 'destructive' : v.status === 'deprecated' ? 'secondary' : v.status === 'active' ? 'default' : 'outline'}>
                         {v.status}
                       </Badge>
                     </TableCell>
@@ -99,85 +94,6 @@ export function VersionHistoryDialog({ open, onOpenChange, spaceId, logicalId }:
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>关闭</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ============================================================================
-// Create Version Dialog
-// ============================================================================
-
-export function CreateVersionDialog({ open, onOpenChange, currentItem, spaceId }: {
-  open: boolean
-  onOpenChange: (v: boolean) => void
-  currentItem: { id: string; logicalId: string; name: string; description: string; businessVersion: string; importance: string } | null
-  spaceId: string
-}) {
-  const [newVersion, setNewVersion] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [createVersionMut] = useMutation(CREATE_VERSION)
-
-  useEffect(() => {
-    if (open && currentItem) {
-      const match = currentItem.businessVersion.match(/v?(\d+)\.(\d+)/)
-      if (match) {
-        setNewVersion(`${parseInt(match[1]) + 1}.0.0`)
-      } else {
-        setNewVersion('2.0.0')
-      }
-      setError(null)
-    }
-  }, [open, currentItem])
-
-  async function handleCreateVersion() {
-    if (!currentItem) return
-    setLoading(true)
-    setError(null)
-    try {
-      // Single atomic mutation: archives current + creates new version
-      await createVersionMut({
-        variables: {
-          currentId: currentItem.id,
-          newVersion,
-          newName: currentItem.name,
-          newDescription: currentItem.description,
-        },
-        refetchQueries: [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
-      })
-
-      onOpenChange(false)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '创建版本失败')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>新建版本</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 py-4">
-          {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
-          <p className="text-sm text-muted-foreground">
-            当前版本 <Badge variant="secondary">{currentItem?.businessVersion}</Badge> 将被归档，
-            新版本 <Badge>{newVersion}</Badge> 将成为 active。
-          </p>
-          <div className="space-y-2">
-            <Label htmlFor="new-version">新版本号</Label>
-            <Input id="new-version" value={newVersion} onChange={e => setNewVersion(e.target.value)} placeholder="2.0.0" />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
-          <Button onClick={handleCreateVersion} disabled={loading || !newVersion}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : '创建新版本'}
-          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

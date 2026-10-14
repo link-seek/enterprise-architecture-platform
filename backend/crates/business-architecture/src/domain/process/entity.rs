@@ -51,9 +51,8 @@ impl BusinessProcess {
     }
 
     /// Lifecycle state machine: `Active | Deprecated → Archived` (terminal).
-    /// The `processArchive` mutation additionally restricts archival to the
-    /// `Deprecated → Archived` edge so the compatibility window cannot be
-    /// skipped.
+    /// Unified publish policy: active rows retire whole-line, deprecated rows
+    /// leave the compatibility window.
     pub fn archive(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
         if !matches!(self.status, LifecycleStatus::Active | LifecycleStatus::Deprecated) {
             return Err(DomainError::InvalidTransition {
