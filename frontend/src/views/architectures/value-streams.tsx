@@ -67,39 +67,48 @@ function ValueStreamPublishDialog({ item, spaceId, onOpenChange }: {
   const client = useApolloClient()
   const [items, setItems] = useState<PublishImpactItem[]>([])
   const [impactLoading, setImpactLoading] = useState(false)
+  const [impactError, setImpactError] = useState<string | null>(null)
   const [publishMut] = useMutation(PUBLISH_VALUE_STREAM_VERSION)
+  const itemId = item?.id
 
   useEffect(() => {
-    if (!item) return
+    if (!itemId) return
     let cancelled = false
     setImpactLoading(true)
+    setImpactError(null)
     setItems([])
     ;(async () => {
       const { data } = await client.query<{ valueStreamStagesByValueStream?: { id: string; name: string }[] }>({
         query: GET_STAGES_BY_VS,
-        variables: { valueStreamId: item.id },
+        variables: { valueStreamId: itemId },
         fetchPolicy: 'network-only',
       })
       const stages = data?.valueStreamStagesByValueStream ?? []
-      const rows: PublishImpactItem[] = []
-      for (const s of stages) {
+      const rows = await Promise.all(stages.map(async (s) => {
         const r = await client.query<{ capabilitiesByStage?: { id: string; name: string }[] }>({
           query: GET_STAGE_CAPABILITIES,
           variables: { stageId: s.id },
           fetchPolicy: 'network-only',
         })
         const caps = r.data?.capabilitiesByStage ?? []
-        rows.push({ id: s.id, name: `阶段 ${s.name}`, detail: caps.length > 0 ? caps.map(c => c.name).join('、') : '无关联能力' })
-      }
+        return {
+          id: s.id,
+          name: `阶段 ${s.name}`,
+          detail: caps.length > 0 ? caps.map(c => c.name).join('、') : '无关联能力',
+        } as PublishImpactItem
+      }))
       if (!cancelled) {
         setItems(rows)
         setImpactLoading(false)
       }
-    })().catch(() => {
-      if (!cancelled) setImpactLoading(false)
+    })().catch((err) => {
+      if (!cancelled) {
+        setImpactError(err instanceof Error ? err.message : '加载失败')
+        setImpactLoading(false)
+      }
     })
     return () => { cancelled = true }
-  }, [item, client])
+  }, [itemId, client])
 
   return (
     <VersionPublishDialog
@@ -111,6 +120,7 @@ function ValueStreamPublishDialog({ item, spaceId, onOpenChange }: {
       impactIntro="以下阶段及其能力关联将整体迁移到新版，旧版进入 deprecated 兼容期："
       impactItems={items}
       impactLoading={impactLoading}
+      impactError={impactError}
       impactEmptyText="该价值流暂无阶段，直接发布新版。"
       confirmLabel="确认发布"
       successTitle="发布成功，阶段与关联已迁移到新版:"
@@ -310,7 +320,6 @@ export default function ValueStreams() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<ValueStream | null>(null)
   const [deleting, setDeleting] = useState<ValueStream | null>(null)
-  const [historyOpen, setHistoryOpen] = useState(false)
   const [historyLogicalId, setHistoryLogicalId] = useState<string | null>(null)
   const [versionItem, setVersionItem] = useState<ValueStream | null>(null)
   const [transferItem, setTransferItem] = useState<ValueStream | null>(null)
@@ -323,7 +332,7 @@ export default function ValueStreams() {
   const handleEdit = useCallback((vs: ValueStream) => { setEditing(vs); setDialogOpen(true) }, [])
   const handleDelete = useCallback((vs: ValueStream) => setDeleting(vs), [])
   const handleVersion = useCallback((vs: ValueStream) => { setVersionItem(vs) }, [])
-  const handleHistory = useCallback((vs: ValueStream) => { setHistoryLogicalId(vs.logicalId); setHistoryOpen(true) }, [])
+  const handleHistory = useCallback((vs: ValueStream) => { setHistoryLogicalId(vs.logicalId) }, [])
   const handleTransfer = useCallback((vs: ValueStream) => setTransferItem(vs), [])
 
   if (!spaceId) {
@@ -377,7 +386,7 @@ export default function ValueStreams() {
 
       <ValueStreamCrudDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} spaceId={spaceId} />
       <ValueStreamDeleteDialog item={deleting} onConfirm={() => setDeleting(null)} spaceId={spaceId} />
-      <VersionHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} spaceId={spaceId} logicalId={historyLogicalId} query={GET_VALUE_STREAM_VERSIONS} dataKey="valueStreamsBySpaceAndLogicalId" />
+      <VersionHistoryDialog open={historyLogicalId !== null} onOpenChange={(v) => { if (!v) setHistoryLogicalId(null) }} spaceId={spaceId} logicalId={historyLogicalId} query={GET_VALUE_STREAM_VERSIONS} dataKey="valueStreamsBySpaceAndLogicalId" />
       <ValueStreamPublishDialog item={versionItem} spaceId={spaceId} onOpenChange={(v) => { if (!v) setVersionItem(null) }} />
       <TransferOwnershipDialog
         open={!!transferItem}

@@ -334,6 +334,27 @@ impl SeaOrmProcessRepo {
             .await?
             .ok_or(DomainError::ProcessVersionNotFound)?;
 
+        // Monotonicity: the new version must be greater than every existing
+        // version of this logicalId (no duplicates, no rollbacks).
+        let existing_versions = business_process::Entity::find()
+            .filter(business_process::Column::LogicalId.eq(logical_id))
+            .filter(business_process::Column::DeletedAt.is_null())
+            .all(&txn)
+            .await?;
+        let new_parsed = crate::application::version::parse(&new_version)
+            .map_err(DomainError::from)?;
+        for row in &existing_versions {
+            if let Ok(v) = crate::application::version::parse(&row.business_version) {
+                if new_parsed <= v {
+                    return Err(DomainError::InvalidTransition {
+                        from: row.business_version.clone(),
+                        to: new_version.clone(),
+                        entity: "BusinessProcess".to_string(),
+                    });
+                }
+            }
+        }
+
         // Collect capability links pointing at the old version row before it is
         // deprecated (transactions see a consistent snapshot).
         let links = capability_process::Entity::find()
@@ -399,20 +420,41 @@ impl SeaOrmProcessRepo {
         };
         let new_model = new_active.insert(&txn).await?;
 
-        // Move capability links to the new row (same transaction). The live
-        // version owns the live links; the deprecated row keeps its content
-        // snapshot, link-free, still queryable for history/rollback.
-        for link in &links {
-            let active = capability_process::ActiveModel {
-                capability_id: Set(link.capability_id),
+        // Copy steps to the new version (same content, new ids). Without this
+        // the new version would ship with zero steps, breaking parity with
+        // value-stream publishes (which copy stages).
+        let old_steps = process_step::Entity::find()
+            .filter(process_step::Column::ProcessId.eq(old.id))
+            .filter(process_step::Column::DeletedAt.is_null())
+            .all(&txn)
+            .await?;
+        for step in &old_steps {
+            let step_active = process_step::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                name: Set(step.name.clone()),
+                description: Set(step.description.clone()),
+                sequence_order: Set(step.sequence_order),
+                business_rules: Set(step.business_rules.clone()),
+                required_inputs: Set(step.required_inputs.clone()),
+                produced_outputs: Set(step.produced_outputs.clone()),
+                role_id: Set(step.role_id),
                 process_id: Set(new_id),
+                created_at: Set(step.created_at),
+                updated_at: Set(now),
+                deleted_at: Set(None),
             };
-            capability_process::Entity::insert(active)
-                .on_conflict(sea_orm::sea_query::OnConflict::new().do_nothing().to_owned())
-                .exec(&txn)
-                .await?;
+            step_active.insert(&txn).await?;
         }
-        capability_process::Entity::delete_many()
+
+        // Move capability links to the new row with a single UPDATE (same
+        // transaction). UPDATE moves every current link — including ones added
+        // concurrently after the receipt snapshot — so nothing is lost, unlike
+        // INSERT(new)+DELETE(old) which can orphan concurrent inserts.
+        capability_process::Entity::update_many()
+            .col_expr(
+                capability_process::Column::ProcessId,
+                sea_orm::sea_query::Expr::value(new_id),
+            )
             .filter(capability_process::Column::ProcessId.eq(old.id))
             .exec(&txn)
             .await?;

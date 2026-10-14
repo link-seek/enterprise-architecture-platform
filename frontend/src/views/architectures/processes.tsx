@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Plus, Pencil, Trash2, Loader2, MoreVertical, UserRoundCog, GitBranch, AppWindow, History, Archive } from 'lucide-react'
+import { Plus, Pencil, Trash2, Loader2, MoreVertical, UserRoundCog, GitBranch, AppWindow, History } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -15,7 +15,7 @@ import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { useIsMobile } from '@/hooks/use-media-query'
 import { TransferOwnershipDialog } from './transfer-ownership-dialog'
 import { CrossDomainDialog, type CrossDomainItem } from './cross-domain-dialog'
-import { VersionHistoryDialog } from './version-control'
+import { VersionHistoryDialog, ArchiveButton, ARCHIVE_PROCESS } from './version-control'
 import { VersionPublishDialog, suggestNextVersion, type PublishImpactItem } from './version-publish-dialog'
 import { friendlyDeleteError } from './crud'
 
@@ -66,12 +66,6 @@ const PUBLISH_PROCESS_VERSION = gql`
         newVersion
       }
     }
-  }
-`
-
-const ARCHIVE_PROCESS = gql`
-  mutation ArchiveProcess($id: String!) {
-    processArchive(id: $id)
   }
 `
 
@@ -133,30 +127,6 @@ function joinLines(items: string[] | null | undefined): string {
   return (items ?? []).join('\n')
 }
 
-function ProcessArchiveButton({ id, spaceId }: { id: string; spaceId: string }) {
-  const [archiveMut] = useMutation(ARCHIVE_PROCESS, {
-    refetchQueries: [{ query: GET_PROCESSES, variables: { spaceId } }],
-  })
-  const [loading, setLoading] = useState(false)
-
-  async function handleArchive() {
-    setLoading(true)
-    try {
-      await archiveMut({ variables: { id } })
-    } catch (err) {
-      console.error('Archive failed:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <Button variant="ghost" size="sm" aria-label="归档" title="归档" onClick={handleArchive} disabled={loading}>
-      {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
-    </Button>
-  )
-}
-
 function ProcessList({ nodes, isOwned, isMobile, spaceId, onEdit, onDelete, onTransfer, onPublish, onHistory, onApplicationSupport }: {
   nodes: Process[]
   isOwned: (p: Process) => boolean
@@ -205,11 +175,13 @@ function ProcessList({ nodes, isOwned, isMobile, spaceId, onEdit, onDelete, onTr
               <Button variant="ghost" size="sm" aria-label="应用支撑" title="应用支撑" onClick={() => onApplicationSupport(p)}>
                 <AppWindow className="h-3.5 w-3.5" />
               </Button>
-              <Button variant="ghost" size="sm" aria-label="历史" title="历史" onClick={() => onHistory(p)}>
-                <History className="h-3.5 w-3.5" />
-              </Button>
+                {p.logicalId && (
+                <Button variant="ghost" size="sm" aria-label="历史" title="历史" onClick={() => onHistory(p)}>
+                  <History className="h-3.5 w-3.5" />
+                </Button>
+                )}
               {owned && p.status !== 'archived' && spaceId && (
-                <ProcessArchiveButton id={p.id} spaceId={spaceId} />
+                <ArchiveButton id={p.id} spaceId={spaceId} mutation={ARCHIVE_PROCESS} refetchQuery={GET_PROCESSES} />
               )}
               {owned && (
                 <DropdownMenu>
@@ -224,9 +196,11 @@ function ProcessList({ nodes, isOwned, isMobile, spaceId, onEdit, onDelete, onTr
                         <GitBranch className="h-4 w-4 mr-2" />发布新版本
                       </DropdownMenuItem>
                     )}
+                    {p.logicalId && (
                     <DropdownMenuItem onClick={() => onHistory(p)}>
                       <History className="h-4 w-4 mr-2" />历史
                     </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem onClick={() => onEdit(p)}>
                       <Pencil className="h-4 w-4 mr-2" />编辑
                     </DropdownMenuItem>
@@ -301,9 +275,11 @@ function ProcessList({ nodes, isOwned, isMobile, spaceId, onEdit, onDelete, onTr
                 <Button variant="ghost" size="sm" aria-label="应用支撑" title="应用支撑" onClick={() => onApplicationSupport(p)}>
                   <AppWindow className="h-3.5 w-3.5" />
                 </Button>
+                {p.logicalId && (
                 <Button variant="ghost" size="sm" aria-label="历史" title="历史" onClick={() => onHistory(p)}>
                   <History className="h-3.5 w-3.5" />
                 </Button>
+                )}
                 {owned && (
                   <>
                     {p.status === 'active' && p.logicalId && (
@@ -318,7 +294,7 @@ function ProcessList({ nodes, isOwned, isMobile, spaceId, onEdit, onDelete, onTr
                       <UserRoundCog className="h-3.5 w-3.5" />
                     </Button>
                     {p.status !== 'archived' && spaceId && (
-                      <ProcessArchiveButton id={p.id} spaceId={spaceId} />
+                      <ArchiveButton id={p.id} spaceId={spaceId} mutation={ARCHIVE_PROCESS} refetchQuery={GET_PROCESSES} />
                     )}
                     <Button variant="ghost" size="sm" onClick={() => onDelete(p)} aria-label="删除" title="删除">
                       <Trash2 className="h-3.5 w-3.5 text-destructive" />
@@ -519,9 +495,9 @@ function PublishVersionDialog({ item, onOpenChange, spaceId }: {
   spaceId?: string
 }) {
   const [publishMut] = useMutation<{ processPublishVersion?: { affectedLinks?: AffectedLink[] } }>(PUBLISH_PROCESS_VERSION)
-  const { data, loading: capsLoading } = useQuery<{ capabilitiesByProcess?: { id: string; name: string; status: string }[] }>(
+  const { data, loading: capsLoading, error: capsError } = useQuery<{ capabilitiesByProcess?: { id: string; name: string; status: string }[] }>(
     GET_CAPABILITIES_BY_PROCESS,
-    { variables: { processId: item?.id }, skip: !item?.id },
+    { variables: { processId: item?.id }, skip: !item?.id, fetchPolicy: 'network-only' },
   )
 
   const linkedCaps = data?.capabilitiesByProcess ?? []
@@ -541,11 +517,12 @@ function PublishVersionDialog({ item, onOpenChange, spaceId }: {
       impactIntro="以下能力关联将迁移到新版，旧版进入 deprecated 兼容期："
       impactItems={impactItems}
       impactLoading={capsLoading}
+      impactError={capsError ? (capsError.message || '加载失败') : null}
       impactEmptyText="当前没有能力关联此流程，发布不受影响。"
       confirmLabel="确认发布"
       successTitle="发布成功，以下能力关联已迁移到新版:"
       onConfirm={async (newVersion) => {
-        if (!item?.logicalId) return []
+        if (!item?.logicalId) throw new Error('缺少 logicalId，无法发布')
         const res = await publishMut({
           variables: { logicalId: item.logicalId, newVersion },
           refetchQueries: [{ query: GET_PROCESSES, variables: { spaceId } }],

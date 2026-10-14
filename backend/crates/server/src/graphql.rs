@@ -2170,7 +2170,7 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                 // as value streams and capabilities).
                 if existing.status != LifecycleStatus::Active {
                     return Err(async_graphql::Error::new(
-                        "Cannot modify archived process.",
+                        "Cannot modify non-active process.",
                     ));
                 }
 
@@ -2334,7 +2334,7 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                 check_value_stream_auth(&ctx, OperationType::Create)?;
                 let db = ctx.data::<DatabaseConnection>()?;
                 let logical_id = parse_uuid_arg(&ctx, "logicalId")?;
-                let new_version = ctx.args.get("newVersion").and_then(|v| v.string().ok()).unwrap_or_default();
+                let new_version = ctx.args.try_get("newVersion").map_err(|_| async_graphql::Error::new("Missing required argument 'newVersion'"))?.string()?;
 
                 let repo = SeaOrmProcessRepo::new(db.clone());
                 // Enforce space-level ACL + entity ownership before publishing.
@@ -5090,6 +5090,7 @@ fn register_space_scoped_queries(builder: &mut Builder) {
         TypeRef::named_nn_list_nn("ValueStreams"),
         |ctx| {
             FieldFuture::new(async move {
+                use sea_orm::QueryOrder;
                 let db = ctx.data::<DatabaseConnection>()?;
                 let space_id = parse_uuid_arg(&ctx, "spaceId")?;
                 let logical_id = parse_uuid_arg(&ctx, "logicalId")?;
@@ -5103,6 +5104,7 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                     .filter(value_stream::Column::SpaceId.eq(space_id))
                     .filter(value_stream::Column::LogicalId.eq(logical_id))
                     .filter(value_stream::Column::DeletedAt.is_null())
+                    .order_by_asc(value_stream::Column::CreatedAt)
                     .all(db)
                     .await
                     .map_err(db_err_to_graphql)?;
@@ -5124,6 +5126,7 @@ fn register_space_scoped_queries(builder: &mut Builder) {
         TypeRef::named_nn_list_nn("BusinessProcesses"),
         |ctx| {
             FieldFuture::new(async move {
+                use sea_orm::QueryOrder;
                 let db = ctx.data::<DatabaseConnection>()?;
                 let space_id = parse_uuid_arg(&ctx, "spaceId")?;
                 let logical_id = parse_uuid_arg(&ctx, "logicalId")?;
@@ -5137,6 +5140,7 @@ fn register_space_scoped_queries(builder: &mut Builder) {
                     .filter(business_process::Column::SpaceId.eq(space_id))
                     .filter(business_process::Column::LogicalId.eq(logical_id))
                     .filter(business_process::Column::DeletedAt.is_null())
+                    .order_by_asc(business_process::Column::CreatedAt)
                     .all(db)
                     .await
                     .map_err(db_err_to_graphql)?;

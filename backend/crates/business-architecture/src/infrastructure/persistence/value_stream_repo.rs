@@ -304,11 +304,21 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
     ) -> Result<(), DomainError> {
         let txn = self.db.begin().await?;
 
-        // 1. Deprecate the current version (compatibility window).
+        // 1. Deprecate the current version (compatibility window). The row must
+        // still be Active: silently "deprecating" an already-archived row
+        // would resurrect it, and a concurrent second publish must fail
+        // instead of producing two Active rows.
         let current_model = value_stream::Entity::find_by_id(current.id)
             .one(&txn)
             .await?
             .ok_or(DomainError::ValueStreamNotFound)?;
+        if current_model.status != LifecycleStatus::Active {
+            return Err(DomainError::InvalidTransition {
+                from: format!("{:?}", current_model.status),
+                to: "Deprecated".to_string(),
+                entity: "ValueStream".to_string(),
+            });
+        }
         let mut current_active: value_stream::ActiveModel = current_model.into();
         current_active.status = Set(LifecycleStatus::Deprecated);
         current_active.updated_at = Set(current.updated_at);
@@ -376,6 +386,7 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
         //    links at all.
         let old_stages = value_stream_stage::Entity::find()
             .filter(value_stream_stage::Column::ValueStreamId.eq(current.id))
+            .filter(value_stream_stage::Column::DeletedAt.is_null())
             .all(&txn)
             .await
             .map_err(|e| {
@@ -392,42 +403,20 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
             let Some(old_stage_id) = old_stage_id_by_seq.get(&stage.sequence_order) else {
                 continue;
             };
-            let links = stage_capability::Entity::find()
-                .filter(stage_capability::Column::StageId.eq(*old_stage_id))
-                .all(&txn)
-                .await
-                .map_err(|e| {
-                    DomainError::Database(format!(
-                        "save_version_atomic: list stage_capabilities of stage {old_stage_id}: {e}"
-                    ))
-                })?;
-            for link in links {
-                let active = stage_capability::ActiveModel {
-                    stage_id: Set(stage.id),
-                    capability_id: Set(link.capability_id),
-                };
-                stage_capability::Entity::insert(active)
-                    .on_conflict(sea_orm::sea_query::OnConflict::new().do_nothing().to_owned())
-                    .exec(&txn)
-                    .await
-                    .map_err(|e| {
-                        DomainError::Database(format!(
-                            "save_version_atomic: copy stage_capability ({}, {}) → {}: {e}",
-                            old_stage_id,
-                            link.capability_id,
-                            stage.id
-                        ))
-                    })?;
-            }
-            // Move, don't copy: drop the old links so the live version is the
-            // sole owner of the live associations.
-            stage_capability::Entity::delete_many()
+            // Move (single UPDATE): every current link — including ones added
+            // concurrently — lands on the new stage; nothing is orphaned.
+            stage_capability::Entity::update_many()
+                .col_expr(
+                    stage_capability::Column::StageId,
+                    sea_orm::sea_query::Expr::value(stage.id),
+                )
                 .filter(stage_capability::Column::StageId.eq(*old_stage_id))
                 .exec(&txn)
                 .await
                 .map_err(|e| {
                     DomainError::Database(format!(
-                        "save_version_atomic: delete old stage_capabilities of stage {old_stage_id}: {e}"
+                        "save_version_atomic: move stage_capabilities {old_stage_id} → {}: {e}",
+                        stage.id
                     ))
                 })?;
         }

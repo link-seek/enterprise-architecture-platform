@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Plus, Pencil, Trash2, Loader2, MoreVertical, UserRoundCog, Link2, AppWindow, Archive } from 'lucide-react'
+import { Plus, Pencil, Trash2, Loader2, MoreVertical, UserRoundCog, Link2, AppWindow } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo, memo } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -14,6 +14,7 @@ import { useParams } from 'react-router-dom'
 import { useSpaceMembership } from '@/hooks/use-space-membership'
 import { useIsMobile } from '@/hooks/use-media-query'
 import { TransferOwnershipDialog } from './transfer-ownership-dialog'
+import { ArchiveButton, ARCHIVE_CAPABILITY } from './version-control'
 import { CrossDomainDialog, type CrossDomainItem } from './cross-domain-dialog'
 import { friendlyDeleteError } from './crud'
 
@@ -22,12 +23,6 @@ const GET_CAPABILITIES = gql`
     businessCapabilitiesBySpace(spaceId: $spaceId) {
       id name description level maturity businessValue businessVersion status ownerId
     }
-  }
-`
-
-const ARCHIVE_CAPABILITY = gql`
-  mutation ArchiveCapability($id: String!) {
-    capabilityArchive(id: $id)
   }
 `
 
@@ -137,31 +132,6 @@ function statusVariant(status: string): 'default' | 'destructive' | 'secondary' 
   return 'outline'
 }
 
-// 归档按钮（inline、无确认框，与价值流 ArchiveButton 同交互）。
-function CapabilityArchiveButton({ id, spaceId }: { id: string; spaceId: string }) {
-  const [archiveMut] = useMutation(ARCHIVE_CAPABILITY, {
-    refetchQueries: [{ query: GET_CAPABILITIES, variables: { spaceId } }],
-  })
-  const [loading, setLoading] = useState(false)
-
-  async function handleArchive() {
-    setLoading(true)
-    try {
-      await archiveMut({ variables: { id } })
-    } catch (err) {
-      console.error('Archive failed:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <Button variant="ghost" size="sm" aria-label="归档" title="归档" onClick={handleArchive} disabled={loading}>
-      {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
-    </Button>
-  )
-}
-
 const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, spaceId, onEdit, onDelete, onTransfer, onProcesses, onApplicationSupport }: {
   nodes: Capability[]
   isOwned: (cap: Capability) => boolean
@@ -201,7 +171,7 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
                 <AppWindow className="h-3.5 w-3.5" />
               </Button>
               {owned && cap.status === 'active' && spaceId && (
-                <CapabilityArchiveButton id={cap.id} spaceId={spaceId} />
+                <ArchiveButton id={cap.id} spaceId={spaceId} mutation={ARCHIVE_CAPABILITY} refetchQuery={GET_CAPABILITIES} />
               )}
               {owned && (
                 <DropdownMenu>
@@ -277,7 +247,7 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
                       <UserRoundCog className="h-3.5 w-3.5" />
                     </Button>
                     {cap.status === 'active' && spaceId && (
-                      <CapabilityArchiveButton id={cap.id} spaceId={spaceId} />
+                      <ArchiveButton id={cap.id} spaceId={spaceId} mutation={ARCHIVE_CAPABILITY} refetchQuery={GET_CAPABILITIES} />
                     )}
                     <Button variant="ghost" size="sm" aria-label="删除" title="删除" onClick={() => onDelete(cap)}>
                       <Trash2 className="h-3.5 w-3.5 text-destructive" />

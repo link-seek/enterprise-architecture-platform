@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useId } from 'react'
 import type { ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -7,11 +7,16 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Loader2 } from 'lucide-react'
 
-// 与后端 `bump_minor` 一致的版本号建议：X.Y.Z → X.(Y+1).0，用户可改。
+// 与后端 `bump_minor` 对齐：X.Y.Z → X.(Y+1).Z（保留 patch）。
+// 全串匹配：拒绝 `v` 前缀、两段式、多段等非严格 semver，后端会同样拒绝。
+export function isValidSemver(v: string): boolean {
+  return /^\d+\.\d+\.\d+$/.test(v.trim())
+}
+
 export function suggestNextVersion(current?: string | null): string {
-  const m = (current ?? '').match(/(\d+)\.(\d+)\.(\d+)/)
+  const m = (current ?? '').trim().match(/^(\d+)\.(\d+)\.(\d+)$/)
   if (!m) return '1.1.0'
-  return `${m[1]}.${parseInt(m[2], 10) + 1}.0`
+  return `${m[1]}.${parseInt(m[2], 10) + 1}.${m[3]}`
 }
 
 // 统一发布仪式（discussions#752 统一发布策略 v1）：当前版本 → 新版本号 →
@@ -23,7 +28,7 @@ export interface PublishImpactItem {
   detail?: string
 }
 
-export function VersionPublishDialog({ open, onOpenChange, title, currentVersion, suggestedVersion, impactIntro, impactItems, impactLoading, impactEmptyText, confirmLabel, successTitle, onConfirm }: {
+export function VersionPublishDialog({ open, onOpenChange, title, currentVersion, suggestedVersion, impactIntro, impactItems, impactLoading, impactError, impactEmptyText, confirmLabel, successTitle, onConfirm }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   title: string
@@ -32,6 +37,7 @@ export function VersionPublishDialog({ open, onOpenChange, title, currentVersion
   impactIntro: ReactNode
   impactItems: PublishImpactItem[]
   impactLoading?: boolean
+  impactError?: string | null
   impactEmptyText: string
   confirmLabel?: string
   successTitle?: string
@@ -41,20 +47,35 @@ export function VersionPublishDialog({ open, onOpenChange, title, currentVersion
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<PublishImpactItem[] | null>(null)
+  const prevOpen = useRef(open)
+  const inputId = useId()
 
+  // 只在打开瞬间重置，不覆盖用户已输入的值与成功回执。
   useEffect(() => {
-    if (open) {
+    if (open && !prevOpen.current) {
       setNewVersion(suggestedVersion)
       setError(null)
       setDone(null)
     }
+    prevOpen.current = open
   }, [open, suggestedVersion])
 
+  const trimmed = newVersion.trim()
+  const versionError = !trimmed
+    ? null
+    : !isValidSemver(trimmed)
+      ? '版本号须为严格 semver（如 2.0.0，无 v 前缀）'
+      : trimmed === (currentVersion ?? '').trim()
+        ? '新版本号不能与当前版本相同'
+        : null
+  const canConfirm = !loading && !impactLoading && !impactError && trimmed !== '' && versionError === null
+
   async function handleConfirm() {
+    if (!canConfirm) return
     setLoading(true)
     setError(null)
     try {
-      const moved = await onConfirm(newVersion)
+      const moved = await onConfirm(trimmed)
       setDone(moved)
     } catch (err) {
       setError(err instanceof Error ? err.message : '发布失败')
@@ -63,8 +84,36 @@ export function VersionPublishDialog({ open, onOpenChange, title, currentVersion
     }
   }
 
+  // 发布进行中禁止关闭：否则后台继续执行而回执丢失，用户会重复提交。
+  function handleOpenChange(v: boolean) {
+    if (!v && loading) return
+    onOpenChange(v)
+  }
+
+  function renderImpact() {
+    if (impactLoading) {
+      return <div className="text-center py-4 text-muted-foreground">加载影响范围...</div>
+    }
+    if (impactError) {
+      return <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">影响范围加载失败：{impactError}</div>
+    }
+    if (impactItems.length === 0) {
+      return <p className="text-muted-foreground">{impactEmptyText}</p>
+    }
+    return (
+      <ul className="space-y-1">
+        {impactItems.map(item => (
+          <li key={item.id} className="flex items-center gap-2">
+            <span>{item.name}</span>
+            {item.detail && <span className="font-mono text-xs text-muted-foreground">{item.detail}</span>}
+          </li>
+        ))}
+      </ul>
+    )
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-4 text-sm">
@@ -74,28 +123,16 @@ export function VersionPublishDialog({ open, onOpenChange, title, currentVersion
               <p className="text-muted-foreground">
                 当前版本 <Badge variant="secondary" className="font-mono">{currentVersion ?? '-'}</Badge>{' '}
                 将进入 <Badge variant="secondary">deprecated</Badge> 兼容期，
-                新版本 <Badge>{newVersion || '?'}</Badge> 将成为 active，关联同步迁移。
+                新版本 <Badge>{trimmed || '?'}</Badge> 将成为 active，关联同步迁移。
               </p>
               <div className="space-y-2">
-                <Label htmlFor="publish-new-version">新版本号</Label>
-                <Input id="publish-new-version" value={newVersion} onChange={e => setNewVersion(e.target.value)} placeholder="2.0.0" />
+                <Label htmlFor={inputId}>新版本号</Label>
+                <Input id={inputId} value={newVersion} onChange={e => setNewVersion(e.target.value)} placeholder="2.0.0" disabled={loading} />
+                {versionError && <p className="text-xs text-destructive">{versionError}</p>}
               </div>
               <div className="space-y-2">
                 <p className="font-medium">{impactIntro}</p>
-                {impactLoading ? (
-                  <div className="text-center py-4 text-muted-foreground">加载影响范围...</div>
-                ) : impactItems.length === 0 ? (
-                  <p className="text-muted-foreground">{impactEmptyText}</p>
-                ) : (
-                  <ul className="space-y-1">
-                    {impactItems.map(item => (
-                      <li key={item.id} className="flex items-center gap-2">
-                        <span>{item.name}</span>
-                        {item.detail && <span className="font-mono text-xs text-muted-foreground">{item.detail}</span>}
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                {renderImpact()}
               </div>
             </>
           ) : (
@@ -117,9 +154,9 @@ export function VersionPublishDialog({ open, onOpenChange, title, currentVersion
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>{done === null ? '取消' : '关闭'}</Button>
+          <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={loading}>{done === null ? '取消' : '关闭'}</Button>
           {done === null && (
-            <Button onClick={handleConfirm} disabled={loading || !newVersion || impactLoading}>
+            <Button onClick={handleConfirm} disabled={!canConfirm}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (confirmLabel ?? '确认发布')}
             </Button>
           )}

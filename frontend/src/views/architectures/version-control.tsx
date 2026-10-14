@@ -26,6 +26,18 @@ const ARCHIVE_VALUE_STREAM = gql`
   }
 `
 
+export const ARCHIVE_PROCESS = gql`
+  mutation ArchiveProcess($id: String!) {
+    processArchive(id: $id)
+  }
+`
+
+export const ARCHIVE_CAPABILITY = gql`
+  mutation ArchiveCapability($id: String!) {
+    capabilityArchive(id: $id)
+  }
+`
+
 const GET_VALUE_STREAMS = gql`
   query GetValueStreamsForVersion($spaceId: String!) {
     valueStreamsBySpace(spaceId: $spaceId) {
@@ -48,12 +60,13 @@ export function VersionHistoryDialog({ open, onOpenChange, spaceId, logicalId, t
   query: DocumentNode
   dataKey: string
 }) {
-  const { data, loading } = useQuery<any>(query, {
+  const { data, loading, error } = useQuery<any>(query, {
     variables: { spaceId, logicalId },
     skip: !logicalId || !spaceId,
   })
 
-  const versions = (data?.[dataKey] || []) as { id: string; name: string; description: string; businessVersion: string; status: string; createdAt: string; updatedAt: string }[]
+  const raw = data?.[dataKey]
+  const versions = (Array.isArray(raw) ? raw : []) as { id: string; name: string; description: string; businessVersion: string; status: string; createdAt: string; updatedAt: string }[]
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -63,6 +76,8 @@ export function VersionHistoryDialog({ open, onOpenChange, spaceId, logicalId, t
         </DialogHeader>
         <div className="py-4">
           {loading && <div className="text-center py-8 text-muted-foreground">加载中...</div>}
+          {!loading && error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">版本历史加载失败</div>}
+          {!loading && !error && versions.length === 0 && <div className="text-center py-8 text-muted-foreground">暂无版本记录</div>}
           {versions.length > 0 && (
             <Table>
               <TableHeader>
@@ -79,7 +94,7 @@ export function VersionHistoryDialog({ open, onOpenChange, spaceId, logicalId, t
                     <TableCell className="font-mono">{v.businessVersion}</TableCell>
                     <TableCell>{v.name}</TableCell>
                     <TableCell>
-                      <Badge variant={v.status === 'archived' ? 'destructive' : v.status === 'deprecated' ? 'secondary' : v.status === 'active' ? 'default' : 'outline'}>
+                      <Badge variant={historyStatusVariant(v.status)}>
                         {v.status}
                       </Badge>
                     </TableCell>
@@ -100,13 +115,30 @@ export function VersionHistoryDialog({ open, onOpenChange, spaceId, logicalId, t
   )
 }
 
+const HISTORY_STATUS_VARIANTS = {
+  active: 'default',
+  deprecated: 'secondary',
+  archived: 'destructive',
+} as const
+
+function historyStatusVariant(status: string): 'default' | 'destructive' | 'secondary' | 'outline' {
+  return (HISTORY_STATUS_VARIANTS as Record<string, 'default' | 'destructive' | 'secondary' | 'outline'>)[status] ?? 'outline'
+}
+
 // ============================================================================
-// Archive Button (inline)
+// Archive Button (shared, inline, no confirm dialog).
+// The mutation + list refetch are parameterized so value streams, processes
+// and capabilities share one component instead of three copies.
 // ============================================================================
 
-export function ArchiveButton({ id, onArchived, spaceId }: { id: string; onArchived?: () => void; spaceId: string }) {
-  const [archiveMut] = useMutation(ARCHIVE_VALUE_STREAM, {
-    refetchQueries: [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
+export function ArchiveButton({ id, spaceId, mutation, refetchQuery }: {
+  id: string
+  spaceId: string
+  mutation?: DocumentNode
+  refetchQuery?: DocumentNode
+}) {
+  const [archiveMut] = useMutation(mutation ?? ARCHIVE_VALUE_STREAM, {
+    refetchQueries: refetchQuery ? [{ query: refetchQuery, variables: { spaceId } }] : [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
   })
   const [loading, setLoading] = useState(false)
 
@@ -114,7 +146,6 @@ export function ArchiveButton({ id, onArchived, spaceId }: { id: string; onArchi
     setLoading(true)
     try {
       await archiveMut({ variables: { id } })
-      onArchived?.()
     } catch (err) {
       console.error('Archive failed:', err)
     } finally {
