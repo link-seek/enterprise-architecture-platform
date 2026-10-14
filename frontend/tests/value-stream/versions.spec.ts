@@ -71,6 +71,10 @@ test.describe('Value Stream Management - Version Control', () => {
     // Click confirm
     await page.getByRole('button', { name: /确认发布|创建|Create/ }).click();
 
+    // Unified ritual shows a success receipt inside the dialog — close it explicitly
+    await expect(page.getByText(/发布成功/)).toBeVisible({ timeout: 10000 });
+    await page.getByRole('button', { name: /关闭|Close/ }).first().click();
+
     // Verify dialog closes
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
 
@@ -236,7 +240,7 @@ test.describe('Value Stream Management - Version Control', () => {
 
     // Empty version name: the submit button is disabled and the dialog stays open
     await page.getByRole('textbox', { name: /版本|Version/ }).clear();
-    await expect(page.getByRole('button', { name: /创建|Create/ })).toBeDisabled();
+    await expect(page.getByRole('button', { name: /确认发布|创建|Create/ })).toBeDisabled();
     await expect(page.getByRole('dialog')).toBeVisible();
 
     // Close dialog

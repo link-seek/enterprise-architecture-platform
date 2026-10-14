@@ -26,6 +26,8 @@ const ARCHIVE_VALUE_STREAM = gql`
   }
 `
 
+export { ARCHIVE_VALUE_STREAM }
+
 export const ARCHIVE_PROCESS = gql`
   mutation ArchiveProcess($id: String!) {
     processArchive(id: $id)
@@ -134,11 +136,11 @@ function historyStatusVariant(status: string): 'default' | 'destructive' | 'seco
 export function ArchiveButton({ id, spaceId, mutation, refetchQuery }: {
   id: string
   spaceId: string
-  mutation?: DocumentNode
-  refetchQuery?: DocumentNode
+  mutation: DocumentNode
+  refetchQuery: DocumentNode
 }) {
-  const [archiveMut] = useMutation(mutation ?? ARCHIVE_VALUE_STREAM, {
-    refetchQueries: refetchQuery ? [{ query: refetchQuery, variables: { spaceId } }] : [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
+  const [archiveMut] = useMutation(mutation, {
+    refetchQueries: [{ query: refetchQuery, variables: { spaceId } }],
   })
   const [loading, setLoading] = useState(false)
 

@@ -304,6 +304,33 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
     ) -> Result<(), DomainError> {
         let txn = self.db.begin().await?;
 
+        // Unified publish policy (same contract as process publishes):
+        // strict semver + monotonicity against every existing version of this
+        // logicalId (no duplicates, no rollbacks). Unparseable history rows
+        // are data corruption: fail loudly instead of skipping.
+        let new_parsed = crate::application::version::parse(&new_version.business_version)
+            .map_err(DomainError::from)?;
+        let existing_versions = value_stream::Entity::find()
+            .filter(value_stream::Column::LogicalId.eq(new_version.logical_id))
+            .filter(value_stream::Column::DeletedAt.is_null())
+            .all(&txn)
+            .await?;
+        for row in &existing_versions {
+            let v = crate::application::version::parse(&row.business_version).map_err(|e| {
+                DomainError::Validation(format!(
+                    "stored version '{}' is not valid semver: {e}",
+                    row.business_version
+                ))
+            })?;
+            if new_parsed <= v {
+                return Err(DomainError::InvalidTransition {
+                    from: row.business_version.clone(),
+                    to: new_version.business_version.clone(),
+                    entity: "ValueStream".to_string(),
+                });
+            }
+        }
+
         // 1. Deprecate the current version (compatibility window). The row must
         // still be Active: silently "deprecating" an already-archived row
         // would resurrect it, and a concurrent second publish must fail

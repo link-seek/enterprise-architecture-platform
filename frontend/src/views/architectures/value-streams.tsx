@@ -9,7 +9,7 @@ import { Link, useParams } from 'react-router-dom'
 import { Plus, Pencil, Trash2, History, GitBranch, MoreVertical, UserRoundCog, type LucideIcon } from 'lucide-react'
 import { useState, useCallback, useEffect, memo } from 'react'
 import { ValueStreamCrudDialog, ValueStreamDeleteDialog } from './crud'
-import { VersionHistoryDialog, ArchiveButton, GET_VALUE_STREAMS, GET_VALUE_STREAM_VERSIONS } from './version-control'
+import { VersionHistoryDialog, ArchiveButton, ARCHIVE_VALUE_STREAM, GET_VALUE_STREAMS, GET_VALUE_STREAM_VERSIONS } from './version-control'
 import { VersionPublishDialog, suggestNextVersion, type PublishImpactItem } from './version-publish-dialog'
 import { GET_STAGE_CAPABILITIES } from './value-stream-stages'
 import { TransferOwnershipDialog } from './transfer-ownership-dialog'
@@ -231,7 +231,7 @@ const ValueStreamList = memo(function ValueStreamList({ nodes, isOwned, isMobile
               </Link>
               {owned && (
                 <div className="flex items-center gap-1">
-                  {vs.status !== 'archived' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
+                  {vs.status !== 'archived' && <ArchiveButton id={vs.id} spaceId={spaceId} mutation={ARCHIVE_VALUE_STREAM} refetchQuery={GET_VALUE_STREAMS} />}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="sm" className="h-11 w-11 p-0" aria-label="更多操作" title="更多操作">
@@ -297,7 +297,7 @@ const ValueStreamList = memo(function ValueStreamList({ nodes, isOwned, isMobile
                     {actions.filter((a) => !a.destructive).map((action) => (
                       <ActionButton key={action.label} action={action} />
                     ))}
-                    {vs.status !== 'archived' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
+                    {vs.status !== 'archived' && <ArchiveButton id={vs.id} spaceId={spaceId} mutation={ARCHIVE_VALUE_STREAM} refetchQuery={GET_VALUE_STREAMS} />}
                     {actions.filter((a) => a.destructive).map((action) => (
                       <ActionButton key={action.label} action={action} />
                     ))}
