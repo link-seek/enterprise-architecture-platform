@@ -60,7 +60,7 @@ interface ValueStreamAction {
 function ActionButton({ action }: { action: ValueStreamAction }) {
   const Icon = action.icon
   return (
-    <Button variant="ghost" size="sm" aria-label={action.label} onClick={action.onClick}>
+    <Button variant="ghost" size="sm" aria-label={action.label} title={action.label} onClick={action.onClick}>
       <Icon className={`h-3.5 w-3.5${action.destructive ? ' text-destructive' : ''}`} />
     </Button>
   )
@@ -129,7 +129,7 @@ const ValueStreamList = memo(function ValueStreamList({ nodes, isOwned, isMobile
                   {vs.status === 'active' && <ArchiveButton id={vs.id} spaceId={spaceId} />}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" className="h-11 w-11 p-0" aria-label="更多操作">
+                      <Button variant="ghost" size="sm" className="h-11 w-11 p-0" aria-label="更多操作" title="更多操作">
                         <MoreVertical className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>

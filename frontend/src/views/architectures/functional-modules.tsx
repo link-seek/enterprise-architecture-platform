@@ -64,8 +64,8 @@ const ModuleList = memo(function ModuleList({ nodes, canEdit, onEdit, onDelete }
             {canEdit && (
               <TableCell>
                 <div className="flex gap-1">
-                  <Button variant="ghost" size="sm" aria-label="编辑" onClick={() => onEdit(m)}><Pencil className="h-3.5 w-3.5" /></Button>
-                  <Button variant="ghost" size="sm" aria-label="删除" onClick={() => onDelete(m)}><Trash2 className="h-3.5 w-3.5 text-destructive" /></Button>
+                  <Button variant="ghost" size="sm" aria-label="编辑" title="编辑" onClick={() => onEdit(m)}><Pencil className="h-3.5 w-3.5" /></Button>
+                  <Button variant="ghost" size="sm" aria-label="删除" title="删除" onClick={() => onDelete(m)}><Trash2 className="h-3.5 w-3.5 text-destructive" /></Button>
                 </div>
               </TableCell>
             )}

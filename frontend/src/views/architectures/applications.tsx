@@ -84,7 +84,7 @@ const ComponentList = memo(function ComponentList({ nodes, canEdit, isMobile, on
               <div className="flex justify-end pt-1">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0" aria-label="更多操作">
+                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0" aria-label="更多操作" title="更多操作">
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -132,10 +132,10 @@ const ComponentList = memo(function ComponentList({ nodes, canEdit, isMobile, on
             {canEdit && (
               <TableCell>
                 <div className="flex gap-1">
-                  <Button variant="ghost" size="sm" aria-label="编辑" onClick={() => onEdit(c)}>
+                  <Button variant="ghost" size="sm" aria-label="编辑" title="编辑" onClick={() => onEdit(c)}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
-                  <Button variant="ghost" size="sm" aria-label="删除" onClick={() => onDelete(c)}>
+                  <Button variant="ghost" size="sm" aria-label="删除" title="删除" onClick={() => onDelete(c)}>
                     <Trash2 className="h-3.5 w-3.5 text-destructive" />
                   </Button>
                 </div>

@@ -292,6 +292,7 @@ export default function ValueStreamDetail() {
                                 variant="ghost"
                                 size="sm"
                                 aria-label="编辑"
+                                title="编辑"
                                 onClick={() => { setEditingStage(stage); setStageDialogOpen(true) }}
                               >
                                 <Pencil className="h-3.5 w-3.5" />
@@ -300,6 +301,7 @@ export default function ValueStreamDetail() {
                                 variant="ghost"
                                 size="sm"
                                 aria-label="删除"
+                                title="删除"
                                 onClick={() => setDeletingStage(stage)}
                               >
                                 <Trash2 className="h-3.5 w-3.5 text-destructive" />

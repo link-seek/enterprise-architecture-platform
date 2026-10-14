@@ -134,7 +134,7 @@ export default function SpaceDetail() {
               isMobile ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-9 w-9 p-0" aria-label="更多操作">
+                    <Button variant="outline" size="sm" className="h-9 w-9 p-0" aria-label="更多操作" title="更多操作">
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -181,6 +181,7 @@ export default function SpaceDetail() {
               type="button"
               onClick={() => setArchiveError(null)}
               aria-label="关闭错误提示"
+              title="关闭错误提示"
               className="shrink-0 text-destructive hover:opacity-70"
             >
               <X className="h-4 w-4" />

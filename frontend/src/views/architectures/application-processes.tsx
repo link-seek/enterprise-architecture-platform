@@ -107,7 +107,7 @@ const ProcessList = memo(function ProcessList({ nodes, canEdit, isMobile, onEdit
               {canEdit && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0" aria-label="更多操作">
+                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0" aria-label="更多操作" title="更多操作">
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -157,10 +157,10 @@ const ProcessList = memo(function ProcessList({ nodes, canEdit, isMobile, onEdit
                 </Button>
                 {canEdit && (
                   <>
-                    <Button variant="ghost" size="sm" onClick={() => onEdit(p)} aria-label="编辑">
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(p)} aria-label="编辑" title="编辑">
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onDelete(p)} aria-label="删除">
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(p)} aria-label="删除" title="删除">
                       <Trash2 className="h-3.5 w-3.5 text-destructive" />
                     </Button>
                   </>
