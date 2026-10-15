@@ -32,7 +32,7 @@ jobs:
     if: |
       github.event_name == 'issues' &&
       github.event.label.name == 'deploy-broken'
-    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@v1.0.27-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@v1.0.28-pilot
     with:
       deploy-broken-issue: ${{ github.event.issue.number }}
       issue-repo: link-seek/enterprise-architecture-platform
@@ -41,6 +41,9 @@ jobs:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
       PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+      # deploy.sh 强校验 APP_JWT__SECRET（缺则 loud fail）：broken 路径同样透传，
+      # 避免修复流走到重部署时必失败。
+      APP_JWT__SECRET: ${{ secrets.APP_JWT__SECRET }}
       APP_SEED_EDITOR_EMAIL: ${{ secrets.APP_SEED_EDITOR_EMAIL }}
       APP_SEED_EDITOR_PASSWORD: ${{ secrets.APP_SEED_EDITOR_PASSWORD }}
       APP_SEED_STRANGER_EMAIL: ${{ secrets.APP_SEED_STRANGER_EMAIL }}
@@ -74,7 +77,7 @@ jobs:
   deploy:
     needs: resolve-tag
     if: needs.resolve-tag.outputs.tag != ''
-    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@v1.0.27-pilot
+    uses: link-seek/issue-resolver-l1/.github/workflows/deploy.yml@v1.0.28-pilot
     with:
       image-tag: ${{ needs.resolve-tag.outputs.tag }}
       runner-label: eap-prod
