@@ -29,6 +29,13 @@ podman rm -f "$CONTAINER_NAME" 2>/dev/null || true
 # Fall back to E2E_* env vars so the backend seeds with the same credentials
 # the tests use, even when APP_SEED_* secrets are not separately configured.
 mkdir -p "$(dirname "$ENV_FILE")"
+# JWT 必须在写 service 文件之前就位：否则首次启动缺钥 crashloop
+# （Restart=always 每 5s 重启一次），直到 L1 补丁二次重启才恢复，
+# 中间是 inspector 可见的 API 中断。为空则 loud fail 交给回滚。
+if [[ -z "${APP_JWT__SECRET:-}" ]]; then
+  echo "ERROR: APP_JWT__SECRET is empty — refusing to deploy without JWT secret" >&2
+  exit 1
+fi
 (
   umask 077
   {
@@ -79,6 +86,9 @@ mkdir -p "$(dirname "$ENV_FILE")"
     if [[ -n "${PILOT_API_URL:-}" ]]; then
       printf 'PILOT_API_URL=%s\n' "$PILOT_API_URL"
     fi
+    # JWT 直接写 env 文件（600）：首次启动即有钥，不再经历
+    # “无钥 crashloop → L1 sed 补丁 → 二次重启”的 1 分钟 API 中断。
+    printf 'APP_JWT__SECRET=%s\n' "$APP_JWT__SECRET"
     echo "RUST_LOG=info,sqlx::pool=warn"
   } > "$ENV_FILE"
 )
