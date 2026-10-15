@@ -2346,7 +2346,7 @@ fn register_process_domain_mutations(builder: &mut Builder) {
                 ensure_entity_owner_or_admin(&ctx, active.owner_id).await?;
 
                 let result = repo
-                    .publish_new_version(logical_id, &new_version)
+                    .publish_new_version(logical_id, &new_version, Some(active.id))
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
 

@@ -34,22 +34,6 @@ pub struct BusinessProcess {
 }
 
 impl BusinessProcess {
-    /// Lifecycle state machine: `Active → Deprecated` (compatibility window).
-    /// A deprecated process remains valid for existing capability links while
-    /// a newer version is live.
-    pub fn deprecate(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
-        if self.status != LifecycleStatus::Active {
-            return Err(DomainError::InvalidTransition {
-                from: format!("{:?}", self.status),
-                to: "Deprecated".to_string(),
-                entity: "BusinessProcess".to_string(),
-            });
-        }
-        self.status = LifecycleStatus::Deprecated;
-        self.updated_at = now;
-        Ok(())
-    }
-
     /// Lifecycle state machine: `Active | Deprecated → Archived` (terminal).
     /// Unified publish policy: active rows retire whole-line, deprecated rows
     /// leave the compatibility window.
