@@ -518,7 +518,7 @@ impl PublishStrategy for SeaOrmValueStreamRepo {
             business_version: Set(new_version.to_owned()),
             status: Set(LifecycleStatus::Active),
             name: Set(overrides.name.clone().unwrap_or_else(|| old.name.clone())),
-            description: Set(overrides.description.clone().or(old.description.clone())),
+            description: Set(overrides.description.clone().or_else(|| old.description.clone())),
             triggering_event: Set(old.triggering_event.clone()),
             end_deliverable: Set(old.end_deliverable.clone()),
             owner_id: Set(old.owner_id),
@@ -580,7 +580,8 @@ impl PublishStrategy for SeaOrmValueStreamRepo {
         old_version: &str,
         new_version: &str,
     ) -> Result<Vec<MovedLink>, DomainError> {
-        // Names for the impact receipt (same snapshot).
+        // Names for the impact receipt (same snapshot): one batched query
+        // for all old stages, grouped in memory.
         let old_stages = value_stream_stage::Entity::find()
             .filter(value_stream_stage::Column::ValueStreamId.eq(old_id))
             .filter(value_stream_stage::Column::DeletedAt.is_null())
@@ -589,20 +590,23 @@ impl PublishStrategy for SeaOrmValueStreamRepo {
             .map_err(|e| {
                 DomainError::Database(format!("publish: list old stages of {old_id}: {e}"))
             })?;
-        let mut cap_ids: Vec<Uuid> = Vec::new();
-        for s in &old_stages {
-            let links = stage_capability::Entity::find()
-                .filter(stage_capability::Column::StageId.eq(s.id))
+        let old_stage_ids: Vec<Uuid> = old_stages.iter().map(|s| s.id).collect();
+        let mut cap_ids: Vec<Uuid> = if old_stage_ids.is_empty() {
+            Vec::new()
+        } else {
+            stage_capability::Entity::find()
+                .filter(stage_capability::Column::StageId.is_in(old_stage_ids))
                 .all(txn)
                 .await
                 .map_err(|e| {
                     DomainError::Database(format!(
-                        "publish: list stage_capabilities of stage {}: {e}",
-                        s.id
+                        "publish: list stage_capabilities of {old_id}: {e}"
                     ))
-                })?;
-            cap_ids.extend(links.into_iter().map(|l| l.capability_id));
-        }
+                })?
+                .into_iter()
+                .map(|l| l.capability_id)
+                .collect()
+        };
         cap_ids.sort();
         cap_ids.dedup();
         let cap_name_by_id: std::collections::HashMap<Uuid, String> = if cap_ids.is_empty() {

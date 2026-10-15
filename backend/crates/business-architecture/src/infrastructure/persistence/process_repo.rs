@@ -415,6 +415,13 @@ impl PublishStrategy for SeaOrmProcessRepo {
         new_version: &str,
         _overrides: &PublishOverrides,
     ) -> Result<Uuid, DomainError> {
+        // Processes always copy content verbatim: overrides are accepted by
+        // the shared engine signature but intentionally ignored here (value
+        // streams are the only element that renames on publish).
+        debug_assert!(
+            _overrides.name.is_none() && _overrides.description.is_none(),
+            "process publish ignores content overrides"
+        );
         let old = business_process::Entity::find_by_id(old_id)
             .one(txn)
             .await?
@@ -490,7 +497,7 @@ impl PublishStrategy for SeaOrmProcessRepo {
             Vec::new()
         } else {
             business_capability::Entity::find()
-                .filter(business_capability::Column::Id.is_in(cap_ids.clone()))
+                .filter(business_capability::Column::Id.is_in(cap_ids))
                 .all(txn)
                 .await?
                 .into_iter()

@@ -66,9 +66,20 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         new_name: Option<String>,
         new_description: Option<String>,
     ) -> Result<ValueStream, DomainError> {
-        // Load current version (for its logical id).
+        // Fail fast on malformed versions before any DB I/O.
+        crate::application::version::parse(&new_version).map_err(DomainError::from)?;
+        // Load current version (for its logical id). Only the active head
+        // can be published: publishing from a history row would silently
+        // rebase onto a different baseline than the caller expects.
         let current = self.repo.find_by_id(current_id).await?
             .ok_or(DomainError::ValueStreamNotFound)?;
+        if current.status != shared_common::enums::LifecycleStatus::Active {
+            return Err(DomainError::InvalidTransition {
+                from: format!("{:?}", current.status),
+                to: "Deprecated (for versioning)".to_string(),
+                entity: "ValueStream".to_string(),
+            });
+        }
 
         let new_id = self.repo
             .publish_version(current.logical_id, new_version, new_name, new_description)

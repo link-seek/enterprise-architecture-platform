@@ -17,6 +17,7 @@
 //!
 //! All six steps run inside a single transaction.
 use sea_orm::{DatabaseConnection, DatabaseTransaction, TransactionTrait};
+use semver::Version;
 use uuid::Uuid;
 
 use super::version;
@@ -99,18 +100,35 @@ pub async fn publish(
     // Step 1: strict semver, same rule for every element.
     let new_parsed = version::parse(new_version).map_err(DomainError::from)?;
     let new_version = new_version.to_owned();
-    let txn = strategy.db().begin().await?;
+    let txn = strategy.db().begin().await.map_err(|e| {
+        DomainError::Database(format!("{} publish: begin transaction: {e}", strategy.entity_name()))
+    })?;
 
-    // Step 2: monotonicity. Unparseable history rows are data corruption,
-    // not skippable: fail loudly.
-    let existing = strategy.existing_versions(&txn, logical_id).await?;
+    // Step 2: monotonicity against the MAXIMUM existing version, so the
+    // `from` in the error is deterministic. Unparseable history rows are
+    // data corruption, not skippable: fail loudly.
+    let existing = strategy.existing_versions(&txn, logical_id).await
+        .map_err(|e| {
+            DomainError::Database(format!(
+                "{} publish: list existing versions: {e}",
+                strategy.entity_name()
+            ))
+        })?;
+    let mut max: Option<Version> = None;
+    let mut max_raw = String::new();
     for (_id, ver) in &existing {
         let v = version::parse(ver).map_err(|e| {
             DomainError::Validation(format!("stored version '{ver}' is not valid semver: {e}"))
         })?;
-        if new_parsed <= v {
+        if max.as_ref().map_or(true, |m| v > *m) {
+            max = Some(v);
+            max_raw = ver.clone();
+        }
+    }
+    if let Some(m) = max {
+        if new_parsed <= m {
             return Err(DomainError::InvalidTransition {
-                from: ver.clone(),
+                from: max_raw,
                 to: new_version.clone(),
                 entity: strategy.entity_name().to_string(),
             });
@@ -126,6 +144,8 @@ pub async fn publish(
         .move_links(&txn, old_id, new_id, &old_version, &new_version)
         .await?;
 
-    txn.commit().await?;
+    txn.commit().await.map_err(|e| {
+        DomainError::Database(format!("{} publish: commit transaction: {e}", strategy.entity_name()))
+    })?;
     Ok((new_id, moved))
 }
