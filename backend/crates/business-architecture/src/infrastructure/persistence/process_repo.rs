@@ -364,7 +364,10 @@ impl PublishStrategy for SeaOrmProcessRepo {
             .filter(business_process::Column::LogicalId.eq(logical_id))
             .filter(business_process::Column::DeletedAt.is_null())
             .all(txn)
-            .await?
+            .await
+            .map_err(|e| {
+                DomainError::Database(format!("publish: list existing versions: {e}"))
+            })?
             .into_iter()
             .map(|r| (r.id, r.business_version))
             .collect())
@@ -380,7 +383,10 @@ impl PublishStrategy for SeaOrmProcessRepo {
             .filter(business_process::Column::Status.eq(LifecycleStatus::Active))
             .filter(business_process::Column::DeletedAt.is_null())
             .one(txn)
-            .await?
+            .await
+            .map_err(|e| {
+                DomainError::Database(format!("publish: load active version: {e}"))
+            })?
             .ok_or(DomainError::ProcessVersionNotFound)?;
 
         // Conditional compare-and-swap: the flip only lands if the row is
@@ -399,7 +405,10 @@ impl PublishStrategy for SeaOrmProcessRepo {
             .filter(business_process::Column::Id.eq(old.id))
             .filter(business_process::Column::Status.eq(LifecycleStatus::Active))
             .exec(txn)
-            .await?;
+            .await
+            .map_err(|e| {
+                DomainError::Database(format!("publish: deprecate active version: {e}"))
+            })?;
         if flipped.rows_affected != 1 {
             return Err(DomainError::InvalidTransition {
                 from: "Active".to_string(),
@@ -415,18 +424,23 @@ impl PublishStrategy for SeaOrmProcessRepo {
         txn: &DatabaseTransaction,
         old_id: Uuid,
         new_version: &str,
-        _overrides: &PublishOverrides,
+        overrides: &PublishOverrides,
     ) -> Result<Uuid, DomainError> {
-        // Processes always copy content verbatim: overrides are accepted by
-        // the shared engine signature but intentionally ignored here (value
-        // streams are the only element that renames on publish).
-        debug_assert!(
-            _overrides.name.is_none() && _overrides.description.is_none(),
-            "process publish ignores content overrides"
-        );
+        // Processes always copy content verbatim: overrides are rejected
+        // loudly (not debug_assert — release builds must not silently drop
+        // caller intent). Value streams are the only element that renames
+        // on publish.
+        if overrides.name.is_some() || overrides.description.is_some() {
+            return Err(DomainError::Validation(
+                "process publish does not accept content overrides".to_string(),
+            ));
+        }
         let old = business_process::Entity::find_by_id(old_id)
             .one(txn)
-            .await?
+            .await
+            .map_err(|e| {
+                DomainError::Database(format!("publish: load old version {old_id}: {e}"))
+            })?
             .ok_or(DomainError::ProcessVersionNotFound)?;
 
         let now = chrono::Utc::now();
@@ -453,14 +467,19 @@ impl PublishStrategy for SeaOrmProcessRepo {
             deleted_at: Set(None),
             space_id: Set(old.space_id),
         };
-        new_active.insert(txn).await?;
+        new_active.insert(txn).await.map_err(|e| {
+            DomainError::Database(format!("publish: insert new version: {e}"))
+        })?;
 
         // Copy steps to the new version (same content, new ids).
         let old_steps = process_step::Entity::find()
             .filter(process_step::Column::ProcessId.eq(old.id))
             .filter(process_step::Column::DeletedAt.is_null())
             .all(txn)
-            .await?;
+            .await
+            .map_err(|e| {
+                DomainError::Database(format!("publish: list old steps: {e}"))
+            })?;
         for step in &old_steps {
             let step_active = process_step::ActiveModel {
                 id: Set(Uuid::new_v4()),
@@ -476,7 +495,9 @@ impl PublishStrategy for SeaOrmProcessRepo {
                 updated_at: Set(now),
                 deleted_at: Set(None),
             };
-            step_active.insert(txn).await?;
+            step_active.insert(txn).await.map_err(|e| {
+                DomainError::Database(format!("publish: insert step: {e}"))
+            })?;
         }
         Ok(new_id)
     }
@@ -493,7 +514,10 @@ impl PublishStrategy for SeaOrmProcessRepo {
         let links = capability_process::Entity::find()
             .filter(capability_process::Column::ProcessId.eq(old_id))
             .all(txn)
-            .await?;
+            .await
+            .map_err(|e| {
+                DomainError::Database(format!("publish: list capability links: {e}"))
+            })?;
         let cap_ids: Vec<Uuid> = links.iter().map(|l| l.capability_id).collect();
         let cap_names: Vec<(Uuid, String)> = if cap_ids.is_empty() {
             Vec::new()
@@ -501,7 +525,10 @@ impl PublishStrategy for SeaOrmProcessRepo {
             business_capability::Entity::find()
                 .filter(business_capability::Column::Id.is_in(cap_ids))
                 .all(txn)
-                .await?
+                .await
+                .map_err(|e| {
+                    DomainError::Database(format!("publish: list capability names: {e}"))
+                })?
                 .into_iter()
                 .map(|c| (c.id, c.name))
                 .collect()
@@ -536,7 +563,10 @@ impl PublishStrategy for SeaOrmProcessRepo {
             )
             .filter(capability_process::Column::ProcessId.eq(old_id))
             .exec(txn)
-            .await?;
+            .await
+            .map_err(|e| {
+                DomainError::Database(format!("publish: move capability_process::Column::ProcessId: {e}"))
+            })?;
         capability_realization::Entity::update_many()
             .col_expr(
                 capability_realization::Column::ProcessId,
@@ -544,7 +574,10 @@ impl PublishStrategy for SeaOrmProcessRepo {
             )
             .filter(capability_realization::Column::ProcessId.eq(old_id))
             .exec(txn)
-            .await?;
+            .await
+            .map_err(|e| {
+                DomainError::Database(format!("publish: move capability_realization::Column::ProcessId: {e}"))
+            })?;
         participation::Entity::update_many()
             .col_expr(
                 participation::Column::BusinessProcessId,
@@ -552,7 +585,10 @@ impl PublishStrategy for SeaOrmProcessRepo {
             )
             .filter(participation::Column::BusinessProcessId.eq(old_id))
             .exec(txn)
-            .await?;
+            .await
+            .map_err(|e| {
+                DomainError::Database(format!("publish: move participation::Column::BusinessProcessId: {e}"))
+            })?;
         process_reference::Entity::update_many()
             .col_expr(
                 process_reference::Column::BusinessProcessId,
@@ -560,7 +596,10 @@ impl PublishStrategy for SeaOrmProcessRepo {
             )
             .filter(process_reference::Column::BusinessProcessId.eq(old_id))
             .exec(txn)
-            .await?;
+            .await
+            .map_err(|e| {
+                DomainError::Database(format!("publish: move process_reference::Column::BusinessProcessId: {e}"))
+            })?;
         Ok(moved)
     }
 }

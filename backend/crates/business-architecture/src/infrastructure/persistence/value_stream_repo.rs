@@ -509,7 +509,10 @@ impl PublishStrategy for SeaOrmValueStreamRepo {
     ) -> Result<Uuid, DomainError> {
         let old = value_stream::Entity::find_by_id(old_id)
             .one(txn)
-            .await?
+            .await
+            .map_err(|e| {
+                DomainError::Database(format!("publish: load old version {old_id}: {e}"))
+            })?
             .ok_or(DomainError::ValueStreamNotFound)?;
 
         let now = chrono::Utc::now();

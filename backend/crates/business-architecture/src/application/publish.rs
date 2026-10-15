@@ -112,14 +112,9 @@ pub async fn publish(
 
     // Step 2: monotonicity against the MAXIMUM existing version, so the
     // `from` in the error is deterministic. Unparseable history rows are
-    // data corruption, not skippable: fail loudly.
-    let existing = strategy.existing_versions(&txn, logical_id).await
-        .map_err(|e| {
-            DomainError::Database(format!(
-                "{} publish: list existing versions: {e}",
-                strategy.entity_name()
-            ))
-        })?;
+    // data corruption, not skippable: fail loudly. (The engine re-checks
+    // against the freshly flipped head after CAS — see below.)
+    let existing = strategy.existing_versions(&txn, logical_id).await?;
     let mut max: Option<Version> = None;
     let mut max_raw = String::new();
     for (_id, ver) in &existing {
@@ -151,6 +146,20 @@ pub async fn publish(
                 entity: strategy.entity_name().to_string(),
             });
         }
+    }
+    // Re-validate monotonicity against the freshly flipped head: a concurrent
+    // publish may have committed a higher version after our snapshot (the CAS
+    // serializes writers, but the winner could still be older than a version
+    // committed in between). Abort instead of archiving a newer head.
+    let old_parsed = version::parse(&old_version).map_err(|e| {
+        DomainError::Validation(format!("stored version '{old_version}' is not valid semver: {e}"))
+    })?;
+    if new_parsed <= old_parsed {
+        return Err(DomainError::InvalidTransition {
+            from: old_version,
+            to: new_version.clone(),
+            entity: strategy.entity_name().to_string(),
+        });
     }
     let new_id = strategy
         .insert_new(&txn, old_id, &new_version, overrides)
