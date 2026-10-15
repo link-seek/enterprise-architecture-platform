@@ -12,7 +12,6 @@ use super::super::error::DomainError;
 pub struct BusinessCapability {
     pub id: Uuid,
     pub logical_id: Uuid,
-    pub business_version: String,
     pub status: LifecycleStatus,
     pub capability_status: CapabilityStatus,
     pub name: String,
@@ -60,7 +59,6 @@ mod tests {
         BusinessCapability {
             id: Uuid::now_v7(),
             logical_id: Uuid::now_v7(),
-            business_version: "1.0.0".to_string(),
             status: LifecycleStatus::Active,
             capability_status: CapabilityStatus::default(),
             name: "test".to_string(),

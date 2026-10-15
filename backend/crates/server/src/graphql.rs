@@ -1833,7 +1833,6 @@ fn register_capability_domain_mutations(builder: &mut Builder) {
                 let am = business_capability::ActiveModel {
                     id: Set(Uuid::now_v7()),
                     logical_id: Set(Uuid::now_v7()),
-                    business_version: Set("v1.0".to_owned()),
                     status: Set(LifecycleStatus::Active),
                     capability_status: Set(capability_status),
                     name: Set(name),

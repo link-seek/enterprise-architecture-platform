@@ -18,9 +18,9 @@ async fn migrator_applies_and_capability_status_column_exists() {
     let uuid_str = "00000000-0000-0000-0000-000000000001";
     let insert_sql = format!(
         r#"INSERT INTO "business_capabilities"
-           ("id","logical_id","business_version","status","name","description",
+           ("id","logical_id","status","name","description",
             "level","maturity","business_value","cost","created_at","updated_at")
-           VALUES ('{uuid}','{uuid}','1.0.0','active','n','d',
+           VALUES ('{uuid}','{uuid}','active','n','d',
                    'level_1','initial','medium','medium','2020-01-01 00:00:00','2020-01-01 00:00:00')"#,
         uuid = uuid_str
     );
