@@ -221,7 +221,6 @@ async fn seed_business_architecture(db: &DatabaseConnection) -> anyhow::Result<(
             business_capability::Model {
                 id: cid,
                 logical_id: cid,
-                business_version: "1.0.0".into(),
                 status: LifecycleStatus::Active,
                 capability_status: CapabilityStatus::Active,
                 name: name.into(),
