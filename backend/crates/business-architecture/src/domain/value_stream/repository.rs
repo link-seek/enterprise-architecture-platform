@@ -37,6 +37,7 @@ pub trait ValueStreamRepository: Send + Sync + 'static {
         new_version: String,
         new_name: Option<String>,
         new_description: Option<String>,
+        expected_active_id: Option<Uuid>,
     ) -> Result<Uuid, DomainError>;
 }
 

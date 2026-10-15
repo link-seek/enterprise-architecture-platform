@@ -316,12 +316,14 @@ impl SeaOrmProcessRepo {
         &self,
         logical_id: Uuid,
         new_version: &str,
+        expected_active_id: Option<Uuid>,
     ) -> Result<PublishVersionResult, DomainError> {
         let (new_id, moved) = crate::application::publish::publish(
             self,
             logical_id,
             new_version,
             &PublishOverrides::default(),
+            expected_active_id,
         )
         .await?;
         let new_process = business_process::Entity::find_by_id(new_id)

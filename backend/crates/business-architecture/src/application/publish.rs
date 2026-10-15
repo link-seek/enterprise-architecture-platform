@@ -91,11 +91,17 @@ pub trait PublishStrategy: Send + Sync {
 }
 
 /// Publish one new version. See module docs for the six unified steps.
+///
+/// `expected_active_id`: optimistic-concurrency binding — when the caller
+/// already resolved the head it intends to publish from (both GraphQL paths
+/// do), the engine aborts instead of silently rebasing onto a newer head
+/// that committed in between. `None` skips the check.
 pub async fn publish(
     strategy: &impl PublishStrategy,
     logical_id: Uuid,
     new_version: &str,
     overrides: &PublishOverrides,
+    expected_active_id: Option<Uuid>,
 ) -> Result<(Uuid, Vec<MovedLink>), DomainError> {
     // Step 1: strict semver, same rule for every element.
     let new_parsed = version::parse(new_version).map_err(DomainError::from)?;
@@ -137,6 +143,15 @@ pub async fn publish(
 
     // Steps 3–5: flip, insert, move — one transaction.
     let (old_id, old_version) = strategy.deprecate_active(&txn, logical_id).await?;
+    if let Some(expected) = expected_active_id {
+        if old_id != expected {
+            return Err(DomainError::InvalidTransition {
+                from: format!("{old_id} (expected head {expected} already superseded)"),
+                to: new_version.clone(),
+                entity: strategy.entity_name().to_string(),
+            });
+        }
+    }
     let new_id = strategy
         .insert_new(&txn, old_id, &new_version, overrides)
         .await?;

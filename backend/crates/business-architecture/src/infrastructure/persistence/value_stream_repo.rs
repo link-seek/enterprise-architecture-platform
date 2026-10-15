@@ -309,6 +309,7 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
         new_version: String,
         new_name: Option<String>,
         new_description: Option<String>,
+        expected_active_id: Option<Uuid>,
     ) -> Result<Uuid, DomainError> {
         let (new_id, _moved) = crate::application::publish::publish(
             self,
@@ -318,6 +319,7 @@ impl ValueStreamRepository for SeaOrmValueStreamRepo {
                 name: new_name,
                 description: new_description,
             },
+            expected_active_id,
         )
         .await?;
         Ok(new_id)
@@ -580,8 +582,13 @@ impl PublishStrategy for SeaOrmValueStreamRepo {
         old_version: &str,
         new_version: &str,
     ) -> Result<Vec<MovedLink>, DomainError> {
+        // old_stages is re-queried here (insert_new queried it too): stage
+        // rows are tiny, publish is a rare op, and this keeps each strategy
+        // method independently correct inside the single transaction.
         // Names for the impact receipt (same snapshot): one batched query
-        // for all old stages, grouped in memory.
+        // for all old stages, receipt built per link in deterministic
+        // (stage sequence, capability) order — same shape and tolerance as
+        // the process side (missing capabilities render unnamed, links kept).
         let old_stages = value_stream_stage::Entity::find()
             .filter(value_stream_stage::Column::ValueStreamId.eq(old_id))
             .filter(value_stream_stage::Column::DeletedAt.is_null())
@@ -590,8 +597,12 @@ impl PublishStrategy for SeaOrmValueStreamRepo {
             .map_err(|e| {
                 DomainError::Database(format!("publish: list old stages of {old_id}: {e}"))
             })?;
+        let seq_by_stage: HashMap<Uuid, i32> = old_stages
+            .iter()
+            .map(|s| (s.id, s.sequence_order))
+            .collect();
         let old_stage_ids: Vec<Uuid> = old_stages.iter().map(|s| s.id).collect();
-        let mut cap_ids: Vec<Uuid> = if old_stage_ids.is_empty() {
+        let mut links = if old_stage_ids.is_empty() {
             Vec::new()
         } else {
             stage_capability::Entity::find()
@@ -603,28 +614,38 @@ impl PublishStrategy for SeaOrmValueStreamRepo {
                         "publish: list stage_capabilities of {old_id}: {e}"
                     ))
                 })?
-                .into_iter()
-                .map(|l| l.capability_id)
-                .collect()
         };
-        cap_ids.sort();
-        cap_ids.dedup();
+        links.sort_by_key(|l| {
+            (
+                seq_by_stage.get(&l.stage_id).copied().unwrap_or(i32::MAX),
+                l.capability_id,
+            )
+        });
+        let cap_ids: Vec<Uuid> = links.iter().map(|l| l.capability_id).collect();
         let cap_name_by_id: std::collections::HashMap<Uuid, String> = if cap_ids.is_empty() {
             Default::default()
         } else {
             business_capability::Entity::find()
                 .filter(business_capability::Column::Id.is_in(cap_ids))
                 .all(txn)
-                .await?
+                .await
+                .map_err(|e| {
+                    DomainError::Database(format!(
+                        "publish: list capability names for {old_id}: {e}"
+                    ))
+                })?
                 .into_iter()
                 .map(|c| (c.id, c.name))
                 .collect()
         };
-        let moved: Vec<MovedLink> = cap_name_by_id
+        let moved: Vec<MovedLink> = links
             .iter()
-            .map(|(id, name)| MovedLink {
-                capability_id: *id,
-                capability_name: name.clone(),
+            .map(|l| MovedLink {
+                capability_id: l.capability_id,
+                capability_name: cap_name_by_id
+                    .get(&l.capability_id)
+                    .cloned()
+                    .unwrap_or_default(),
                 old_version: old_version.to_owned(),
                 new_version: new_version.to_owned(),
             })

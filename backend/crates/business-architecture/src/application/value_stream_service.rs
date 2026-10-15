@@ -76,13 +76,19 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         if current.status != shared_common::enums::LifecycleStatus::Active {
             return Err(DomainError::InvalidTransition {
                 from: format!("{:?}", current.status),
-                to: "Deprecated (for versioning)".to_string(),
+                to: "Deprecated".to_string(),
                 entity: "ValueStream".to_string(),
             });
         }
 
         let new_id = self.repo
-            .publish_version(current.logical_id, new_version, new_name, new_description)
+            .publish_version(
+                current.logical_id,
+                new_version,
+                new_name,
+                new_description,
+                Some(current.id),
+            )
             .await?;
         self.repo.find_by_id(new_id).await?
             .ok_or(DomainError::ValueStreamNotFound)
