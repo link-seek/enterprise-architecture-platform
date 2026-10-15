@@ -526,7 +526,7 @@ struct ProcessPublishVersionOutput {
     affected_links: Vec<AffectedProcessLinkOutput>,
 }
 
-/// Result of the `valueStreamPublish` mutation: the run row backing this
+/// Result of the `valueStreamProvisionPilot` mutation: the run row backing this
 /// publish plus where the provisioned consumer repo lives. `pr_url` is empty
 /// when no fresh provisioning happened (idempotent reuse of an existing live
 /// run, either for this logical version or for the space); `reused` flags
@@ -534,7 +534,7 @@ struct ProcessPublishVersionOutput {
 /// provisioned". `template_version` is the effective template (requested on
 /// fresh provision, pinned on reuse).
 #[derive(Clone, Debug)]
-struct ValueStreamPublishOutput {
+struct ValueStreamProvisionPilotOutput {
     run_id: String,
     status: String,
     repo_url: String,
@@ -986,8 +986,8 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
 
     builder.mutations.push(transfer_field);
 
-    // ── valueStreamPublish ───────────────────────────────────────
-    // Publish the active value stream version: create a `value_stream_runs`
+    // ── valueStreamProvisionPilot ───────────────────────────────────────
+    // Provision a pilot for the active value stream version: create a `value_stream_runs`
     // row and provision the consumer repo via `provision_pilot_consumer`,
     // flipping the run `provisioning → live` and writing back `repo_url`.
     //
@@ -999,9 +999,9 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
     // Otherwise a fresh provision runs; on failure the run row is flipped
     // to `archived` with the error in `snapshot_json` (no `failed` state
     // exists by design) and the mutation returns the provisioning error.
-    let publish_field = Field::new(
-        "valueStreamPublish",
-        TypeRef::named_nn("ValueStreamPublishResult"),
+    let provision_field = Field::new(
+        "valueStreamProvisionPilot",
+        TypeRef::named_nn("ValueStreamProvisionPilotResult"),
         |ctx| {
             FieldFuture::new(async move {
                 use sea_orm::ActiveValue::Set;
@@ -1339,7 +1339,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
     )
     .argument(InputValue::new("logicalId", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("templateVersion", TypeRef::named_nn(TypeRef::STRING)));
-    builder.mutations.push(publish_field);
+    builder.mutations.push(provision_field);
 }
 
 // ============================================================================
@@ -1552,7 +1552,7 @@ fn run_template_of(run: &value_stream_run::Model) -> String {
         .unwrap_or_default()
 }
 
-/// Render a run row as a `ValueStreamPublishResult`. `reused` is true only
+/// Render a run row as a `ValueStreamProvisionPilotResult`. `reused` is true only
 /// for live rows that already existed (idempotent reuse); a still-
 /// `provisioning` row is returned with `reused=false` so the UI shows
 /// "in progress, poll later" instead of a misleading reuse message.
@@ -1562,14 +1562,14 @@ fn run_to_output(
     run: &value_stream_run::Model,
     pr_url: &str,
     reused: bool,
-) -> ValueStreamPublishOutput {
+) -> ValueStreamProvisionPilotOutput {
     let status = match run.status {
         ValueStreamRunStatus::Live => "live",
         ValueStreamRunStatus::Provisioning => "provisioning",
         ValueStreamRunStatus::Defined => "defined",
         ValueStreamRunStatus::Archived => "archived",
     };
-    ValueStreamPublishOutput {
+    ValueStreamProvisionPilotOutput {
         run_id: run.id.to_string(),
         status: status.to_owned(),
         repo_url: run.repo_url.clone(),
@@ -1596,7 +1596,7 @@ async fn link_space_repo(
     chain_path: String,
     pinned_versions: shared_common::value_objects::StringStringMap,
     snapshot_json: String,
-) -> async_graphql::Result<ValueStreamPublishOutput> {
+) -> async_graphql::Result<ValueStreamProvisionPilotOutput> {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
     let now = chrono::Utc::now();
     let inserted = value_stream_run::ActiveModel {
@@ -4648,45 +4648,45 @@ fn register_space_scoped_queries(builder: &mut Builder) {
         }));
     builder.outputs.push(publish_result_type);
 
-    // ── ValueStreamPublishResult output type ──────────────────────
-    let vs_publish_result_type = Object::new("ValueStreamPublishResult")
+    // ── ValueStreamProvisionPilotResult output type ──────────────────────
+    let vs_provision_result_type = Object::new("ValueStreamProvisionPilotResult")
         .field(Field::new("runId", TypeRef::named_nn(TypeRef::STRING), |ctx| {
             FieldFuture::new(async move {
-                let v = ctx.parent_value.try_downcast_ref::<ValueStreamPublishOutput>()?;
+                let v = ctx.parent_value.try_downcast_ref::<ValueStreamProvisionPilotOutput>()?;
                 Ok(Some(FieldValue::value(v.run_id.clone())))
             })
         }))
         .field(Field::new("status", TypeRef::named_nn(TypeRef::STRING), |ctx| {
             FieldFuture::new(async move {
-                let v = ctx.parent_value.try_downcast_ref::<ValueStreamPublishOutput>()?;
+                let v = ctx.parent_value.try_downcast_ref::<ValueStreamProvisionPilotOutput>()?;
                 Ok(Some(FieldValue::value(v.status.clone())))
             })
         }))
         .field(Field::new("repoUrl", TypeRef::named_nn(TypeRef::STRING), |ctx| {
             FieldFuture::new(async move {
-                let v = ctx.parent_value.try_downcast_ref::<ValueStreamPublishOutput>()?;
+                let v = ctx.parent_value.try_downcast_ref::<ValueStreamProvisionPilotOutput>()?;
                 Ok(Some(FieldValue::value(v.repo_url.clone())))
             })
         }))
         .field(Field::new("prUrl", TypeRef::named_nn(TypeRef::STRING), |ctx| {
             FieldFuture::new(async move {
-                let v = ctx.parent_value.try_downcast_ref::<ValueStreamPublishOutput>()?;
+                let v = ctx.parent_value.try_downcast_ref::<ValueStreamProvisionPilotOutput>()?;
                 Ok(Some(FieldValue::value(v.pr_url.clone())))
             })
         }))
         .field(Field::new("reused", TypeRef::named_nn(TypeRef::BOOLEAN), |ctx| {
             FieldFuture::new(async move {
-                let v = ctx.parent_value.try_downcast_ref::<ValueStreamPublishOutput>()?;
+                let v = ctx.parent_value.try_downcast_ref::<ValueStreamProvisionPilotOutput>()?;
                 Ok(Some(FieldValue::value(v.reused)))
             })
         }))
         .field(Field::new("templateVersion", TypeRef::named_nn(TypeRef::STRING), |ctx| {
             FieldFuture::new(async move {
-                let v = ctx.parent_value.try_downcast_ref::<ValueStreamPublishOutput>()?;
+                let v = ctx.parent_value.try_downcast_ref::<ValueStreamProvisionPilotOutput>()?;
                 Ok(Some(FieldValue::value(v.template_version.clone())))
             })
         }));
-    builder.outputs.push(vs_publish_result_type);
+    builder.outputs.push(vs_provision_result_type);
 
     // ── myMembership ──────────────────────────────────────────────────
     // Returns the caller's own role in a space (or null for non-members).
@@ -6418,7 +6418,7 @@ mod tests {
     }
 
     const PUBLISH_MUTATION: &str = r#"mutation($logicalId: String!, $templateVersion: String!) {
-        valueStreamPublish(logicalId: $logicalId, templateVersion: $templateVersion) {
+        valueStreamProvisionPilot(logicalId: $logicalId, templateVersion: $templateVersion) {
             runId status repoUrl prUrl reused templateVersion
         }
     }"#;
@@ -6442,7 +6442,7 @@ mod tests {
             .await
     }
 
-    fn publish_json(resp: &async_graphql::Response) -> serde_json::Value {
+    fn provision_json(resp: &async_graphql::Response) -> serde_json::Value {
         serde_json::to_value(&resp.data).unwrap()
     }
 
@@ -6514,8 +6514,8 @@ mod tests {
 
         let resp = exec_publish(&schema, claims, logical, "v1.0.0-pilot").await;
         assert!(resp.errors.is_empty(), "errors: {:?}", resp.errors);
-        let json = publish_json(&resp);
-        let node = &json["valueStreamPublish"];
+        let json = provision_json(&resp);
+        let node = &json["valueStreamProvisionPilot"];
         assert_eq!(node["status"], "live");
         assert_eq!(node["reused"], false);
         assert_eq!(node["repoUrl"], "https://github.com/org/pilot-aaa");
@@ -6547,7 +6547,7 @@ mod tests {
 
         let first = exec_publish(&schema, claims.clone(), logical, "v1.0.0-pilot").await;
         assert!(first.errors.is_empty());
-        let first_id = publish_json(&first)["valueStreamPublish"]["runId"]
+        let first_id = provision_json(&first)["valueStreamProvisionPilot"]["runId"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -6555,7 +6555,7 @@ mod tests {
         crate::pilot::__test_set_provision_mock(Some(mock_success));
         let second = exec_publish(&schema, claims, logical, "v1.0.0-pilot").await;
         assert!(second.errors.is_empty(), "errors: {:?}", second.errors);
-        let node = publish_json(&second)["valueStreamPublish"].clone();
+        let node = provision_json(&second)["valueStreamProvisionPilot"].clone();
         assert_eq!(node["runId"], first_id);
         assert_eq!(node["reused"], true);
         assert_eq!(node["status"], "live");
@@ -6578,7 +6578,7 @@ mod tests {
 
         let first = exec_publish(&schema, claims.clone(), logical_a, "v1.0.0-pilot").await;
         assert!(first.errors.is_empty());
-        let repo_a = publish_json(&first)["valueStreamPublish"]["repoUrl"]
+        let repo_a = provision_json(&first)["valueStreamProvisionPilot"]["repoUrl"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -6586,7 +6586,7 @@ mod tests {
         crate::pilot::__test_set_provision_mock(Some(mock_success));
         let second = exec_publish(&schema, claims, logical_b, "v1.0.0-pilot").await;
         assert!(second.errors.is_empty(), "errors: {:?}", second.errors);
-        let node = publish_json(&second)["valueStreamPublish"].clone();
+        let node = provision_json(&second)["valueStreamProvisionPilot"].clone();
         assert_eq!(node["repoUrl"], repo_a);
         assert_eq!(node["reused"], true);
         assert_eq!(crate::pilot::__test_provision_calls(), 0);

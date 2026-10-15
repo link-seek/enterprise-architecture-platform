@@ -95,9 +95,9 @@ interface ValueStreamRunsQuery {
   valueStreamRunsByValueStream: ValueStreamRun[]
 }
 
-const VALUE_STREAM_PUBLISH = gql`
-  mutation ValueStreamPublish($logicalId: String!, $templateVersion: String!) {
-    valueStreamPublish(logicalId: $logicalId, templateVersion: $templateVersion) {
+const PROVISION_PILOT = gql`
+  mutation ValueStreamProvisionPilot($logicalId: String!, $templateVersion: String!) {
+    valueStreamProvisionPilot(logicalId: $logicalId, templateVersion: $templateVersion) {
       runId
       status
       repoUrl
@@ -108,7 +108,7 @@ const VALUE_STREAM_PUBLISH = gql`
   }
 `
 
-interface ValueStreamPublishResult {
+interface ValueStreamProvisionPilotResult {
   runId: string
   status: string
   repoUrl: string
@@ -138,7 +138,7 @@ export default function ValueStreamDetail() {
   const [editingStage, setEditingStage] = useState<ValueStreamStage | null>(null)
   const [deletingStage, setDeletingStage] = useState<ValueStreamStage | null>(null)
   const [capabilityStage, setCapabilityStage] = useState<ValueStreamStage | null>(null)
-  const [publishOpen, setPublishOpen] = useState(false)
+  const [provisionOpen, setProvisionOpen] = useState(false)
 
   const vs = data?.valueStreamById
   const stages = useMemo(
@@ -329,12 +329,12 @@ export default function ValueStreamDetail() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setPublishOpen(true)}
-                      aria-label="发布上线"
-                      title="发布上线：创建运行实例并开通消费仓"
+                      onClick={() => setProvisionOpen(true)}
+                      aria-label="开通试点"
+                      title="开通试点：创建运行实例并开通消费仓"
                     >
                       <Rocket className="h-4 w-4 mr-2" />
-                      发布上线
+                      开通试点
                     </Button>
                   )}
                 </div>
@@ -399,9 +399,9 @@ export default function ValueStreamDetail() {
                 onOpenChange={(v) => { if (!v) setCapabilityStage(null) }}
               />
               {vs && id && (
-                <PublishDialog
-                  open={publishOpen}
-                  onOpenChange={setPublishOpen}
+                <PilotProvisionDialog
+                  open={provisionOpen}
+                  onOpenChange={setProvisionOpen}
                   valueStreamId={id}
                   logicalId={vs.logicalId}
                   name={vs.name}
@@ -416,7 +416,7 @@ export default function ValueStreamDetail() {
   )
 }
 
-function PublishDialog({ open, onOpenChange, valueStreamId, logicalId, name, businessVersion }: {
+function PilotProvisionDialog({ open, onOpenChange, valueStreamId, logicalId, name, businessVersion }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   valueStreamId: string
@@ -427,12 +427,12 @@ function PublishDialog({ open, onOpenChange, valueStreamId, logicalId, name, bus
   const [templateVersion, setTemplateVersion] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState<ValueStreamPublishResult | null>(null)
-  const [publishMut] = useMutation<{ valueStreamPublish?: ValueStreamPublishResult }>(VALUE_STREAM_PUBLISH)
+  const [done, setDone] = useState<ValueStreamProvisionPilotResult | null>(null)
+  const [provisionMut] = useMutation<{ valueStreamProvisionPilot?: ValueStreamProvisionPilotResult }>(PROVISION_PILOT)
 
-  async function handlePublish() {
+  async function handleProvision() {
     if (!logicalId) {
-      setError('价值流缺少 logicalId，无法发布')
+      setError('价值流缺少 logicalId，无法开通')
       return
     }
     if (!templateVersion.trim()) {
@@ -441,34 +441,34 @@ function PublishDialog({ open, onOpenChange, valueStreamId, logicalId, name, bus
     }
     setLoading(true); setError(null)
     try {
-      const res = await publishMut({
+      const res = await provisionMut({
         variables: { logicalId, templateVersion: templateVersion.trim() },
         refetchQueries: [{ query: GET_VALUE_STREAM_RUNS, variables: { valueStreamId } }],
       })
-      const out = res.data?.valueStreamPublish
-      if (!out) throw new Error('发布无返回')
+      const out = res.data?.valueStreamProvisionPilot
+      if (!out) throw new Error('开通无返回')
       setDone(out)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '发布失败')
+      setError(err instanceof Error ? err.message : '开通失败')
     } finally { setLoading(false) }
   }
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) { setError(null); setDone(null); setTemplateVersion('') } onOpenChange(v) }}>
       <DialogContent>
-        <DialogHeader><DialogTitle>发布上线</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>开通试点</DialogTitle></DialogHeader>
         <div className="space-y-4 py-4 text-sm">
           {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
           {done === null ? (
             <>
               <p className="text-muted-foreground">
                 将为价值流「{name}」（当前版本 <span className="font-mono">{businessVersion}</span>）创建运行实例并开通消费仓。
-                同一价值流重复发布会直接返回已有的 live 运行；同空间已有 live 消费仓时将复用，不重复建仓。
+                同一价值流重复开通会直接返回已有的 live 运行；同空间已有 live 消费仓时将复用，不重复建仓。
               </p>
               <div className="space-y-2">
-                <Label htmlFor="vs-publish-template">模板版本</Label>
+                <Label htmlFor="vs-provision-template">模板版本</Label>
                 <Input
-                  id="vs-publish-template"
+                  id="vs-provision-template"
                   placeholder="如 v1.0.0-pilot"
                   value={templateVersion}
                   onChange={(e) => setTemplateVersion(e.target.value)}
@@ -478,7 +478,7 @@ function PublishDialog({ open, onOpenChange, valueStreamId, logicalId, name, bus
             </>
           ) : done.status !== 'live' ? (
             <>
-              <p className="font-medium">发布处理中（{done.status}），请稍后刷新运行实例列表：</p>
+              <p className="font-medium">开通处理中（{done.status}），请稍后刷新运行实例列表：</p>
               <ul className="space-y-1 text-sm">
                 {done.templateVersion && <li>模板版本 <span className="font-mono text-xs">{done.templateVersion}</span></li>}
                 <li className="font-mono text-xs break-all">仓库 {done.repoUrl || '-'}</li>
@@ -487,7 +487,7 @@ function PublishDialog({ open, onOpenChange, valueStreamId, logicalId, name, bus
           ) : (
             <>
               <p className="font-medium">
-                {done.reused ? '已有 live 运行，本次直接复用（未重新建仓）：' : '发布成功，运行实例已上线：'}
+                {done.reused ? '已有 live 运行，本次直接复用（未重新建仓）：' : '开通成功，运行实例已上线：'}
               </p>
               <ul className="space-y-1 text-sm">
                 <li>状态 <Badge>{done.status}</Badge></li>
@@ -500,8 +500,8 @@ function PublishDialog({ open, onOpenChange, valueStreamId, logicalId, name, bus
         </div>
         <DialogFooter>
           {done === null && (
-            <Button onClick={handlePublish} disabled={loading}>
-              {loading ? '发布中...' : '确认发布'}
+            <Button onClick={handleProvision} disabled={loading}>
+              {loading ? '开通中...' : '确认开通'}
             </Button>
           )}
         </DialogFooter>
