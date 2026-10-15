@@ -1,0 +1,5 @@
+# 哈希文件名不可变：一次上传永久有效，禁止回源 revalidate。
+# 没有它时 Pages 默认 max-age=14400 + must-revalidate，每次发布新哈希 =
+# 全冷缓存，冒烟首批加载全部回源，链路一抖就超时误杀。
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
