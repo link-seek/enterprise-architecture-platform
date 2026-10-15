@@ -71,6 +71,7 @@ mod m20250101_000068_add_e2e_verify_1_to_organizations;
 mod m20250101_000069_add_pipeline_test_1789625944_to_organizations;
 mod m20260917_000001_value_stream_runs;
 mod m20261013_000001_vs_runs_open_uniqueness;
+mod m20261015_000001_drop_capability_business_version;
 
 pub struct Migrator;
 
@@ -149,6 +150,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000069_add_pipeline_test_1789625944_to_organizations::Migration),
             Box::new(m20260917_000001_value_stream_runs::Migration),
             Box::new(m20261013_000001_vs_runs_open_uniqueness::Migration),
+            Box::new(m20261015_000001_drop_capability_business_version::Migration),
         ]
     }
 }

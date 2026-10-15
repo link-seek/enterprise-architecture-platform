@@ -21,7 +21,7 @@ import { friendlyDeleteError } from './crud'
 const GET_CAPABILITIES = gql`
   query GetCapabilities($spaceId: String!) {
     businessCapabilitiesBySpace(spaceId: $spaceId) {
-      id name description level maturity businessValue businessVersion status ownerId
+      id name description level maturity businessValue status ownerId
     }
   }
 `
@@ -105,7 +105,7 @@ const CAPABILITY_PROCESS_DELETE = gql`
 
 interface Capability {
   id: string; name: string; description: string
-  level: string; maturity: string; businessValue: string; businessVersion?: string | null; status: string
+  level: string; maturity: string; businessValue: string; status: string
   ownerId?: string | null
 }
 
@@ -156,10 +156,7 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
           <div key={cap.id} className="rounded-lg border p-4 space-y-2">
             <div className="flex items-start justify-between gap-2">
               <p className="font-medium break-words">{cap.name}</p>
-              <div className="flex gap-1 shrink-0">
-                {cap.businessVersion && <Badge variant="secondary" className="font-mono">{cap.businessVersion}</Badge>}
-                <Badge variant={statusVariant(cap.status)}>{cap.status}</Badge>
-              </div>
+              <Badge variant={statusVariant(cap.status)}>{cap.status}</Badge>
             </div>
             <div className="flex flex-wrap gap-1">
               <Badge variant="secondary">{cap.level}</Badge>
@@ -212,7 +209,6 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
           <TableHead>层级</TableHead>
           <TableHead>成熟度</TableHead>
           <TableHead>业务价值</TableHead>
-          <TableHead>版本</TableHead>
           <TableHead>状态</TableHead>
           <TableHead>操作</TableHead>
         </TableRow>
@@ -226,9 +222,6 @@ const CapabilityList = memo(function CapabilityList({ nodes, isOwned, isMobile, 
             <TableCell>{cap.level}</TableCell>
             <TableCell>{cap.maturity}</TableCell>
             <TableCell>{cap.businessValue}</TableCell>
-            <TableCell>
-              {cap.businessVersion ? <Badge variant="secondary" className="font-mono">{cap.businessVersion}</Badge> : '-'}
-            </TableCell>
             <TableCell><Badge variant={statusVariant(cap.status)}>{cap.status}</Badge></TableCell>
             <TableCell>
               <div className="flex gap-1">

@@ -14,7 +14,6 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub logical_id: Uuid,
-    pub business_version: String,
     pub status: LifecycleStatus,
     pub capability_status: CapabilityStatus,
     pub name: String,
