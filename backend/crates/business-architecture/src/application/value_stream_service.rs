@@ -56,12 +56,9 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         self.repo.soft_delete(id).await
     }
 
-    /// Create a new version of an existing value stream.
-    /// The current active version is deprecated, and a new version is created
-    /// with the same logical_id. The current version's stages are copied to
-    /// the new version and their capability links are moved over. The whole
-    /// operation (deprecate + insert + stage copy + link move) runs inside a
-    /// single transaction.
+    /// Create a new version of an existing value stream through the unified
+    /// publish engine (same six steps as every other publishable element).
+    /// Thin adapter: resolves the current row, delegates, reloads the new row.
     pub async fn create_version(
         &self,
         current_id: Uuid,
@@ -69,30 +66,15 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         new_name: Option<String>,
         new_description: Option<String>,
     ) -> Result<ValueStream, DomainError> {
-        // Load current version
-        let mut current = self.repo.find_by_id(current_id).await?
+        // Load current version (for its logical id).
+        let current = self.repo.find_by_id(current_id).await?
             .ok_or(DomainError::ValueStreamNotFound)?;
 
-        let now = Utc::now();
-        let new_id = Uuid::now_v7();
-        let name = new_name.unwrap_or_else(|| current.name.clone());
-        let description = new_description.or_else(|| current.description.clone());
-
-        // Domain rule: archive current, create new version with same logical_id
-        let new_vs = current.create_new_version(new_id, new_version, name, description, now)?;
-
-        // Copy stages (new id, new value_stream_id, fields preserved).
-        let stages = self.repo.find_stages_by_value_stream(current_id).await?;
-        let new_stages: Vec<_> = stages
-            .iter()
-            .map(|s| s.for_version(Uuid::now_v7(), new_id))
-            .collect();
-
-        // Persist atomically: archive current + insert new version + copy stages.
-        self.repo
-            .save_version_atomic(&current, &new_vs, &new_stages)
+        let new_id = self.repo
+            .publish_version(current.logical_id, new_version, new_name, new_description)
             .await?;
-        Ok(new_vs)
+        self.repo.find_by_id(new_id).await?
+            .ok_or(DomainError::ValueStreamNotFound)
     }
 
     /// Update mutable fields of an active value stream.

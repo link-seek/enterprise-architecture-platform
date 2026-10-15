@@ -29,14 +29,15 @@ pub trait ValueStreamRepository: Send + Sync + 'static {
         &self,
         vs_id: Uuid,
     ) -> Result<Vec<ValueStreamStage>, DomainError>;
-    /// Atomically archive `current`, insert `new_version`, and copy the given
-    /// stages to the new version — all inside a single transaction.
-    async fn save_version_atomic(
+    /// Publish one new version through the unified engine
+    /// (`application::publish::publish`). Returns the new row id.
+    async fn publish_version(
         &self,
-        current: &ValueStream,
-        new_version: &ValueStream,
-        new_stages: &[ValueStreamStage],
-    ) -> Result<(), DomainError>;
+        logical_id: Uuid,
+        new_version: String,
+        new_name: Option<String>,
+        new_description: Option<String>,
+    ) -> Result<Uuid, DomainError>;
 }
 
 #[async_trait]

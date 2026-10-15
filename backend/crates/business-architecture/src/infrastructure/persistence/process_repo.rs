@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    Set, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
+    PaginatorTrait, QueryFilter, Set, TransactionTrait,
 };
 use shared_common::enums::LifecycleStatus;
 use uuid::Uuid;
 
-use crate::application::version::parse as parse_semver;
+use crate::application::publish::{MovedLink, PublishOverrides, PublishStrategy};
 use crate::domain::error::DomainError;
 use crate::domain::process::entity::{
     AffectedProcessLink, BusinessProcess, ProcessStep, PublishVersionResult,
@@ -307,94 +307,84 @@ impl ProcessStepRepository for SeaOrmProcessRepo {
 
 impl SeaOrmProcessRepo {
     /// Publish a new version of the active process identified by
-    /// `logical_id`. Unified publish policy (same as value streams): the
-    /// caller supplies an explicit semver `new_version` (strictly validated);
-    /// the old active version transitions to `Deprecated` (compatibility
-    /// window); capability links are MOVED to the new row in the same
-    /// transaction ("现行版本拥有现行关联"). All of this runs inside a
-    /// single transaction.
-    ///
-    /// The result also carries the moved capability links so the caller can
-    /// render the publish impact receipt.
+    /// `logical_id`. Thin adapter over the unified engine
+    /// ([`crate::application::publish::publish`]): the same six steps as
+    /// every other publishable element; only data mapping lives in the
+    /// [`PublishStrategy`](crate::application::publish::PublishStrategy)
+    /// impl below.
     pub async fn publish_new_version(
         &self,
         logical_id: Uuid,
         new_version: &str,
     ) -> Result<PublishVersionResult, DomainError> {
-        // Strict semver, same rule as value-stream versions.
-        let new_parsed = parse_semver(new_version).map_err(DomainError::from)?;
-        let new_version = new_version.to_owned();
-        let txn = self.db.begin().await?;
+        let (new_id, moved) = crate::application::publish::publish(
+            self,
+            logical_id,
+            new_version,
+            &PublishOverrides::default(),
+        )
+        .await?;
+        let new_process = business_process::Entity::find_by_id(new_id)
+            .one(&self.db)
+            .await?
+            .ok_or(DomainError::ProcessVersionNotFound)?;
+        Ok(PublishVersionResult {
+            new_process: new_process.into(),
+            affected_links: moved
+                .into_iter()
+                .map(|m| AffectedProcessLink {
+                    capability_id: m.capability_id,
+                    capability_name: m.capability_name,
+                    old_version: m.old_version,
+                    new_version: m.new_version,
+                })
+                .collect(),
+        })
+    }
+}
 
+#[async_trait]
+impl PublishStrategy for SeaOrmProcessRepo {
+    fn entity_name(&self) -> &'static str {
+        "BusinessProcess"
+    }
+
+    fn db(&self) -> &DatabaseConnection {
+        &self.db
+    }
+
+    async fn existing_versions(
+        &self,
+        txn: &DatabaseTransaction,
+        logical_id: Uuid,
+    ) -> Result<Vec<(Uuid, String)>, DomainError> {
+        Ok(business_process::Entity::find()
+            .filter(business_process::Column::LogicalId.eq(logical_id))
+            .filter(business_process::Column::DeletedAt.is_null())
+            .all(txn)
+            .await?
+            .into_iter()
+            .map(|r| (r.id, r.business_version))
+            .collect())
+    }
+
+    async fn deprecate_active(
+        &self,
+        txn: &DatabaseTransaction,
+        logical_id: Uuid,
+    ) -> Result<(Uuid, String), DomainError> {
         let old = business_process::Entity::find()
             .filter(business_process::Column::LogicalId.eq(logical_id))
             .filter(business_process::Column::Status.eq(LifecycleStatus::Active))
             .filter(business_process::Column::DeletedAt.is_null())
-            .one(&txn)
+            .one(txn)
             .await?
             .ok_or(DomainError::ProcessVersionNotFound)?;
 
-        // Monotonicity: the new version must be greater than every existing
-        // version of this logicalId (no duplicates, no rollbacks). Unparseable
-        // history rows are data corruption, not skippable: fail loudly.
-        let existing_versions = business_process::Entity::find()
-            .filter(business_process::Column::LogicalId.eq(logical_id))
-            .filter(business_process::Column::DeletedAt.is_null())
-            .all(&txn)
-            .await?;
-        for row in &existing_versions {
-            let v = crate::application::version::parse(&row.business_version).map_err(|e| {
-                DomainError::Validation(format!(
-                    "stored version '{}' is not valid semver: {e}",
-                    row.business_version
-                ))
-            })?;
-            if new_parsed <= v {
-                return Err(DomainError::InvalidTransition {
-                    from: row.business_version.clone(),
-                    to: new_version.clone(),
-                    entity: "BusinessProcess".to_string(),
-                });
-            }
-        }
-
-        // Collect capability links pointing at the old version row before it is
-        // deprecated (transactions see a consistent snapshot).
-        let links = capability_process::Entity::find()
-            .filter(capability_process::Column::ProcessId.eq(old.id))
-            .all(&txn)
-            .await?;
-        let cap_ids: Vec<Uuid> = links.iter().map(|l| l.capability_id).collect();
-        let cap_names: Vec<(Uuid, String)> = if cap_ids.is_empty() {
-            Vec::new()
-        } else {
-            business_capability::Entity::find()
-                .filter(business_capability::Column::Id.is_in(cap_ids.clone()))
-                .all(&txn)
-                .await?
-                .into_iter()
-                .map(|c| (c.id, c.name))
-                .collect()
-        };
-        let cap_name_by_id: std::collections::HashMap<Uuid, String> =
-            cap_names.into_iter().collect();
-        let affected_links: Vec<AffectedProcessLink> = links
-            .iter()
-            .map(|l| AffectedProcessLink {
-                capability_id: l.capability_id,
-                capability_name: cap_name_by_id
-                    .get(&l.capability_id)
-                    .cloned()
-                    .unwrap_or_default(),
-                old_version: old.business_version.clone(),
-                new_version: new_version.clone(),
-            })
-            .collect();
-
-        // Old active version → Deprecated (compatibility window). Conditional
-        // compare-and-swap: the flip only lands if the row is still Active.
-        // Concurrent double-publishes serialize on the row lock; the loser
-        // matches zero rows and aborts instead of creating a second Active.
+        // Conditional compare-and-swap: the flip only lands if the row is
+        // still Active. Concurrent double-publishes serialize on the row
+        // lock; the loser matches zero rows and aborts instead of creating
+        // a second Active row.
         let flipped = business_process::Entity::update_many()
             .col_expr(
                 business_process::Column::Status,
@@ -406,7 +396,7 @@ impl SeaOrmProcessRepo {
             )
             .filter(business_process::Column::Id.eq(old.id))
             .filter(business_process::Column::Status.eq(LifecycleStatus::Active))
-            .exec(&txn)
+            .exec(txn)
             .await?;
         if flipped.rows_affected != 1 {
             return Err(DomainError::InvalidTransition {
@@ -415,13 +405,27 @@ impl SeaOrmProcessRepo {
                 entity: "BusinessProcess".to_string(),
             });
         }
+        Ok((old.id, old.business_version))
+    }
+
+    async fn insert_new(
+        &self,
+        txn: &DatabaseTransaction,
+        old_id: Uuid,
+        new_version: &str,
+        _overrides: &PublishOverrides,
+    ) -> Result<Uuid, DomainError> {
+        let old = business_process::Entity::find_by_id(old_id)
+            .one(txn)
+            .await?
+            .ok_or(DomainError::ProcessVersionNotFound)?;
 
         let now = chrono::Utc::now();
         let new_id = Uuid::new_v4();
         let new_active = business_process::ActiveModel {
             id: Set(new_id),
-            logical_id: Set(logical_id),
-            business_version: Set(new_version),
+            logical_id: Set(old.logical_id),
+            business_version: Set(new_version.to_owned()),
             status: Set(LifecycleStatus::Active),
             name: Set(old.name.clone()),
             description: Set(old.description.clone()),
@@ -440,15 +444,13 @@ impl SeaOrmProcessRepo {
             deleted_at: Set(None),
             space_id: Set(old.space_id),
         };
-        let new_model = new_active.insert(&txn).await?;
+        new_active.insert(txn).await?;
 
-        // Copy steps to the new version (same content, new ids). Without this
-        // the new version would ship with zero steps, breaking parity with
-        // value-stream publishes (which copy stages).
+        // Copy steps to the new version (same content, new ids).
         let old_steps = process_step::Entity::find()
             .filter(process_step::Column::ProcessId.eq(old.id))
             .filter(process_step::Column::DeletedAt.is_null())
-            .all(&txn)
+            .all(txn)
             .await?;
         for step in &old_steps {
             let step_active = process_step::ActiveModel {
@@ -465,56 +467,91 @@ impl SeaOrmProcessRepo {
                 updated_at: Set(now),
                 deleted_at: Set(None),
             };
-            step_active.insert(&txn).await?;
+            step_active.insert(txn).await?;
         }
+        Ok(new_id)
+    }
 
-        // Move version-anchored associations to the new row with single UPDATEs
-        // (same transaction). UPDATE moves every current link — including ones
-        // added concurrently after the receipt snapshot — so nothing is lost,
-        // unlike INSERT(new)+DELETE(old) which can orphan concurrent inserts.
-        // The live version owns the live links; the deprecated row keeps its
-        // content snapshot, link-free, still queryable for history/rollback.
-        // Moved: capability links, realizations, participations (RACI) and
-        // application references. Steps were copied above; run history rows
-        // intentionally stay on the version they ran against.
+    async fn move_links(
+        &self,
+        txn: &DatabaseTransaction,
+        old_id: Uuid,
+        new_id: Uuid,
+        old_version: &str,
+        new_version: &str,
+    ) -> Result<Vec<MovedLink>, DomainError> {
+        // Collect the links first (same snapshot) for the impact receipt.
+        let links = capability_process::Entity::find()
+            .filter(capability_process::Column::ProcessId.eq(old_id))
+            .all(txn)
+            .await?;
+        let cap_ids: Vec<Uuid> = links.iter().map(|l| l.capability_id).collect();
+        let cap_names: Vec<(Uuid, String)> = if cap_ids.is_empty() {
+            Vec::new()
+        } else {
+            business_capability::Entity::find()
+                .filter(business_capability::Column::Id.is_in(cap_ids.clone()))
+                .all(txn)
+                .await?
+                .into_iter()
+                .map(|c| (c.id, c.name))
+                .collect()
+        };
+        let cap_name_by_id: std::collections::HashMap<Uuid, String> =
+            cap_names.into_iter().collect();
+        let moved: Vec<MovedLink> = links
+            .iter()
+            .map(|l| MovedLink {
+                capability_id: l.capability_id,
+                capability_name: cap_name_by_id
+                    .get(&l.capability_id)
+                    .cloned()
+                    .unwrap_or_default(),
+                old_version: old_version.to_owned(),
+                new_version: new_version.to_owned(),
+            })
+            .collect();
+
+        // MOVE with single UPDATEs (same transaction). UPDATE moves every
+        // current link — including ones added concurrently after the receipt
+        // snapshot — so nothing is lost, unlike INSERT(new)+DELETE(old)
+        // which can orphan concurrent inserts. The live version owns the
+        // live links; the deprecated row keeps its content snapshot,
+        // link-free. Moved: capability links, realizations, participations
+        // (RACI) and application references. Steps were copied above; run
+        // history rows intentionally stay on the version they ran against.
         capability_process::Entity::update_many()
             .col_expr(
                 capability_process::Column::ProcessId,
                 sea_orm::sea_query::Expr::value(new_id),
             )
-            .filter(capability_process::Column::ProcessId.eq(old.id))
-            .exec(&txn)
+            .filter(capability_process::Column::ProcessId.eq(old_id))
+            .exec(txn)
             .await?;
         capability_realization::Entity::update_many()
             .col_expr(
                 capability_realization::Column::ProcessId,
                 sea_orm::sea_query::Expr::value(new_id),
             )
-            .filter(capability_realization::Column::ProcessId.eq(old.id))
-            .exec(&txn)
+            .filter(capability_realization::Column::ProcessId.eq(old_id))
+            .exec(txn)
             .await?;
         participation::Entity::update_many()
             .col_expr(
                 participation::Column::BusinessProcessId,
                 sea_orm::sea_query::Expr::value(new_id),
             )
-            .filter(participation::Column::BusinessProcessId.eq(old.id))
-            .exec(&txn)
+            .filter(participation::Column::BusinessProcessId.eq(old_id))
+            .exec(txn)
             .await?;
         process_reference::Entity::update_many()
             .col_expr(
                 process_reference::Column::BusinessProcessId,
                 sea_orm::sea_query::Expr::value(new_id),
             )
-            .filter(process_reference::Column::BusinessProcessId.eq(old.id))
-            .exec(&txn)
+            .filter(process_reference::Column::BusinessProcessId.eq(old_id))
+            .exec(txn)
             .await?;
-
-        txn.commit().await?;
-
-        Ok(PublishVersionResult {
-            new_process: new_model.into(),
-            affected_links,
-        })
+        Ok(moved)
     }
 }
