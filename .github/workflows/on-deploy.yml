@@ -41,6 +41,9 @@ jobs:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
       PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+      # deploy.sh 强校验 APP_JWT__SECRET（缺则 loud fail）：broken 路径同样透传，
+      # 避免修复流走到重部署时必失败。
+      APP_JWT__SECRET: ${{ secrets.APP_JWT__SECRET }}
       APP_SEED_EDITOR_EMAIL: ${{ secrets.APP_SEED_EDITOR_EMAIL }}
       APP_SEED_EDITOR_PASSWORD: ${{ secrets.APP_SEED_EDITOR_PASSWORD }}
       APP_SEED_STRANGER_EMAIL: ${{ secrets.APP_SEED_STRANGER_EMAIL }}

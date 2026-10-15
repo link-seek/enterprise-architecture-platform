@@ -1,6 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
+# 前置 loud fail 必须在任何破坏性操作（pull/stop/rm）之前：否则缺钥时
+# 线上服务停留在已停止、未重建的状态，人为制造中断。
+# JWT 缺失则直接失败交给回滚（旧服务 untouched）。
+if [[ -z "${APP_JWT__SECRET:-}" ]]; then
+  echo "ERROR: APP_JWT__SECRET is empty — refusing to deploy without JWT secret" >&2
+  exit 1
+fi
+
 # EAP 后端部署脚本 — 在 ECS self-hosted runner 上执行
 # 环境变量由 deploy-pipeline.yml 注入:
 #   IMAGE_TAG, ACR_REGISTRY, ACR_NAMESPACE, ACR_REPO
@@ -29,13 +37,8 @@ podman rm -f "$CONTAINER_NAME" 2>/dev/null || true
 # Fall back to E2E_* env vars so the backend seeds with the same credentials
 # the tests use, even when APP_SEED_* secrets are not separately configured.
 mkdir -p "$(dirname "$ENV_FILE")"
-# JWT 必须在写 service 文件之前就位：否则首次启动缺钥 crashloop
-# （Restart=always 每 5s 重启一次），直到 L1 补丁二次重启才恢复，
-# 中间是 inspector 可见的 API 中断。为空则 loud fail 交给回滚。
-if [[ -z "${APP_JWT__SECRET:-}" ]]; then
-  echo "ERROR: APP_JWT__SECRET is empty — refusing to deploy without JWT secret" >&2
-  exit 1
-fi
+# JWT 已在脚本顶部做过非空 loud fail，这里直接写 env 文件（600）：
+# 首次启动即有钥，不再经历“无钥 crashloop → 二次重启”的 API 中断。
 (
   umask 077
   {
